@@ -1,0 +1,69 @@
+<div class="table table-responsive">
+    <table class="table" id="data_table">
+        <thead>
+            <tr>
+                <th>No</th>
+                <th>Nama Pegawai</th>
+                <th>Sub Bidang</th>
+                <th>Jenis Jabatan</th>
+                <th>Nama Jabatan</th>
+                <th>Eselon</th>
+                <th>TMT Jabatan</th>
+                <th>TMT Pelantikan</th>
+                <th>No SK</th>
+                <th>Tanggal SK</th>
+                <th>File</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data %}
+            <tr>
+                <td>{{forloop.counter}}</td>
+                <td>{{item.pegawai.full_name}}</td>
+                <td>{{item.sub_bidang}}</td>
+                <td>{{item.jns_jabatan}}</td>
+                <td>{{item.nama_jabatan}}</td>
+                <td>
+                    {% if item.eselon %}
+                        {{item.eselon}}
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </td>
+                <td>{{item.tmt_jabatan}}</td>
+                <td>
+                    {% if item.tmt_pelantikan %}
+                    {{item.tmt_pelantikan}}
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </td>
+                <td>{{item.no_sk}}</td>
+                <td>{{item.tgl_sk}}</td>
+                <td>{% if item.file %}
+                    <a href="{{item.file.url}}"><i class="fas fa-cloud-download-alt"></i></a>
+                    {% else %}
+                    <i class="fas fa-times" style="font-weight: bold; color:red"></i>
+                    {% endif %}</td>
+                <td>
+                    {% if item.jns_jabatan == 'Struktural' %}
+                    <a href="?nip={{item.pegawai.profil_user.nip}}&jabatan=struktural" class="btn btn-primary"><i class="fas fa-user"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_update_jabatan' id=item.id %}?jabatan=struktural" class="btn btn-outline-primary"><i class="fas fa-edit"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_delete_jabatan' pk=item.id %}?jabatan=struktural#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
+                    {% elif item.jns_jabatan == 'Fungsional' %}
+                    <a href="?nip={{item.pegawai.profil_user.nip}}&jabatan=fungsional" class="btn btn-primary"><i class="fas fa-user"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_update_jabatan' id=item.id %}?jabatan=fungsional" class="btn btn-outline-primary"><i class="fas fa-edit"></i></a> 
+                    <a href="{% url 'riwayat_urls:riwayat_delete_jabatan' pk=item.id %}?jabatan=fungsional#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
+                    {% elif item.jns_jabatan == 'Pelaksana' %}
+                    <a href="?nip={{item.pegawai.profil_user.nip}}&jabatan=pelaksana" class="btn btn-primary"><i class="fas fa-user"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_update_jabatan' id=item.id %}?jabatan=pelaksana" class="btn btn-outline-primary"><i class="fas fa-edit"></i></a> 
+                    <a href="{% url 'riwayat_urls:riwayat_delete_jabatan' pk=item.id %}?jabatan=pelaksana#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+                    

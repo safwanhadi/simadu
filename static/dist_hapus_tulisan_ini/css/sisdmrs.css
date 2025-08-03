@@ -1,0 +1,181 @@
+/* general small box style */
+.small-box-sisdm {
+    border-radius: 0.25rem;
+    box-shadow: 0 0 1px rgba(0, 0, 0, 0.125), 0 1px 3px rgba(0, 0, 0, 0.2);
+    display: block;
+    margin-bottom: 20px;
+    position: relative;
+  }
+  
+  .small-box-sisdm > .inner {
+    padding: 10px;
+  }
+  
+  .small-box-sisdm > .small-box-sisdm-footer {
+    background-color: rgba(0, 0, 0, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+    display: block;
+    padding: 3px 0;
+    position: relative;
+    text-align: center;
+    text-decoration: none;
+    z-index: 10;
+  }
+  
+  .small-box-sisdm > .small-box-sisdm-footer:hover {
+    background-color: rgba(0, 0, 0, 0.15);
+    color: #fff;
+  }
+  
+  .small-box-sisdm h3 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    margin: 0 0 10px;
+    padding: 0;
+    white-space: nowrap;
+  }
+  
+  @media (min-width: 992px) {
+    .col-xl-2 .small-box-sisdm h3,
+    .col-lg-2 .small-box-sisdm h3,
+    .col-md-2 .small-box-sisdm h3 {
+      font-size: 1.6rem;
+    }
+    .col-xl-3 .small-box-sisdm h3,
+    .col-lg-3 .small-box-sisdm h3,
+    .col-md-3 .small-box-sisdm h3 {
+      font-size: 1.6rem;
+    }
+  }
+  
+  @media (min-width: 1200px) {
+    .col-xl-2 .small-box-sisdm h3,
+    .col-lg-2 .small-box-sisdm h3,
+    .col-md-2 .small-box-sisdm h3 {
+      font-size: 2.2rem;
+    }
+    .col-xl-3 .small-box-sisdm h3,
+    .col-lg-3 .small-box-sisdm h3,
+    .col-md-3 .small-box-sisdm h3 {
+      font-size: 2.2rem;
+    }
+  }
+  
+  .small-box-sisdm p {
+    font-size: 1rem;
+  }
+  
+  .small-box-sisdm p > small {
+    color: #f8f9fa;
+    display: block;
+    font-size: .9rem;
+    margin-top: 5px;
+  }
+  
+  .small-box-sisdm h3,
+  .small-box-sisdm p {
+    z-index: 5;
+  }
+  
+  .small-box-sisdm .icon {
+    /* color: rgba(0, 0, 0, 0.15); */
+    color: white;
+    z-index: 0;
+  }
+  
+  .small-box-sisdm .icon > i {
+    font-size: 90px;
+    display: flex;
+    justify-content: center;
+    transition: -webkit-transform 0.3s linear;
+    transition: transform 0.3s linear;
+    transition: transform 0.3s linear, -webkit-transform 0.3s linear;
+  }
+  
+  .small-box-sisdm .icon > i.fa, .small-box-sisdm .icon > i.fas, .small-box-sisdm .icon > i.far, .small-box-sisdm .icon > i.fab, .small-box-sisdm .icon > i.fal, .small-box-sisdm .icon > i.fad, .small-box-sisdm .icon > i.ion {
+    font-size: 60px;
+    top: 20px;
+  }
+  
+  .small-box-sisdm .icon svg {
+    font-size: 70px;
+    position: absolute;
+    right: 15px;
+    top: 15px;
+    transition: -webkit-transform 0.3s linear;
+    transition: transform 0.3s linear;
+    transition: transform 0.3s linear, -webkit-transform 0.3s linear;
+  }
+  
+  .small-box-sisdm:hover {
+    text-decoration: none;
+  }
+  
+  .small-box-sisdm:hover .icon > i, .small-box-sisdm:hover .icon > i.fa, .small-box-sisdm:hover .icon > i.fas, .small-box-sisdm:hover .icon > i.far, .small-box-sisdm:hover .icon > i.fab, .small-box-sisdm:hover .icon > i.fal, .small-box-sisdm:hover .icon > i.fad, .small-box-sisdm:hover .icon > i.ion {
+    -webkit-transform: scale(1.1);
+    transform: scale(1.1);
+  }
+  
+  .small-box-sisdm:hover .icon > svg {
+    -webkit-transform: scale(1.1);
+    transform: scale(1.1);
+  }
+  
+  @media (max-width: 767.98px) {
+    .small-box-sisdm {
+      text-align: center;
+    }
+    /* .small-box-sisdm .icon {
+      display: none;
+    } */
+    .small-box-sisdm p {
+      font-size: 12px;
+    }
+  }
+
+.small-box-sisdm > .overlay,
+.small-box-sisdm > .loading-img {
+  height: 100%;
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
+.small-box-sisdm .overlay {
+    border-radius: 0.25rem;
+    -ms-flex-align: center;
+    align-items: center;
+    background-color: rgba(255, 255, 255, 0.7);
+    display: -ms-flexbox;
+    display: flex;
+    -ms-flex-pack: center;
+    justify-content: center;
+    z-index: 50;
+  }
+
+.small-box-sisdm .overlay > .fa,
+.small-box-sisdm .overlay > .fas,
+.small-box-sisdm .overlay > .far,
+.small-box-sisdm .overlay > .fab,
+.small-box-sisdm .overlay > .fal,
+.small-box-sisdm .overlay > .fad,
+.small-box-sisdm .overlay > .svg-inline--fa,
+.small-box-sisdm .overlay > .ion {
+  color: #343a40;
+}
+
+.small-box-sisdm .overlay.dark {
+   background-color: rgba(0, 0, 0, 0.5);
+}
+
+.small-box-sisdm .overlay.dark > .fa,
+.small-box-sisdm .overlay.dark > .fas,
+.small-box-sisdm .overlay.dark > .far,
+.small-box-sisdm .overlay.dark > .fab,
+.small-box-sisdm .overlay.dark > .fal,
+.small-box-sisdm .overlay.dark > .fad,
+.small-box-sisdm .overlay.dark > .svg-inline--fa,
+.small-box-sisdm .overlay.dark > .ion {
+  color: #ced4da;
+}

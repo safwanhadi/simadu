@@ -1,0 +1,113 @@
+<tr>
+    <td>KTP</td>
+    {% if file_kepeg.profil.file_ktp %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.profil.file_ktp.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>
+<tr>
+    <td>NPWP</td>
+    {% if file_kepeg.profil.file_npwp %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.profil.file_npwp.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>
+<tr>
+    <td>Kartu JKN</td>
+    {% if file_kepeg.profil.file_jkn %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.profil.file_jkn.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>
+<tr>
+    <td>BPJS Tenaga Kerja/Taspen</td>
+    {% if file_kepeg.profil.file_taspen %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.profil.file_taspen.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>
+<tr>
+    <td>Ijazah Terakhir</td>
+    {% if file_kepeg.pendidikan.file_ijazah %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.pendidikan.file_ijazah.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>
+<tr>
+    <td>Transkrip Terakhir</td>
+    {% if file_kepeg.pendidikan.file_transkrip %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.pendidikan.file_transkrip.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>
+<tr>
+    <td>SK KP Terakhir</td>
+    {% if file_kepeg.panggol.file %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.panggol.file.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>
+<tr>
+    <td>SK CPNS</td>
+    {% if file_kepeg.pengangkatan_cpns.file_sk %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.pengangkatan_cpns.file_sk.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>
+<tr>
+    <td>SK Pengangkatan ASN/Non ASN</td>
+    {% if file_kepeg.pengangkatan.file_sk %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.pengangkatan.file_sk.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>
+<tr>
+    <td>SPMT</td>
+    {% if file_kepeg.pengangkatan.file_spmt %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.pengangkatan.file_spmt.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>
+<tr>
+    <td>Latsar</td>
+    {% if file_kepeg.pengangkatan.file_latsar %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.pengangkatan.file_latsar.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>
+<tr>
+    <td>Karpeg</td>
+    {% if file_kepeg.pengangkatan.file_karpeg %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.pengangkatan.file_karpeg.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>
+<tr>
+    <td>SK Penempatan</td>
+    {% if file_kepeg.penempatan.file %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.penempatan.file.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>
+<tr>
+    <td>SK Gaji Berkala</td>
+    {% if file_kepeg.berkala.file %}
+    <td><a class="btn btn-block text-center" href="{{file_kepeg.berkala.file.url}}"><i class="fas fa-download fa-1x text-info"></i></a></td>
+    {% else %}
+    <td><div class="text-center"><i class="fas fa-times text-danger fa-1x"></i></div></td>
+    {% endif %}
+</tr>

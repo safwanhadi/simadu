@@ -1,0 +1,58 @@
+<div class="row">
+    <div class="col-md-12">
+        <div class="form-group row">
+            <div class="col-md-3">
+                NIP/NRK
+            </div>
+            <div class="col-md-9">
+                {{user.profil_user.nip}}
+            </div>
+        </div>
+        <div class="form-group row">
+            <div class="col-md-3">
+                Nama
+            </div>
+            <div class="col-md-9">
+                {{user.full_name}}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-12">
+        <div class="table table-responsive">
+            <table class="table" id="data_table">
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>No SIP</th>
+                        <th>Tanggal SIP</th>
+                        <th>SIP Berlaku</th>
+                        <th>File SIP</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in data_sip %}
+                    <tr>
+                        <td>{{forloop.counter}}</td>
+                        <td>{{item.no_sip}}</td>
+                        <td>{{item.tgl_sip}}</td>
+                        <td>{{item.berlaku_sd}}</td>
+                        <td>
+                            {% if item.file_sip %}
+                            <a href="{{item.file_sip.url}}"><i class="fas fa-file-download"></i></a>
+                            {% else %}
+                            <i class="fas fa-times" style="font-weight: bold; color:red"></i>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{% url 'riwayat_urls:riwayat_update_sipprofesi' id_str=id_str id=item.id %}" class="btn btn-outline-primary"><i class="fas fa-edit"></i></a>
+                            <a class="btn btn-outline-danger" href="{% url 'riwayat_urls:riwayat_delete_sipprofesi' id_str=id_str pk=item.id %}#deletedata"><i class="fas fa-trash"></i></a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>        
+    </div>
+</div>
+                    

@@ -1,0 +1,38 @@
+{% load static %}
+{% load humanize %}
+<div class="col-md-9">
+    <div class="row p-3 mt-3">
+        <div class="col-md-12 d-flex justify-content-start" style="padding-left: 1rem; padding-right:1rem;">
+            <div>
+                <h3 class="art-text">Informasi Terbaru</h3>
+                <hr style="width:100%; height: 5px; border:0; background: linear-gradient(to right, #02b9fc, #c4e9ff);">
+            </div>
+        </div>
+    
+        <div class="col-md-12 mb-3">
+            <div class="row">
+                {% for item in page_obj %}
+                    <div class="col-md-4 mb-3">
+                        <div class="informasi-card">
+                            <div class="card-image-container">
+                                {% if item.gambar %}
+                                    <img src="{{item.gambar.url}}" alt="image" class="card-image">
+                                {% else %}
+                                    <img src="{% static '/img/picture_logo.png' %}" alt="image" class="card-image">
+                                {% endif %}
+                            </div>
+                            <h4 class="card-crop-content">{{item.judul}}</h4>
+                            <div class="headline-crop-content mt-2 mb-3">
+                                {{item.isi|safe}}
+                            </div>
+                            <a href="{% url 'informasi_urls:informasi_view' slug=item.slug %}?case=detail">Lanjut baca</a>
+                            <div class="info-view">
+                                <i class="far fa-grin-hearts"></i> {{item.hit_count.hits}} view
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>

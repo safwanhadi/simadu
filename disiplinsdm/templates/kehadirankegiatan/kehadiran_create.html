@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block cardtitle %}
+<strong>List Indikator Layanan</strong>
+{% endblock cardtitle %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex flex-row justify-content-between">
+                    <div class="d-flex flex-row mb-1">
+                        {% if kegiatan %}
+                        <a href="{% url 'disiplinsdm_urls:listpegawai_view' %}" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
+                        {% elif kehadiran %}
+                        <a href="{% url 'disiplinsdm_urls:kehadiran_apel_view' %}?keg={{keg}}" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
+                        {% endif %}
+                        <h5>Daftar Kehadiran Apel pagi</h5>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% if request.user.is_superuser and kehadiran %}
+                        {% include 'kehadirankegiatan/add_kehadiran_kegiatan.html' %}
+                    {% elif request.user.is_superuser and kegiatan or request.user.is_staff and kegiatan %}
+                        {% include 'kehadirankegiatan/kehadiran_kegiatan.html' %}
+                    {% else %}
+                        {% include 'kehadirankegiatan/kehadiran_kegiatan_perorang.html' %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+{% endblock %}
+
+
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+
+    $(document).ready(function() {
+        $('.sdm').select2();
+        selectOnClose: true
+    });
+</script>
+ 
+{% endblock script %}

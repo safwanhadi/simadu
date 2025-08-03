@@ -1,0 +1,254 @@
+{% load crispy_forms_tags %}
+<div class="card card-solid">
+    <div class="card-body pl-3 pb-0 pt-3 pr-2 bg-light">
+        <div class="row">
+            <div class="col-md-12">
+                <h6>Keterangan status:</h6>
+            </div>
+        </div>
+        {% include '6_layanan_cuti/progress_indikator.html' %}
+    </div>
+</div>
+{% if request.user.is_staff and case == 'tindaklanjut' %}
+    <div class="row mb-5">
+        <div class="col-md-12">
+            <div class="row">
+                <div class="col-md-4 text-bold">Pegawai</div>
+                <div class="col-md-8">: {{data_detail.pegawai.full_name}}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Instalasi</div>
+                <div class="col-md-8">: {{data_detail.pegawai.riwayatpenempatan_set.last.penempatan}}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Sisa Cuti</div>
+                <div class="col-md-8">: 
+                {% if cek_sisa_cuti_pegawai > 0 %}
+                    {{cek_sisa_cuti_pegawai}}
+                {% else %}
+                    0
+                {% endif %}
+                 hari</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Jenis pengajuan cuti</div>
+                <div class="col-md-8">: {{data_detail.cuti.jenis_cuti}}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Lama usulan cuti saat ini</div>
+                <div class="col-md-8">: {{data_detail.cuti.lama_cuti}} hari</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Tanggal cuti</div>
+                <div class="col-md-8">: {{data_detail.cuti.tgl_mulai_cuti|date:"d F Y"}} s/d {{data_detail.cuti.tgl_akhir_cuti|date:"d F Y"}}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-6 text-bold">Total Cuti Tahunan Termasuk Sedang Proses Usulan</div>
+                <div class="col-md-6">: {{cek_total_cuti_tahunan}} hari</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-6 text-bold">Jumlah pegawai cuti atau yang mengajukan cuti di instalasi yang sama (termasuk yang bersangkutan)</div>
+                <div class="col-md-6">: {{cek_total_pegawai_cuti.jumlah}} orang &nbsp; {% if cek_total_pegawai_cuti.jumlah > 0 %}<button type="button" class="btn btn-dark" data-toggle="modal" data-target="#pegawaicuti">Lihat Pegawai Cuti</button>{% endif %}</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row">
+        <div class="col-md-12 table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Atasan Langsung</th>
+                        <th>Pejabat Administrator</th>
+                        <th>Persetujuan Pimpinan</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>{{nama_verifikator.nama_atasan1}}</td>
+                        <td>{{nama_verifikator.nama_atasan2}}</td>
+                        <td>{{nama_verifikator.direktur}}</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            {% if request.user.is_staff and request.user.profil_user.nip == nama_verifikator.nip_atasan1 %}
+                            <a href="{% url 'layanan_urls:layanan_cuti_update_view' status='riwayat' id=data_detail.id %}?case=tindaklanjut&level=1#openModal" class="btn btn-outline-info mr-3" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% if data_detail.verifikasicuti.persetujuan1 %}
+                                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                                {% else %}
+                                    <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                                {% endif %}
+                            {% elif data_detail.verifikasicuti.persetujuan1 %}
+                            <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                            {% else %}
+                            <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if request.user.is_staff and request.user.profil_user.nip == nama_verifikator.nip_atasan2 %}
+                                {% if data_detail.verifikasicuti.persetujuan1 %}
+                                    <a href="{% url 'layanan_urls:layanan_cuti_update_view' status='riwayat' id=data_detail.id %}?case=tindaklanjut&level=2#openModal" class="btn btn-outline-info mr-3" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% else %}
+                                    <a href="#" class="btn btn-outline-info mr-3 disabled" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% endif %}
+                                {% if data_detail.verifikasicuti.persetujuan2 %}
+                                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                                {% else %}
+                                    <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                                {% endif %}
+                            {% elif data_detail.verifikasicuti.persetujuan2 %}
+                            <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                            {% else %}
+                            <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if request.user.is_staff and request.user.profil_user.nip == nama_verifikator.nip_direktur %}
+                                {% if data_detail.verifikasicuti.persetujuan2 %}
+                                    <a href="{% url 'layanan_urls:layanan_cuti_update_view' status='riwayat' id=data_detail.id %}?case=tindaklanjut&level=3#openModal" class="btn btn-outline-info mr-3" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% else %}
+                                    <a href="#" class="btn btn-outline-info mr-3 disabled" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% endif %}
+                                {% if data_detail.verifikasicuti.persetujuan3 %}
+                                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                                {% else %}
+                                    <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                                {% endif %}
+                            {% elif data_detail.verifikasicuti.persetujuan3 %}
+                            <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                            {% else %}
+                            <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            {% if data_detail.verifikasicuti %}
+                                {% if data_detail.verifikasicuti.catatan1 %}
+                                    <p>{{data_detail.verifikasicuti.catatan1}}</p>
+                                {% else %}
+                                    N/A
+                                {% endif %}    
+                            {% else %}
+                                <span class="text-muted">Catatan: </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if data_detail.verifikasicuti %}
+                                {% if data_detail.verifikasicuti.catatan2 %}
+                                    <p>{{data_detail.verifikasicuti.catatan2}}</p>
+                                {% else %}
+                                    N/A
+                                {% endif %}    
+                            {% else %}
+                                <span class="text-muted">Catatan: </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if data_detail.verifikasicuti %}
+                                {% if data_detail.verifikasicuti.catatan3 %}
+                                    <p>{{data_detail.verifikasicuti.catatan3}}</p>
+                                {% else %}
+                                    N/A
+                                {% endif %}    
+                            {% else %}
+                                <span class="text-muted">Catatan: </span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div> 
+        {% if request.user.is_superuser %}
+        <div class="col-md-12 text-center pt-5">
+            <form method="post">
+                <div class="d-flex justify-content-center">
+                    {% csrf_token %}
+                    {{form | crispy}}
+                    {{riwayat_form | crispy}}
+                </div>
+                {% if data_detail.verifikasicuti.persetujuan3 %}
+                <a href="{% url 'file_urls:usulan_cuti_docx' layanan_id=data_detail.id %}" class="btn btn-outline-info p-3">Usulan Cuti</a>
+                {% else %}
+                <button class="btn btn-outline-info p-3" disabled>Usulan Cuti</button>
+                {% endif %}
+                <a href="{% url 'file_urls:cuti_docx' layanan_id=data_detail.id %}" class="btn btn-outline-dark p-3">Draft Surat Cuti</a>
+                <button class="btn btn-outline-primary p-3" type="submit">Tindaklanjut pengajuan &nbsp;&nbsp; <i class="fas fa-fast-forward"></i></button>
+            </form>
+        </div>  
+        {% endif %}
+    </div>
+    {% elif case == 'final' %}
+    <div class="row">
+        <div class="col-md-12">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                {{form | crispy}}
+                {{riwayat_form | crispy}}
+                <input type="submit" value="Simpan" class="btn btn-success">
+            </form>
+        </div>
+    </div>
+    {% elif case == 'detail' %}
+    <div class="row">
+        <div class="col-md-12 mt-4">
+            <div class="row pl-3 pr-3">
+                <div class="col-md-12">
+                    <div class="row">
+                        <div class="col-md-4 text-bold">Pegawai</div>
+                        <div class="col-md-8">: {{data_detail.pegawai.full_name}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Status Cuti</div>
+                        <div class="col-md-8">: {{data_detail.cuti.status_cuti}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Jenis Cuti</div>
+                        <div class="col-md-8">: {{data_detail.cuti.jenis_cuti}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Tgl Cuti</div>
+                        <div class="col-md-8">: {{data_detail.inovasi.tanggal}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">No Surat Cuti</div>
+                        <div class="col-md-8">: {{data_detail.inovasi.no_sk}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Lama Cuti</div>
+                        <div class="col-md-8">: {{data_detail.cuti.lama_cuti}} Hari</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Tahun Cuti</div>
+                        <div class="col-md-8">: {{data_detail.cuti.tahun_cuti}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Surat Pengganti Tugas</div>
+                        {% if data_detail.cuti.file_pendukung %}
+                            <div class="col-md-8">: <a href="{{data_detail.cuti.file_pendukung.url}}"><i class="fas fa-file-word"></i> Download Surat Pengganti Tugas</a></div>
+                        {% else %}
+                        <div class="col-md-8">: <span>Belum ada file</span></div>
+                        {% endif %}
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Surat Pengajuan Cuti</div>
+                        {% if data_detail.cuti.file_pengajuan %}
+                            <div class="col-md-8">: <a href="{{data_detail.cuti.file_pengajuan.url}}"><i class="fas fa-file-word"></i> Download Surat Pengajuan</a></div>
+                        {% else %}
+                        <div class="col-md-8">: <span>Belum ada file</span></div>
+                        {% endif %}
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Surat Cuti</div>
+                        {% if data_detail.cuti.file %}
+                            <div class="col-md-8">: <a href="{{data_detail.cuti.file.url}}"><i class="fas fa-file-word"></i> Download Surat Cuti</a></div>
+                        {% else %}
+                        <div class="col-md-8">: <span>Belum ada file</span></div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endif %}
+                    

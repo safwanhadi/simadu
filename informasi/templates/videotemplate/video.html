@@ -1,0 +1,168 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load crispy_forms_tags %}
+{% load humanize %}
+
+{% block title_page %}
+
+{% endblock title_page %}
+
+{% block styles %}
+<link rel="stylesheet" href="{% static 'dist/css/informasi.css' %}">
+{% endblock styles %}
+
+{% block content %}
+<div class="container">
+    {% if video %}
+        {% if request.user.is_superuser %}
+            <a href="{% url 'informasi_urls:tutorial_view' %}#openModal" class="btn btn-info" >Tambah Video</a>
+        {% endif %}
+        <div class="row">
+            <div class="col-md-7 mb-5 mr-3">
+                <!-- Main video -->
+                <div class="row">
+                    <div class=" col-md-12 auto-resizable-iframe">
+                        <div>
+                            <iframe id="mainVideo" src="https://www.youtube.com/embed/{{video.id_video}}" frameborder="0" class="rounded" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen ></iframe>
+                            <h3>{{video.judul_video}}</h3>
+                        </div>
+                    </div>
+                    <div class="col-md-12">
+                        <div class="user-panel mt-3 pb-3 mb-3 d-flex">
+                            <div class="image">
+                                {% if video.author.profil_user.foto %}
+                                <img src="{{video.author.profil_user.foto.url}}" class="img-circle elevation-2" alt="User Image">
+                                {% else %}
+                                <img src="{% static 'dist/img/avatar5.png' %}" class="img-circle elevation-2" alt="User Image">
+                                {% endif %}
+                            </div>
+                            <div class="info">
+                                <a href="{% url 'myaccount_urls:profil_view' %}" class="d-block">{{video.author.first_name}} {{video.author.last_name}}</a>
+                                <span>{{video.created_at|naturaltime}}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-12">
+                        <form method="post" enctype="multipart/form-data">
+                            {% csrf_token %}
+                            {{commentform | crispy}}
+                            <div class="d-flex justify-content-end">
+                                <input type="submit" value="Simpan" class="btn btn-success">
+                            </div>
+                        </form>
+                    </div>
+                    <div class="mb-5 col-md-12" style="box-sizing: border-box;">
+                        <h5>{{video.videocomment_set.all|length}} Komentar</h5>
+                        <div class="col-md-12 d-flex justify-content-center">
+                            <hr style="width:100%; height: 1px; border:0; background: linear-gradient(to right, #171717, #afaeae);">
+                        </div>
+                        {% if video.videocomment_set.all %}
+                        {% for item in video.videocomment_set.all %}
+                        <div class="col-md-12" style="width: 100%;">
+                            <div class="pb-3 d-flex justify-content-start">
+                                <div class="image">
+                                    {% if item.author.profil_user.foto %}
+                                    <img width="50" src="{{item.author.profil_user.foto.url}}" class="img-circle elevation-2 mr-3" alt="User Image">
+                                    {% else %}
+                                    <img src="{% static 'dist/img/avatar5.png' %}" class="img-circle elevation-2" alt="User Image">
+                                    {% endif %}
+                                </div>
+                                <div class="row info">
+                                    <a style="text-decoration: none;" href="#" class="d-block mr-2">{{item.author.first_name}} {{item.author.last_name}}</a>
+                                    <span style="font-size: small; color:#424141">{{item.created_at|naturaltime}}</span>
+                                    <div class="col-md-12">
+                                        <p>{{item.comment}}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                        {% else %}
+                        <div class="col-md-12">
+                            <h5>Belum ada komentar saat ini..</h5>
+                        </div>
+                        {% endif %}
+                        
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <!-- List of related videos -->
+                <div class="row">
+                    <div class="col-md-12" id="kategorivideo">
+                        <h4>Kategori Video</h4>
+                        <ul style="display: flex; flex-direction:column; gap:5px;">
+                            {% for item in kategori %}
+                            <a href="{% url 'informasi_urls:tutorial_view' %}?kategori={{item.slug}}">
+                                <li class="list">{{item.kategori}}</li>
+                            </a>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    <div class="col-md-12">
+                        {% for item in data %}
+                        <div class="image-container">
+                            <a href="{% url 'informasi_urls:tutorial_view' %}?vid={{item.id_video}}" id="get_videoid">
+                                <div class="d-flex justify-content-start mt-2">
+                                    <!-- <input type="hidden" name="id_video" id="video_input_id" value="{{item.id_video}}"> -->
+                                    <div class="mr-2">
+                                        <img src="https://img.youtube.com/vi/{{item.id_video}}/default.jpg" alt="Play Video" style="cursor: pointer;">
+                                    </div>
+                                    <div style="color: black;">
+                                        {{item.judul_video}}
+                                        <br><span style="font-size: small; color:#424141">{{item.created_at|naturaltime}}</span>
+                                    </div>
+                                </div>
+                            </a>
+                            {% if request.user.is_superuser %}
+                            <a href="{% url 'informasi_urls:tutorial_view' id=item.id %}?vid={{item.id_video}}#openModal" class="btn btn-outline-info edit-button"><i class="fas fa-edit" ></i></a>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% else %}
+    <div class="row">
+        <div class="col-md-12 d-flex justify-content-center">
+            <h4>Belum ada video diupload</h4>
+        </div>
+    </div>
+    
+    {% endif %}
+</div>
+
+<!-- modal untuk persetujuan cuti -->
+<div id="openModal" class="modalinfo">
+    <div class="modal-content">
+        <a href="#close" title="Close" class="close">&times;</a>
+        {% if get_id %}
+            <h4>Edit Video</h4>
+        {% else %}
+            <h4>Tambah Video</h4>
+        {% endif %}
+        <form method="POST">
+            {% csrf_token %}
+            {{form|crispy}}
+            <input type="submit" value="Simpan" class="btn btn-success mt-3">
+        </form>
+    </div>
+</div>
+{% endblock content %}
+
+{% block script %}
+<script>
+    function toggleForm() {
+        var form = document.getElementById("addVideoForm");
+        if (form.style.display === "none") {
+          form.style.display = "block";
+        } else {
+          form.style.display = "none";
+        }
+      }
+      
+</script>
+
+
+{% endblock script %}

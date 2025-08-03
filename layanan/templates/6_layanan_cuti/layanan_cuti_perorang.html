@@ -1,0 +1,78 @@
+<div class="card card-solid">
+    <div class="card-body pl-3 pb-0 pt-3 pr-2">
+        <div class="row">
+            <div class="col-md-12">
+                <h6>Keterangan status:</h6>
+            </div>
+        </div>
+        <div class="row">
+            {% include '6_layanan_cuti/progress_indikator.html' %}
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="form-group row">
+            <div class="col-md-3">
+                NIP/NRK
+            </div>
+            <div class="col-md-9">
+                {{user.profil_user.nip}}
+            </div>
+        </div>
+        <div class="form-group row">
+            <div class="col-md-3">
+                Nama
+            </div>
+            <div class="col-md-9">
+                {{user.full_name}}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-12">
+        <div class="table table-responsive">
+            <table class="table" id="data_table">
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Jenis Cuti</th>
+                        <th>Tahun Cuti</th>
+                        <th>Lama Cuti</th>
+                        <th>Status</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in data %}
+                    <tr>
+                        <td>{{forloop.counter}}</td>
+                        <td>{{item.cuti.jenis_cuti}}</td>
+                        <td>{{item.cuti.tahun_cuti}}</td>
+                        <td>{{item.cuti.lama_cuti}}</td>
+                        <td>{% if item.status == 'draft' %}
+                                <i class="fab fa-dochub" style="color: red;"></i>
+                            {% elif item.status == 'pengajuan' %}
+                                <i class="far fa-hourglass" style="color: yellow;"></i>
+                            {% elif item.status == 'tidak ditindaklanjut' %}
+                                <i class="fas fa-times" style="color: red;"></i>
+                            {% elif item.status == 'tindaklanjut' %}
+                                <i class="fas fa-file-signature" style="color: greenyellow;">
+                            {% elif item.status == 'selesai' %}
+                                <i class="far fa-calendar-check" style="color: blue;"></i>
+                            {% endif %}</td>
+                        <td>{% if item.status == 'draft' %}
+                            <a style="font-size: small;" href="{% url 'layanan_urls:layanan_cuti_update_view' status='update' id=item.id %}" class="btn btn-outline-primary">Edit</a>
+                            {% elif item.status == 'selesai' or item.status == 'tidak ditindaklanjut' %}
+                            <a class="btn btn-outline-info" href="{% url 'layanan_urls:layanan_cuti_update_view' status='riwayat' id=item.id %}?case=detail" style="font-size: small;">Detail Cuti</a>
+                            {% else %}
+                            <button style="font-size: small;" class="btn btn-outline-danger disabled">Tidak ada aksi</button>
+                            {% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+                    

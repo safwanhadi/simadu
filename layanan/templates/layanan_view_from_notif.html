@@ -1,0 +1,254 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block styles %}
+<link rel="stylesheet" href="{% static 'dist/css/dash.css'%}">
+{% endblock styles %}
+
+{% block breadcrumb %}
+<div class="col-sm-6">
+    <ol class="breadcrumb float-sm-right">
+      <li class="breadcrumb-item"><a href="{% url 'dashboard_urls:dashboard_view' %}">{{page}}</a></li>
+      {% if sub_page %}
+      <li class="breadcrumb-item"><a href="#">{{sub_page}}</a></li>
+      {% endif %}
+      {% if title_page %}
+      <li class="breadcrumb-item active"><a href="#">{{title_page}}</a></li>
+      {% endif %}
+    </ol>
+  </div>
+{% endblock breadcrumb %}
+
+{% block cardtitle %}
+{% endblock cardtitle %}
+
+{% block content %}
+    <div class="container">
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card card-solid">
+                    <div class="card-header d-flex flex-row"><a href="{% url 'dashboard_urls:dashboard_view' %}"><i class="fas fa-arrow-left ml-2 mr-2" style="cursor: pointer; font-size:20px;"></i></a>
+                        {% if data == 'yancuti' %}
+                            <h5>Notifikasi Usulan Cuti</h5>
+                        {% elif data == 'yanberkala' %}
+                            <h5>Notifikasi Usulan Gaji Berkala</h5>
+                        {% elif data == 'yandiklat' %}
+                            <h5>Notifikasi Usulan Diklat</h5>
+                        {% elif data == 'yaninovasi' %}
+                            <h5>Notifikasi Usulan Inovasi</h5>
+                        {% else %}
+                            <h5>Detail Seluruh Notifikasi</h5>
+                        {% endif %}
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">{% include 'dashboard_nav.html' %}</div>
+                        <table class="table data_table">
+                            <thead>
+                                <tr>
+                                    <th>No</th>
+                                    <th>Pegawai</th>
+                                    <th>Jenis Usulan</th>
+                                    <th>Tanggal Usulan</th>
+                                    <th>Aksi</th>
+                                    {% if data == 'yancuti' and request.user.is_staff %}
+                                    <th>Persetujuan</th>
+                                    {% endif %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if data == 'yancuti' %}
+                                    {% for item in notif_cuti %}
+                                        <tr>
+                                            <td>{{forloop.counter}}</td>
+                                            <td>{{item.pegawai__first_name}} {{item.pegawai__last_name}}</td>
+                                            <td>Usulan Cuti</td>
+                                            <td>{{item.created_at}}</td>
+                                            <td>
+                                                {% if request.user.is_superuser %}
+                                                    <a href="{% url 'layanan_urls:layanan_cuti_update_view' status='riwayat' id=item.id %}?case=tindaklanjut" class="btn btn-info">Proses</a>
+                                                {% else %}
+                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan={{data}}" method="post">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-info">Lihat Detail</button>
+                                                </form>
+                                                {% endif %}
+                                            </td>
+                                            {% if request.user.is_superuser %}
+                                            <td>
+                                                {% if item.verifikasicuti__persetujuan3 %}
+                                                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                                                {% else %}
+                                                    <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                                                {% endif %}
+                                            </td>
+                                            {% endif %}
+                                        </tr>
+                                    {% endfor %}
+                                    {% for item_admin in notif_cuti_admin %}
+                                        <tr>
+                                            <td>{{forloop.counter}}</td>
+                                            <td>{{item_admin.pegawai__first_name}} {{item_admin.pegawai__last_name}}</td>
+                                            <td>Usulan Cuti</td>
+                                            <td>{{item_admin.created_at}}</td>
+                                            <td>
+                                                {% if request.user.is_staff %}
+                                                    <a href="{% url 'layanan_urls:layanan_cuti_update_view' status='riwayat' id=item_admin.id %}?case=tindaklanjut" class="btn btn-info">Proses</a>
+                                                {% endif %}
+                                            </td>
+                                            {% if request.user.is_staff %}
+                                            <td>
+                                                {% if item_admin.verifikasicuti__persetujuan3 %}
+                                                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                                                {% else %}
+                                                    <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                                                {% endif %}
+                                            </td>
+                                            {% else %}
+                                            <td></td>
+                                            {% endif %}
+                                        </tr>
+                                    {% endfor %}
+                                {% elif data == 'yanberkala' %}
+                                    {% for item in notif_berkala %}
+                                        <tr>
+                                            <td>{{forloop.counter}}</td>
+                                            <td>{{item.pegawai__first_name}} {{item.pegawai__last_name}}</td>
+                                            <td>Usulan Gaji Berkala</td>
+                                            <td>{{item.created_at}}</td>
+                                            <td>
+                                                {% if request.user.is_superuser %}
+                                                    <a href="{% url 'layanan_urls:layanan_berkala_admin_view' layanan_id=item.id nip=item.pegawai__profil_user__nip %}" class="btn btn-info">Proses</a>
+                                                {% else %}
+                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan={{data}}" method="post">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-info">Lihat Detail</button>
+                                                </form>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% elif data == 'yandiklat' %}
+                                    {% for item in notif_diklat %}
+                                        <tr>
+                                            <td>{{forloop.counter}}</td>
+                                            <td>{{item.riwayatdiklat__pegawai__first_name}} {{item.riwayatdiklat__pegawai__last_name}} ({{item.riwayatdiklat__nama_diklat}})</td>
+                                            <td>Usulan Diklat</td>
+                                            <td>{{item.created_at}}</td>
+                                            <td>
+                                                {% if request.user.is_superuser %}
+                                                    <a href="{% url 'layanan_urls:layanan_diklat_update_view' pk=item.id %}?case=proses" class="btn btn-info">Proses</a>
+                                                {% else %}
+                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan={{data}}" method="post">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-info">Lihat Detail</button>
+                                                </form>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                    {% for item_admin in notif_diklat_admin %}
+                                        <tr>
+                                            <td>{{forloop.counter}}</td>
+                                            <td>{{item_admin.riwayatdiklat__pegawai__first_name}} {{item_admin.riwayatdiklat__pegawai__last_name}} ({{item_admin.riwayatdiklat__nama_diklat}})</td>
+                                            <td>Usulan Diklat</td>
+                                            <td>{{item_admin.created_at}}</td>
+                                            <td>
+                                                {% if request.user.is_staff %}
+                                                    <a href="{% url 'layanan_urls:layanan_diklat_update_view' pk=item_admin.id %}?case=proses" class="btn btn-info">Proses</a>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% elif data == 'yaninovasi' %}
+                                    {% for item in notif_inovasi %}
+                                        <tr>
+                                            <td>{{forloop.counter}}</td>
+                                            <td>{{item.pegawai__first_name}} {{item.pegawai__last_name}}</td>
+                                            <td>Usulan Inovasi</td>
+                                            <td>{{item.created_at}}</td>
+                                            <td>
+                                                {% if request.user.is_superuser %}
+                                                    <a href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=proses" class="btn btn-info">Proses</a>
+                                                {% else %}
+                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan={{data}}" method="post">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-info">Lihat Detail</button>
+                                                </form>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    {% for item in notifikasi_layanan %}
+                                    <tr>
+                                        <td>{{forloop.counter}}</td>
+                                        <td>{{item.pegawai__first_name}} {{item.pegawai__last_name}}</td>
+                                        <td>
+                                            {% if item.layanan__url == 'yancuti' %}
+                                                <span class="bg-warning pt-2 pb-2 pl-3 pr-3 rounded">Usulan Cuti</span>
+                                            {% elif item.layanan__url == 'yanberkala' %}
+                                                <span class="bg-info pt-2 pb-2 pl-3 pr-3 rounded">Usulan Gaji Berkala</span>
+                                            {% elif item.layanan__url == 'yandiklat' %}
+                                                <span class="bg-dark pt-2 pb-2 pl-3 pr-3 rounded">Usulan Diklat</span>
+                                            {% elif item.layanan__url == 'yaninovasi' %}
+                                                <span class="bg-danger pt-2 pb-2 pl-3 pr-3 rounded">Usulan Inovasi</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{item.created_at}}</td>
+                                        <td>
+                                            {% if request.user.is_superuser %}
+                                                {% if item.layanan__url == 'yancuti' %}
+                                                    <a href="{% url 'layanan_urls:layanan_cuti_update_view' status='riwayat' id=item.id %}?case=tindaklanjut" class="btn btn-info">Proses</a>
+                                                {% elif item.layanan__url == 'yanberkala' %}
+                                                    <a href="{% url 'layanan_urls:layanan_berkala_admin_view' layanan_id=item.id nip=item.pegawai__profil_user__nip %}" class="btn btn-info">Proses</a>
+                                                {% elif item.layanan__url == 'yandiklat' %}
+                                                    <a href="{% url 'layanan_urls:layanan_diklat_update_view' pk=item.diklat__id %}?case=proses" class="btn btn-info">Proses</a>
+                                                {% elif item.layanan__url == 'yaninovasi' %}
+                                                    <a href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=proses" class="btn btn-info">Proses</a>
+                                                {% endif %}
+                                            {% else %}
+                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan={{item.layanan__url}}" method="post">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-info">Lihat Detail</>
+                                                </form>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+{% endblock %}
+
+
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('.data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+</script>
+
+    
+{% endblock script %}

@@ -1,0 +1,42 @@
+{% load static %}
+{% load humanize %}
+{% if detail %}
+<div class="col-md-9">
+    <article class="blog-content">
+        {% if detail.gambar %}
+        <div class="blog-image-container">
+            <img src="{{detail.gambar.url}}" alt="image" class="blog-image">
+        </div>
+        {% endif %}
+        <h2 class="blog-title">{{detail.judul}}</h2>
+        <div class="user-panel mt-3 pb-3 mb-3 d-flex">
+            <div class="mt-2">
+                {% if detail.author.profil_user.foto %}
+                <img src="{{detail.author.profil_user.foto.url}}" class="img-circle elevation-2" alt="User Image" height="80" width="80">
+                {% else %}
+                <img src="{% static 'dist/img/avatar5.png' %}" class="img-circle elevation-2" alt="User Image" height="80" width="80">
+                {% endif %}
+            </div>
+            <div class="info">
+                <span class="d-block">{{detail.author.first_name}} {{detail.author.last_name}}</span>
+                <span>{{detail.created_at|naturaltime}}</span>
+            </div>
+        </div>
+        <p>{{detail.isi|safe}}</p>
+        
+        {% if detail.pdf_file %}
+        <div class="col-md-12">
+            <!-- <iframe src="{% url 'informasi_urls:pdf_view' id=detail.id %}" class="pdf-container"></iframe> -->
+            <iframe src="{% url 'informasi_urls:pdf_view' id=detail.id %}" class="pdf-container"></iframe>
+        </div>
+        {% endif %}
+    </article>
+</div>
+{% else %}
+<div class="col-md-9">
+    <article class="blog-content d-flex justify-content-center">
+        <h3>Dokumen tidak ditemukan</h3>
+    </article>
+</div>
+{% endif %}
+

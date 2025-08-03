@@ -1,0 +1,41 @@
+<div class="table table-responsive">
+    <table class="table" id="data_table">
+        <thead>
+            <tr>
+                <th>No</th>
+                <th>Pegawai</th>
+                <th>Jenis Cuti</th>
+                <th>Alasan </th>
+                <th>Tanggal </th>
+                <th>Lama </th>
+                <th>Tahun Cuti</th>
+                <th>Status File</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data %}
+            <tr>
+                <td>{{forloop.counter}}</td>
+                <td>{{item.pegawai.full_name}}</td>
+                <td>{{item.jenis_cuti}}</td>
+                <td>{{item.alasan_cuti}}</td>
+                <td>{{item.tgl_mulai_cuti}} s/d {{tgl_akhir_cuti}}</td>
+                <td>{{item.lama_cuti}}</td>
+                <td>{{item.tahun_cuti}}</td>
+                <td>{% if item.file %}
+                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                    {% else %}
+                    <i class="fas fa-times" style="font-weight: bold; color:red"></i>
+                    {% endif %}</td>
+                <td>
+                    <a href="?nip={{item.pegawai.profil_user.nip}}" class="btn btn-primary"><i class="fas fa-user"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_update_cuti' id=item.id %}" class="btn btn-outline-info"><i class="fas fa-edit"></i></a>
+                    <button class="btn btn-outline-danger"><i class="fas fa-trash"></i></button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+                    

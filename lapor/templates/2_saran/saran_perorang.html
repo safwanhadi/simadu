@@ -1,0 +1,35 @@
+<div class="row">
+    <div class="col-md-12">
+        <div class="table table-responsive">
+            <table class="table" id="data_table">
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Tanggal</th>
+                        <th>Saran</th>
+                        <th>Tanggapan</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in data %}
+                    <tr>
+                        <td>{{forloop.counter}}</td>
+                        <td>{{item.created_at}}</td>
+                        <td>{{item.saran}}</td>
+                        <td>
+                            {% if item.tanggapan %}
+                                {{item.tanggapan}}
+                            {% else %}
+                                <span class="border border-warning p-2 rounded bg-warning">Belum ada tanggapan</span>
+                            {% endif %}
+                        </td>
+                        <td><a href="{% url 'laporan_urls:saran_update_view' id=item.id %}" class="btn btn-outline-info"><i class="fas fa-edit"></i></a> </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>        
+    </div>
+</div>
+                    

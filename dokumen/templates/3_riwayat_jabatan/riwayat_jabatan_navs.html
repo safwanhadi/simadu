@@ -1,0 +1,11 @@
+<ul class="nav nav-tabs">
+    <li class="nav-item">
+      <a class="nav-link {% if jabatan == 'pelaksana' %} active {% endif %}" href="{% url 'riwayat_urls:riwayat_jabatan' %}?jabatan=pelaksana">Pelaksana</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link {% if jabatan == 'fungsional' %} active {% endif %}" href="{% url 'riwayat_urls:riwayat_jabatan' %}?jabatan=fungsional">Fungsional</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link {% if jabatan == 'struktural' %} active {% endif %}" href="{% url 'riwayat_urls:riwayat_jabatan' %}?jabatan=struktural">Struktural</a>
+    </li>
+  </ul>

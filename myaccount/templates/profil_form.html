@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+    
+{% endblock title_page %}
+
+{% block content %}
+    <!-- Default box -->
+<div class="card card-solid">
+    <div class="card-body pb-0">
+        <div class="row">
+            <div class="col-12 d-flex align-items-stretch flex-column">
+                <div class="card bg-light d-flex flex-fill">
+                    <div class="card-header text-muted">
+                       <h4>Update User</h4>
+                    </div>
+                    <div class="card-body">
+                        <div id="form_profil">
+                            <form method="post" enctype="multipart/form-data">
+                                {% csrf_token %}
+                                {{form | crispy}}
+                                <input type="submit" value="Simpan" class="btn btn-success">
+                            </form>
+                            
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock content %}
+
+{% block script %}
+{% endblock script %}

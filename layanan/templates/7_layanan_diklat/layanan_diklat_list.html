@@ -1,0 +1,112 @@
+{% extends '7_layanan_diklat/layanan_diklat.html' %}
+
+{% block button %}
+    {% if request.user.is_staff %}
+        <a href="{% url 'layanan_urls:layanan_diklat_penugasan_view' %}" class="btn btn-outline-success">Buat Penugasan</a>
+    {% endif %}
+    {% if request.user.is_staff %}
+        <a class="btn btn-outline-info" href="{% url 'layanan_urls:layanan_diklat_list_view' %}">{% if request.user.is_superuser %} Riwayat Diklat {% else %} Diklatku {% endif %}</a>
+    {% endif %}
+        <a class="btn btn-outline-info" href="{% url 'layanan_urls:layanan_diklat_usulan_view' %}">Usulan Diklat</a>
+{% endblock %}
+
+{% block child_content %}
+<div class="card card-solid">
+    <div class="card-body pl-3 pb-0 pt-3 pr-2 bg-light">
+        <div class="row">
+            <div class="col-md-12">
+                <h6>Keterangan status:</h6>
+            </div>
+        </div>
+        {% include '7_layanan_diklat/progress_indikator.html' %}
+    </div>
+</div>
+
+<div class="col-md-12">
+    <div class="table table-responsive">
+        <table class="table" id="data_table">
+            <thead>
+                <tr>
+                    <th>No</th>
+                    <th>Pegawai</th>
+                    <th>Nama Diklat</th>
+                    <th>Tanggal Diklat</th>
+                    <th>Lama Diklat</th>
+                    <th>Status</th>
+                    <th>Aksi</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in object_list %}
+                <tr>
+                    <td>{{forloop.counter}}</td>
+                    <td>
+                        {% if item.riwayatdiklat_set.last.pegawai.all|length <= 1 %}
+                            {{item.riwayatdiklat_set.last.pegawai.first}}
+                        {% else %}
+                        <ol style="padding-left: 3px;">
+                            {% for pegawai in item.riwayatdiklat_set.last.pegawai.all %}
+                                <li>{{pegawai.full_name}}</li>
+                            {% endfor %}
+                        </ol>
+                        {% endif %}
+                    </td>
+                    <td>{{item.riwayatdiklat_set.last.nama_diklat}}</td>
+                    <td>{{item.riwayatdiklat_set.last.tgl_mulai}}</td>
+                    <td>{{item.riwayatdiklat_set.last.lama_diklat}}</td>
+                    <td>{% if item.status == 'usulan' %}
+                            {%if item.verifikasidiklat.persetujuan3 %}
+                                <i class="fab fa-dochub" style="color: blue;"></i>
+                            {% elif item.verifikasidiklat.persetujuan2 %}
+                                <i class="fab fa-dochub" style="color: green;"></i>
+                            {% elif item.verifikasidiklat.persetujuan1 %}
+                                <i class="fab fa-dochub" style="color: rgb(212, 181, 5);"></i>
+                            {% else %}
+                                <i class="fab fa-dochub" style="color: red;"></i>
+                            {% endif %}
+                        {% elif item.status == 'proses' %}
+                        <i class="far fa-hourglass" style="color: orange;"></i>
+                        {% elif item.status == 'tidak ditindaklanjut' %}
+                        <i class="fas fa-times" style="color: red;"></i>
+                        {% elif item.status == 'tindaklanjut' %}
+                        <i class="fas fa-file-signature" style="color: greenyellow;"></i>
+                        {% elif item.status == 'selesai' %}
+                        <i class="far fa-calendar-check" style="color: blue;"></i>
+                        {% endif %}</td>
+                    <td>
+                        {% if item.status == 'usulan' %}
+                            <a style="font-size: small;" href="{% url 'layanan_urls:layanan_diklat_update_view' pk=item.id %}?case=proses" class="btn btn-outline-danger">Proses</a>
+
+                        {% elif item.status == 'proses' %}
+                            <a style="font-size: small;" href="{% url 'layanan_urls:layanan_diklat_update_view' pk=item.id %}?case=spt" class="btn btn-outline-warning">Unggah SPT</a>
+                        {% elif item.status == 'tindaklanjut' %}
+                            <button style="font-size: small;" class="btn btn-outline-success" disabled>Menunggu laporan</button>
+                        {% elif item.status == 'proses' or item.status == 'selesai' %}
+                            <a style="font-size: small;" href="{% url 'layanan_urls:layanan_diklat_update_view' pk=item.id %}?case=detail" class="btn btn-outline-primary">Detail</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>        
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+</script>
+{% endblock %}
+                    

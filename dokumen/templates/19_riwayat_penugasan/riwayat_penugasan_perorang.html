@@ -1,0 +1,58 @@
+<div class="row">
+    <div class="col-md-12">
+        <div class="form-group row">
+            <div class="col-md-3">
+                NIP/NRK
+            </div>
+            <div class="col-md-9">
+                {{user.profil_user.nip}}
+            </div>
+        </div>
+        <div class="form-group row">
+            <div class="col-md-3">
+                Nama
+            </div>
+            <div class="col-md-9">
+                {{user.first_name}} {{user.last_name}}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-12">
+        <div class="table table-responsive">
+            <table class="table" id="data_table">
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Pegawai</th>
+                        <th>Jabatan</th>
+                        <th>Nama Kegiatan</th>
+                        <th>Tempat Kegiatan</th>
+                        <th>Sumber Anggaran</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in object_list %}
+                    <tr>
+                        <td>{{forloop.counter}}</td>
+                        <td>{{item.pegawai.full_name}}</td>
+                        <td>{{item.jabatan}}</td>
+                        <td>{{item.nama_keg}}</td>
+                        <td>{{item.tempat_keg}}</td>
+                        <td>{% if item.anggaran %}
+                            {{item.sumber_angg}}
+                            {% else %}
+                            Tanpa anggaran
+                            {% endif %}</td>
+                        <td>
+                            <a href="{% url 'riwayat_urls:riwayat_update_penugasan' pk=item.id %}" class="btn btn-outline-info"><i class="fas fa-edit"></i></a>
+                            <a href="{% url 'riwayat_urls:riwayat_delete_penugasan' pk=item.id %}#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>        
+    </div>
+</div>
+                    

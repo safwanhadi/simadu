@@ -1,0 +1,102 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{% static 'dist/css/adminlte.min.css' %}">
+    <link rel="stylesheet" href="{% static 'plugins/datatables-bs4/css/dataTables.bootstrap4.min.css' %}">
+    <link rel="stylesheet" href="{% static 'plugins/datatables-responsive/css/responsive.bootstrap4.min.css' %}">
+    <link rel="stylesheet" href="{% static 'plugins/datatables-buttons/css/buttons.bootstrap4.min.css' %}">
+    <title>Document</title>
+</head>
+<body>
+    <div class="container">
+        <div class="row mt-4 mb-3">
+            <div class="col-md-12">
+                <h3>List Dokumen Pegawai</h3>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-md-12">
+                <div class="table-responsive">
+                    <table class="table" id="data_table">
+                        <thead>
+                            <tr>
+                                <th>No</th>
+                                <th>Pegawai</th>
+				<th>No SK</th>
+                                <th>Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for profesi in data %}
+                            <tr>
+                                <td>{{forloop.counter}}</td>
+                                <td>{{profesi.pegawai.full_name}}</td>
+                                <td>
+                                {% if profesi.riwayatsipprofesi_set %}
+                                {% for item2 in profesi.riwayatsipprofesi_set.all %}
+                                    {% if item2.file_sip %}
+                                    {{item2.no_sip}}
+                                    {% else %}
+                                        No File
+                                        {% endif %}
+                                    {% endfor %}
+                                    {%else%}
+                                    N/A
+                                    {% endif %}
+
+                                </td>
+                                <td>
+                                    {% if profesi.riwayatsipprofesi_set %}
+                                    {% for item2 in profesi.riwayatsipprofesi_set.all %}
+                                        {% if item2.file_sip %}
+                                        <a class="btn btn-outline-primary" href="{{item2.file_sip.url}}">Download</a>
+                                        {% else %}
+                                        No File
+                                        {% endif %}
+                                    {% endfor %}
+                                    {%else%}
+                                    N/A
+                                    {% endif %}
+
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- jQuery -->
+    <script src="{% static 'plugins/jquery/jquery.min.js' %}"></script>
+    <script src="{% static 'plugins/datatables/jquery.dataTables.min.js' %}"></script>
+    <script src="{% static 'plugins/datatables-bs4/js/dataTables.bootstrap4.min.js' %}"></script>
+    <script src="{% static 'plugins/datatables-responsive/js/dataTables.responsive.min.js' %}"></script>
+    <script src="{% static 'plugins/datatables-responsive/js/responsive.bootstrap4.min.js' %}"></script>
+    <script src="{% static 'plugins/datatables-buttons/js/dataTables.buttons.min.js' %}"></script>
+    <script src="{% static 'plugins/datatables-buttons/js/buttons.bootstrap4.min.js' %}"></script>
+    <script src="{% static 'plugins/jszip/jszip.min.js' %}"></script>
+    <script src="{% static 'plugins/pdfmake/pdfmake.min.js' %}"></script>
+    <script src="{% static 'plugins/pdfmake/vfs_fonts.js' %}"></script>
+    <script src="{% static 'plugins/datatables-buttons/js/buttons.html5.min.js' %}"></script>
+    <script src="{% static 'plugins/datatables-buttons/js/buttons.print.min.js' %}"></script>
+    <script src="{% static 'plugins/datatables-buttons/js/buttons.colVis.min.js' %}"></script>
+    <script>
+        $(document).ready(function () {
+            $('#data_table').DataTable({
+                dom: 'Blfrtip',
+                buttons: [
+                    'copy', 'csv', 'excel', 'pdf'
+                ],
+                lengthMenu: [
+                    [10, 25, 50, -1],
+                    [10, 25, 50, 'All'],
+                ],
+            });
+        });
+    </script>
+</body>
+</html>

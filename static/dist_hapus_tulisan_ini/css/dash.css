@@ -1,0 +1,69 @@
+.container .dash .left-line {
+    display: block;
+    height: 1px;
+    width: 45%;
+    border: 0;
+    border-top: 1px solid #ccc;
+    margin-right: 1em;
+    padding: 0;
+}
+
+.container .dash .right-line {
+    display: block;
+    height: 1px;
+    width: 45%;
+    border: 0;
+    border-top: 1px solid #ccc;
+    margin-left: 1em;
+    margin-right: auto;
+    padding: 0;
+}
+
+.container .dash .btn-detail{
+    margin-bottom: 10px;
+}
+
+#card-nakes{
+    height:10rem; 
+    overflow:hidden;
+  }
+
+@media screen and (max-width: 1200px) {
+    #card-nakes{
+        height: 9rem;
+    }
+}
+
+@media screen and (max-width: 990px) {
+    #card-nakes{
+        height: 20rem;
+    }
+}
+
+@media only screen and (max-width: 768px) {
+    /* For mobile phones: */
+    .container .dash .left-line {
+        display: block;
+        height: 1px;
+        width: 20%;
+        border: 0;
+        border-top: 1px solid #ccc;
+        margin-right: 1em;
+        padding: 0;
+    }
+    
+    .container .dash .right-line {
+        display: block;
+        height: 1px;
+        width: 20%;
+        border: 0;
+        border-top: 1px solid #ccc;
+        margin-left: 1em;
+        margin-right: auto;
+        padding: 0;
+    }
+
+    #card-nakes{
+        height: 19rem;
+    }
+  }

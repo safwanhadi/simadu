@@ -1,0 +1,58 @@
+<div class="table table-responsive">
+    <table class="table" id="data_table">
+        <thead>
+            <tr>
+                <th>No</th>
+                <th>Pegawai</th>
+                <th>Penempatan</th>
+                <th>Nomor SK</th>
+                <th>Tanggal SK</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data %}
+            <tr>
+                <td>{{forloop.counter}}</td>
+                <td>{{item.pegawai.full_name}}</td>
+                <td>
+                    {% if item.penempatan_level1 %}
+                        {% if item.penempatan_level4 %}
+                        {{item.penempatan_level4}}
+                        {% elif item.penempatan_level3 %}
+                        {{item.penempatan_level3}}
+                        {% elif item.penempatan_level2 %}
+                        {{item.penempatan_level2}}
+                        {% elif item.penempatan_level1 %}
+                        {{item.penempatan_level1}}
+                        {% endif %}
+                    {% else %}
+                        {% if item.unit_sebelumnya %}
+                        {{item.unit_sebelumnya}}
+                        {% elif item.seksi_sebelumnya %}
+                        {{item.seksi_sebelumnya}}
+                        {% elif item.bidang_sebelumnya %}
+                        {{item.bidang_sebelumnya}}
+                        {% elif item.instansi_sebelumnya %}
+                        {{item.instansi_sebelumnya}}
+                        {% endif %}
+                    {% endif %}</td>
+                <td>{{item.no_sk}}</td>
+                <td>{{item.tgl_sk}}</td>
+                <td>
+                    {% if item.penempatan_level1 %}
+                        <a href="?nip={{item.pegawai.profil_user.nip}}" class="btn btn-primary"><i class="fas fa-user"></i></a>
+                        <a href="{% url 'riwayat_urls:riwayat_update_penempatan' id=item.id %}?f=1" class="btn btn-outline-info"><i class="fas fa-edit"></i></a>
+                        <a href="{% url 'riwayat_urls:riwayat_delete_penempatan' pk=item.id %}#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
+                    {% else %}
+                        <a href="?nip={{item.pegawai.profil_user.nip}}" class="btn btn-primary"><i class="fas fa-user"></i></a>
+                        <a href="{% url 'riwayat_urls:riwayat_update_penempatan_lainnya' pk=item.id %}" class="btn btn-outline-info"><i class="fas fa-edit"></i></a>
+                        <a href="{% url 'riwayat_urls:riwayat_delete_penempatan' pk=item.id %}#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+                    

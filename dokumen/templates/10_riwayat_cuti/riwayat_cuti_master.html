@@ -1,0 +1,127 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block cardtitle %}
+<strong>List Indikator Layanan</strong>
+{% endblock cardtitle %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex flex-row justify-content-between">
+                    <div class="d-flex flex-row mb-1">
+                        {% if update_form or request.user.is_superuser and nip %}
+                            <a href="{% url 'riwayat_urls:riwayat_cuti' %}" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
+                        {% endif %}
+                        <h5>Data Riwayat Cuti</h5>
+                    </div>
+                    {% if request.user.is_superuser %}
+                    <div>
+                        {% if not request.user.is_superuser %}
+                        <a href="{% url 'riwayat_urls:riwayat_cuti_urutkan' pk=dok.id %}" class="btn btn-outline-info">Urutkan Dokumen</a>
+                        {% elif nip %}
+                        <a href="{% url 'riwayat_urls:riwayat_cuti_urutkan' pk=dok.id %}?nip={{nip}}" class="btn btn-outline-info">Urutkan Dokumen</a>
+                        {% endif %}
+                        <input type="button" class="btn btn-outline-success" id="add_data" value="Tambah Data">
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row" id="form_data" style="display: {{form_view}};">
+                    <div class="col-md-12">
+                        <form method="post" enctype="multipart/form-data">
+                            {% csrf_token %}
+                            {{form | crispy}}
+                            <input type="submit" value="Simpan" class="btn btn-success">
+                        </form>
+                    </div>
+                </div>
+                <div class="row" id="list_data" style="display: {{data_view}};">
+                    <div class="col-md-12 border border-success border-block rounded p-2 mb-2" style="background-color: rgb(164, 233, 176);">
+                        {% if cek_sisa_cuti > 0 %}
+                            <span>
+                                Sisa cuti tahunan anda {{cek_sisa_cuti}} hari
+                                {% if cek_sisa_tunda_cuti > 0 %}
+                                    dan sisa cuti tertunda {{cek_sisa_tunda_cuti}} hari
+                                {% endif %}
+                            </span> 
+                        {% else %}
+                            <span>
+                                Jatah cuti tahunan anda sudah habis 
+                                {% if cek_sisa_tunda_cuti > 0 %}
+                                    dan sisa cuti tertunda {{cek_sisa_tunda_cuti}} hari
+                                {% endif %}
+                            </span>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-12">
+                        {% if nip %}
+                            {% include '10_riwayat_cuti/riwayat_cuti_perorang.html' %}
+                        {% elif request.user.is_superuser  %}
+                            {% include '10_riwayat_cuti/riwayat_cuti.html' %}
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+{% endblock %}
+
+
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+</script>
+
+<script>
+    const btn = document.getElementById('add_data');
+    
+    btn.addEventListener('click', () => {
+    const form = document.getElementById('form_data');
+    const data = document.getElementById('list_data');
+
+    if (form.style.display === 'none' && data.style.display === 'block') {
+        // 👇️ this SHOWS the form
+        form.style.display = 'block';
+        data.style.display = 'none';
+        btn.value="Lihat Data"
+      } else {
+        // 👇️ this HIDES the form
+        form.style.display = 'none';
+        data.style.display = 'block';
+        btn.value="Tambah Data"
+      }
+});
+</script>
+    
+{% endblock script %}

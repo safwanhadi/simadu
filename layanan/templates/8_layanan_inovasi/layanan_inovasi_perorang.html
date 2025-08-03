@@ -1,0 +1,72 @@
+<div class="card card-solid">
+    <div class="card-body pl-3 pb-0 pt-3 pr-2 bg-light">
+        <div class="row">
+            <div class="col-md-12">
+                <h6>Keterangan status:</h6>
+            </div>
+        </div>
+        {% include '8_layanan_inovasi/progress_indikator.html' %}
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="form-group row">
+            <div class="col-md-3">
+                NIP/NRK
+            </div>
+            <div class="col-md-9">
+                {{user.profil_user.nip}}
+            </div>
+        </div>
+        <div class="form-group row">
+            <div class="col-md-3">
+                Nama
+            </div>
+            <div class="col-md-9">
+                {{user.full_name}}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-12">
+        <div class="table table-responsive">
+            <table class="table" id="data_table">
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Bidang</th>
+                        <th>Judul Inovasi</th>
+                        <th>Status</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in data %}
+                    <tr>
+                        <td>{{forloop.counter}}</td>
+                        <td>{{item.inovasi.bidang}}</td>
+                        <td>{{item.inovasi.judul}}</td>
+                        <td>{% if item.status == 'usulan' %}
+                            <i class="fab fa-dochub" style="color: red;"></i>
+                            {% elif item.status == 'proses' %}
+                            <i class="far fa-hourglass" style="color: orange;"></i>
+                            {% elif item.status == 'tidak ditindaklanjut' %}
+                            <i class="fas fa-times" style="color: orange;"></i>
+                            {% elif item.status == 'tindaklanjut' %}
+                            <i class="fas fa-file-signature" style="color: greenyellow;"></i>
+                            {% elif item.status == 'selesai' %}
+                            <i class="far fa-calendar-check" style="color: blue;"></i>
+                            {% endif %}</td>
+                        <td>{% if item.status == 'usulan' %}
+                            <a style="font-size: small;" href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}" class="btn btn-outline-warning">Edit</a>
+                            {% else %}
+                            <a style="font-size: small;" href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=detail" class="btn btn-outline-primary">Detail</a>
+                            {% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>        
+    </div>
+</div>
+                    

@@ -1,0 +1,60 @@
+<div class="card card-solid">
+    <div class="card-body pl-3 pb-0 pt-3 pr-2 bg-light">
+        <div class="row">
+            <div class="col-md-12">
+                <h6>Keterangan status:</h6>
+            </div>
+        </div>
+        {% include '8_layanan_inovasi/progress_indikator.html' %}
+    </div>
+</div>
+
+<div class="col-md-12">
+    <div class="table table-responsive">
+        <table class="table" id="data_table">
+            <thead>
+                <tr>
+                    <th>No</th>
+                    <th>Pegawai</th>
+                    <th>Bidang</th>
+                    <th>Judul Inovasi</th>
+                    <th>Status</th>
+                    <th>Aksi</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in data %}
+                <tr>
+                    <td>{{forloop.counter}}</td>
+                    <td>{{item.pegawai.full_name_2}}</td>
+                    <td>{{item.inovasi.bidang}}</td>
+                    <td>{{item.inovasi.judul}}</td>
+                    <td>{% if item.status == 'usulan' %}
+                        <i class="fab fa-dochub" style="color: red;"></i>
+                        {% elif item.status == 'proses' %}
+                        <i class="far fa-hourglass" style="color: orange;"></i>
+                        {% elif item.status == 'tidak ditindaklanjut' %}
+                        <i class="fas fa-times" style="color: red;"></i>
+                        {% elif item.status == 'tindaklanjut' %}
+                        <i class="fas fa-file-signature" style="color: greenyellow;"></i>
+                        {% elif item.status == 'selesai' %}
+                        <i class="far fa-calendar-check" style="color: blue;"></i>
+                        {% endif %}</td>
+                        <td>
+                            {% if item.status == 'usulan' %}
+                            <a style="font-size: small;" href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=proses" class="btn btn-outline-danger">Proses</a>
+                            {% elif item.status == 'proses' %}
+                            <a style="font-size: small;" href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=tl" class="btn btn-outline-warning">Tindaklanjut</a>
+                            {% elif item.status == 'tindaklanjut' %}
+                            <a style="font-size: small;" href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=sk" class="btn btn-outline-success">Upload SK</a>
+                            {% else %}
+                            <a style="font-size: small;" href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=detail" class="btn btn-outline-primary">Detail</a>
+                            {% endif %}
+                        </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>        
+</div>
+                    

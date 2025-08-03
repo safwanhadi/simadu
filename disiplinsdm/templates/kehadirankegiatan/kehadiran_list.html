@@ -1,0 +1,152 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex flex-row justify-content-between">
+                    <div class="d-flex flex-row">
+                        <div>
+                            <a href="{{url}}"><i class="fas fa-chevron-left mr-3 pt-1" style="font-size:x-large;"></i></a>
+                        </div>
+                        <p class="h4">{{title}}</p>
+                    </div>
+                    {% if request.user.is_superuser %}
+                        <div>
+                            <a href="{% url 'disiplinsdm_urls:kehadiran_create' %}" class="btn btn-outline-primary">Tambah Kehadiran</a>
+                            <a href="{% url 'disiplinsdm_urls:kehadiran_upload_fingerprint' %}" class="btn btn-outline-secondary">Upload Fingerprint</a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-12">
+                            <div class="table table-responsive">
+                                <form method="get" id="filterForm">
+                                    <div class="form-group row">
+                                        <label class="col-md-3">Instalasi</label>
+                                        <div class="col-md-9">
+                                            <select name="inst" class="form-control" onchange="document.getElementById('filterForm').submit();">
+                                                <option value="">Semua Instalasi</option>
+                                                {% for instalasi in instalasi_list %}
+                                                <option value="{{instalasi.id}}" {% if instalasi.id|stringformat:"s" == request.GET.inst %}selected{% endif %}>{{instalasi.instalasi}}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="form-group row">
+                                        <label class="col-md-3">Bulan/Tahun</label>
+                                        <div class="col-md-9">
+                                            {% load tz %}
+                                            {% if request.GET.tanggal %}
+                                                {% with request.GET.tanggal as current_date %}
+                                                    <input type="date" name="tanggal" class="form-control"
+                                                        value="{{ current_date }}" onchange="document.getElementById('filterForm').submit();">
+                                                {% endwith %}
+                                            {% else %}
+                                                <input type="date" name="tanggal" class="form-control"
+                                                    value="{% now 'Y-m-d' %}" onchange="document.getElementById('filterForm').submit();">
+                                            {% endif %}
+                                            <small class="text-muted">Abaikan tanggal dalam form ini.</small>
+                                        </div>
+                                    </div>
+                                    
+                                </form>
+                                <table class="table" id="data_table">
+                                    <thead>
+                                        <tr>
+                                            <th>No</th>
+                                            <th>Nama Pegawai</th>
+                                            <th>Sub bidang/instalasi</th>
+                                            <th>Bulan/Tahun</th>
+                                            <th>Hadir</th>
+                                            <th>TK</th>
+                                            <th>Izin</th>
+                                            <th>Sakit</th>
+                                            <th>Aksi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for item in object_list %}
+                                        <tr>
+                                            <td>{{forloop.counter}}</td>
+                                            <td>{{item.pegawai.full_name}}</td>
+                                            <td>
+                                                {% if item.instalasi %}
+                                                    {{item.instalasi.instalasi}}
+                                                {% elif item.sub_bidang %}
+                                                    {{item.sub_bidang}}
+                                                {% elif item.bidang %}
+                                                    {{item.bidang}}
+                                                {% else %}
+                                                    {{item.unor}}
+                                                {% endif %}
+                                            </td>
+                                            <td>{{item.bulan | month_name}} {{item.tahun}}</td>
+                                            <td>{{item.jumlah_hadir}}</td>
+                                            <td>{{item.jumlah_tk}}</td>
+                                            <td>{{item.jumlah_izin}}</td>
+                                            <td>{{item.jumlah_sakit}}</td>
+                                            <td>
+                                                {% if request.user.is_superuser %}
+                                                <a href="{% url 'disiplinsdm_urls:kehadiran_update' pk=item.pk %}" class="btn btn-primary">add/edit</a>
+                                                <a href="{% url 'disiplinsdm_urls:kehadiran_detail_user' id=item.pk %}" class="btn btn-info">detail</a>
+                                                {% else %}
+                                                <a href="{% url 'disiplinsdm_urls:kehadiran_detail_user' id=item.pk %}" class="btn btn-info">detail</a>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>    
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+{% endblock %}
+
+
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+
+    $(document).ready(function() {
+        $('.sdm').select2();
+        selectOnClose: true
+    });
+</script>
+ 
+{% endblock script %}

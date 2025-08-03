@@ -1,0 +1,7 @@
+Catatan perubahan:
+- Penambahan field tahun di LayananCuti
+- Menghapus tahun di RiwayatCuti (terdampak semua nilai tahun di admin, form layanancuti dan form riwayatcuti dihapus)
+- Menambahkan nilai default di status_cuti di mode RiwayatCuti
+- menghapus field cuti (foreign key dari riwayatcuti) dari model layanancuti
+- menambahkan field usulan (foreign key dari layanancuti) di model riwayatcuti
+- Pergantian inlineformset_cuti dari semula riwayatcuti jadi parent menjadi layanancuti sebagai parent 

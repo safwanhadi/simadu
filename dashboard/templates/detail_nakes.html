@@ -1,0 +1,90 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block styles %}
+<link rel="stylesheet" href="{% static 'dist/css/dash.css'%}">
+{% endblock styles %}
+
+{% block breadcrumb %}
+<div class="col-sm-6">
+    <ol class="breadcrumb float-sm-right">
+      <li class="breadcrumb-item"><a href="{% url 'dashboard_urls:dashboard_view' %}">{{page}}</a></li>
+      {% if sub_page %}
+      <li class="breadcrumb-item"><a href="#">{{sub_page}}</a></li>
+      {% endif %}
+      {% if title_page %}
+      <li class="breadcrumb-item active"><a href="#">{{title_page}}</a></li>
+      {% endif %}
+    </ol>
+  </div>
+{% endblock breadcrumb %}
+
+{% block cardtitle %}
+{% endblock cardtitle %}
+
+{% block content %}
+    <div class="container">
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card card-solid">
+                    <div class="card-header d-flex flex-row"><a href="{% url 'dashboard_urls:dashboard_view' %}"><i class="fas fa-arrow-left ml-2 mr-2" style="cursor: pointer; font-size:20px;"></i></a><h5>Detail {{jenissdm.jenis_sdm}}</h5></div>
+                    <div class="card-body">
+                        <div class="mb-3">{% include 'dashboard_nav.html' %}</div>
+                        <table class="table data_table">
+                            <thead>
+                                <tr>
+                                    <th>No</th>
+                                    <th>Nama</th>
+                                    <th>Penempatan</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in data %}
+                                <tr>
+                                    <td>{{forloop.counter}}</td>
+                                    <td>{{item.pegawai.full_name}}</td>
+                                    <td>
+                                        {% if item.pegawai.penempatan_aktif %}
+                                            {{ item.pegawai.penempatan_aktif.0.penempatan_level4.instalasi }}  <!-- riwayat penempatan terakhir -->
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+{% endblock %}
+
+
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('.data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+</script>
+
+    
+{% endblock script %}

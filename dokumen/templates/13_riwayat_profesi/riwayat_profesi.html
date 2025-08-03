@@ -1,0 +1,39 @@
+<div class="table table-responsive">
+    <table class="table" id="data_table">
+        <thead>
+            <tr>
+                <th>No</th>
+                <th>Pegawai</th>
+                <th>Profesi</th>
+                <th>No STR</th>
+                <th>Tanggal STR</th>
+                <th>File STR</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data_str %}
+            <tr>
+                <td>{{forloop.counter}}</td>
+                <td>{{item.pegawai.full_name}}</td>
+                <td>{{item.profesi}}</td>
+                <td>{{item.no_str}}</td>
+                <td>{{item.tgl_str}}</td>
+                <td>
+                    {% if item.file_str %}
+                    <a href="{{item.file_str.url}}"><i class="fas fa-file-download"></i></a>
+                    {% else %}
+                    <i class="fas fa-times" style="font-weight: bold; color:red"></i>
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="{% url 'riwayat_urls:riwayat_update_profesi' id=item.id %}" class="btn btn-primary"><i class="fas fa-edit"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_delete_profesi' pk=item.id %}#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_sipprofesi' id=item.id %}" class="btn btn-info">Tambah SIP</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+                    

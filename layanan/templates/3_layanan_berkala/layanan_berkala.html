@@ -1,0 +1,92 @@
+<div class="card card-solid">
+    <div class="card-body pl-3 pb-0 pt-3 pr-2 bg-light">
+        <div class="row">
+            <div class="col-md-12">
+                <h6>Keterangan status:</h6>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-md-3">
+                <div class="form-group row">
+                    <label class= "col-md-4" style="font-size: smaller;" for="symbol_1">Draft</label>
+                    <div class="col-md-8"><i class="fab fa-dochub" style="color: red;"></i></div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group row">
+                    <label class= "col-md-4" style="font-size: smaller;" for="symbol_2">Usulan</label>
+                    <div class="col-md-8"><i class="far fa-hourglass" style="color:rgb(255, 213, 0);"></i></div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group row">
+                    <label class= "col-md-6" style="font-size: smaller;" for="symbol_3">Pengesahan</label>
+                    <div class="col-md-6"><i class="fas fa-mug-hot" style="color: greenyellow;"></i></div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group row">
+                    <label class= "col-md-4" style="font-size: smaller;" for="symbol_4">Selesai</label>
+                    <div class="col-md-8"><i class="far fa-calendar-check" style="color: blue;"></i></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="table table-responsive">
+    <table class="table" id="data_table">
+        <thead>
+            <tr>
+                <th>No</th>
+                <th>Nama Pegawai</th>
+                <th>Riwayat Berkala</th>
+                <th>Berkala Saat Ini</th>
+                <th>Status</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data %}
+            <tr>
+                <td>{{forloop.counter}}</td>
+                <td>
+                    {{item.pegawai.full_name}}
+                </td>
+                <td>{{item.riwayat.tmt_gaji}}</td>
+                {% if item.berkala %}
+                <td>{{item.berkala.tmt_gaji}}</td>
+                {% elif item.status == 'belum' %}
+                <td style="color:red;">Belum diproses</td>
+                {% else %}
+                <td style="color:orange;">Sedang diproses</td>
+                {% endif %}
+                <td>{% if item.status == 'belum' %}
+                    <i class="fab fa-dochub" style="color: red;"></i>
+                    {% elif item.status == 'pengajuan' %}
+                    <i class="far fa-hourglass" style="color: orange;"></i>
+                    {% elif item.status == 'proses' %}
+                    <i class="fas fa-mug-hot" style="color: greenyellow;"></i>
+                    {% elif item.status == 'selesai' %}
+                    <i class="far fa-calendar-check" style="color: blue;"></i>
+                    {% endif %}</td>
+                <td>{% if item.status == 'belum' %}
+                    <a style="font-size: small;" href="{% url 'layanan_urls:layanan_berkala_update_view' id=item.id %}" class="btn btn-outline-warning">Edit</a>
+
+                    {% elif item.status == 'pengajuan' and request.user.is_superuser %}
+                        <a class="btn btn-outline-primary" href="{% url 'layanan_urls:layanan_berkala_admin_view' layanan_id=item.id nip=item.pegawai.profil_user.nip %}" style="font-size: small;">Proses</a>
+
+                    {% elif item.status == 'proses' and request.user.is_superuser %}
+                        <a class="btn btn-outline-info" href="{% url 'file_urls:berkala_docx' layanan_id=item.id %}" style="font-size: small;">Draf Berkala</a>
+                        <a class="btn btn-outline-success" href="{% url 'layanan_urls:layanan_berkala_admin_upload_view' berkala_id=item.berkala.id layanan_id=item.id nip=item.pegawai.profil_user.nip %}" style="font-size: small;">Upload File</a>
+
+                    {% elif item.status == 'selesai' %}
+                    <a class="btn btn-outline-secondary" href="{% url 'layanan_urls:layanan_berkala_admin_view' layanan_id=item.id nip=item.pegawai.profil_user.nip %}" style="font-size: small;">Detail</a>
+                    <a class="btn btn-outline-success" href="{{ item.berkala.file.url }}" style="font-size: small;">Unduh Berkala</a>
+                    {% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+                    

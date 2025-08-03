@@ -1,0 +1,68 @@
+{% extends '11_riwayat_diklat/riwayat_diklat.html' %}
+
+{% block button %}
+    <a href="{% url 'riwayat_urls:riwayat_diklat_create' %}" class="btn btn-outline-primary">Tambah Riwayat</a>
+    {% if request.user.is_staff %}
+    <a href="{% url 'riwayat_urls:riwayat_diklat' %}" class="btn btn-outline-info">Diklat Pegawai</a>
+    {% endif %}
+{% endblock %}
+
+{% block child_content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="form-group row">
+            <label class="col-2">Nama</label>
+            <div class="col-10">{{data.full_name}}</div>
+        </div>
+        <div class="form-group row">
+            <label class="col-2">NIP/NRK</label>
+            <div class="col-10">{{data.profil_user.nip}}</div>
+        </div>
+    </div>
+    <div class="col-md-12">
+        <div class="table table-responsive">
+            <table class="table" id="data_table">
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Jenis Diklat</th>
+                        <th>Nama Diklat</th>
+                        <th>Penyelenggara</th>
+                        <th>No Sertifikat</th>
+                        <th>Tanggal Mulai</th>
+                        <th>Tanggal Selesai</th>
+                        <th>File Sertifikat</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in data.riwayatdiklat_set.all %}
+                    <tr>
+                        <td>{{forloop.counter}}</td>
+                        <td>{{item.jenis_diklat}}</td>
+                        <td>{{item.nama_diklat}}</td>
+                        <td>{{item.penyelenggara}}</td>
+                        <td>{{item.no_sertifikat}}</td>
+                        <td>{{item.tgl_mulai}}</td>
+                        <td>{{item.tgl_selesai}}</td>
+                        <td>
+                            {% if item.file %}
+                            <a href="{{item.file.url}}"><i class="fas fa-file-download"></i></a>
+                            {% else %}
+                            <i class="fas fa-times" style="font-weight: bold; color:red"></i>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="?nip={{item.pegawai.profil_user.nip}}" class="btn btn-primary"><i class="fas fa-user"></i></a>
+                            <a href="{% url 'riwayat_urls:riwayat_update_diklat' id=item.id %}" class="btn btn-primary"><i class="fas fa-edit"></i></a>
+                            <a href="{% url 'riwayat_urls:riwayat_delete_diklat' pk=item.id %}#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+    
+{% endblock %}

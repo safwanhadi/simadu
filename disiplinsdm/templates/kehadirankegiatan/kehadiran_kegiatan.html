@@ -1,0 +1,49 @@
+{% load template_tags %}
+{% load crispy_forms_tags %}
+<div class="col-md-12">
+    {% if request.user.is_superuser %}
+    <div class="row">
+        <div class="col-md-12">
+            <div class="row d-flex">
+                <div class="col-md-6">
+                    <form method="get">
+                        <div class="form-group row d-flex justify-content-between">
+                            <input type="hidden" name="keg" class="form-control" required value="{{kegiatan.slug}}">
+                            <div class="col-md-6">
+                                <input type="date" name="tanggal" class="form-control" required value="{{tanggal}}" onchange="this.form.submit();">
+                                <small id="passwordHelpInline" class="text-muted">
+                                    Pastikan bulan sudah sesuai
+                                </small>
+                            </div>
+                            <div class="col-md-6">
+                                <select name="sdm" class="form-control sdm" onchange="this.form.submit();">
+                                    {% if pegawai %}
+                                    <option value="{{pegawai.profil_user.nip}}">{{pegawai.full_name}}</option>
+                                    {% else %}
+                                    <option value="">---Pilih Pegawai---</option>
+                                    {% endif %}
+                                    {% for item in data %}
+                                    <option value="{{item.profil_user.nip}}">{{item.full_name}}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="col-md-6 justify-content-start">
+                    <form method="post">
+                        {% csrf_token %}
+                        {{form|crispy}}
+                        {% if pegawai %}
+                        <input type="submit" value="Submit" class="btn btn-outline-primary">
+                        {% else %}
+                        <input type="submit" value="Submit" class="btn btn-outline-primary" disabled>
+                        {% endif %}
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    {% include 'kehadirankegiatan/list_kehadiran_pegawai.html' %}
+</div>

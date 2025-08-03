@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <strong>Tambah Data</strong>
+    </div>
+    <div class="card-body">
+        <div class="tab-content m-3 mt-2" id="myTabContent">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                {{form | crispy}}
+                <input type="submit" value="Simpan" class="btn btn-success">
+            </form>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

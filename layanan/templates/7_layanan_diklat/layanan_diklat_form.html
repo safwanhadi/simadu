@@ -1,0 +1,36 @@
+{% extends '7_layanan_diklat/layanan_diklat.html' %}
+{% load crispy_forms_tags %}
+
+{% block button %}
+    {% if request.user.is_staff and not request.user.is_superuser %}
+    <a class="btn btn-outline-primary" href="{% url 'layanan_urls:layanan_diklat_staf_view' %}">Diklat Staf</a>
+    {% endif %}
+    <a class="btn btn-outline-info" href="{% url 'layanan_urls:layanan_diklat_list_view' %}">{% if request.user.is_superuser %} Riwayat Diklat {% else %} Diklatku {% endif %}</a>
+{% endblock %}
+
+{% block child_content %}
+{{ form.media }}
+<form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {{ riwayat_form.management_form }}
+        {% for item_form in riwayat_form %}
+            {{ item_form | crispy }}
+            {% for obj in item_form.pegawai.all %}
+                <input type="text" name="pegawai" value="{{ obj.id }}">
+            {% endfor %}
+        {% endfor %}
+    {{form | crispy}}
+    <input type="submit" value="Simpan" class="btn btn-success">
+</form>
+                            
+{% endblock %}
+
+{% block script %}
+<script>
+    $(document).ready(function(){
+        $('.pegawai').hide();
+        $('.select2').select2();
+    });
+</script>
+
+{% endblock script %}

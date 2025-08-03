@@ -1,0 +1,122 @@
+{% load crispy_forms_tags %}
+<div class="card card-solid">
+    <div class="card-body pl-3 pb-0 pt-3 pr-2 bg-light">
+        <div class="row">
+            <div class="col-md-12">
+                <h6>Keterangan status:</h6>
+            </div>
+        </div>
+        {% include '8_layanan_inovasi/progress_indikator.html' %}
+    </div>
+</div>
+{% if case == 'proses' %}
+    <div class="row">
+        <div class="col-md-12 text-center">
+            <button class="btn btn-outline-success p-5" style="font-size: larger;">Unduh draft surat permohonan</button>
+            {% if data_detail.inovasi.makalah %}
+                <a href="{{data_detail.inovasi.makalah.url}}" class="btn btn-outline-success p-5" style="font-size: larger;">Unduh makalah</a>
+            {% else %}
+                <button class="btn btn-danger p-5" style="font-size: larger;" disabled>Makalah belum diupload</button>
+            {% endif %}
+        </div> 
+        <div class="col-md-12 text-center pt-5">
+            <span>Klik Tombol Verifikasi Usulan untuk konfirmasi kepada <span style="font-weight: bold; color:blue;">{{data_detail.pegawai.full_name}}</span> bahwa usulannya akan dilakukan proses verifikasi untuk menentukan apakah usulan akan ditindaklanjut atau tidak</span><br><br>
+            <form method="post">
+                <div class="d-flex justify-content-center">
+                    {% csrf_token %}
+                    {{form | crispy}}
+                    {{riwayat_form | crispy}}
+                </div>
+                <button class="btn btn-outline-primary" type="submit">Verifikasi Usulan &nbsp;&nbsp; <i class="fas fa-fast-forward"></i></button>
+            </form>
+        </div>  
+    </div>
+{% elif case == 'tl' %}
+    <div class="row">
+        <div class="col-md-12 text-center">
+            <a href="{% url 'file_urls:format_penilaian_inovasi_docx' layanan_id=data_detail.id %}" class="btn btn-outline-info p-5" style="font-size: larger;" >Unduh Lembar Penilaian</a>
+        </div> 
+        <div class="col-md-12 text-center pt-5">
+            <span>Klik Tombol Tindaklanjut Penilaian untuk konfirmasi kepada <span style="font-weight: bold; color:blue;">{{data_detail.pegawai.full_name}}</span> bahwa usulannya akan ditindaklanjut ke tahap penilian atau tidak</span><br><br>
+            <form method="post">
+                {% csrf_token %}
+                {{form | crispy}}
+                {{riwayat_form | crispy}}
+                <button class="btn btn-outline-primary" type="submit">Tindaklanjut Penilaian &nbsp;&nbsp; <i class="fas fa-fast-forward"></i></button>
+            </form>
+        </div>  
+    </div>
+    {% elif case == 'sk' %}
+    <div class="row">
+        <div class="col-md-12">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                {{form | crispy}}
+                {{ form.management_form }}
+                {{riwayat_form | crispy}}
+                <input type="submit" value="Simpan" class="btn btn-success">
+            </form>
+        </div>
+    </div>
+    {% elif case == 'detail' %}
+    <div class="row">
+        <div class="col-md-12 mt-4">
+            <div class="row pl-3 pr-3">
+                <div class="col-md-6">
+                    <div class="row">
+                        <div class="col-md-4 text-bold">Pegawai</div>
+                        <div class="col-md-8">: {{data_detail.pegawai.full_name}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Bidang</div>
+                        <div class="col-md-8">: {{data_detail.inovasi.bidang}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Judul Inovasi</div>
+                        <div class="col-md-8">: {{data_detail.inovasi.judul}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Tgl Sertifikat</div>
+                        <div class="col-md-8">: {{data_detail.inovasi.tanggal}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">No Sertifikat</div>
+                        <div class="col-md-8">: {{data_detail.inovasi.no_sk}}</div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Status Inovasi</div>
+                        <div class="col-md-8">: {{data_detail.status}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Keterangan</div>
+                        <div class="col-md-8">: </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Makalah</div>
+                        {% if data_detail.inovasi.makalah %}
+                            <div class="col-md-8">: <a href="{{data_detail.makalah.url}}"><i class="fas fa-file-word"></i> Download Makalah</a></div>
+                        {% else %}
+                        <div class="col-md-8">: <span>Belum ada file</span></div>
+                        {% endif %}
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">SK</div>
+                        {% if data_detail.inovasi.file_sk %}
+                            <div class="col-md-8">: <a href="{{data_detail.file_sk.url}}"><i class="fas fa-file-word"></i> Download SK</a></div>
+                        {% else %}
+                        <div class="col-md-8">: <span>Belum ada file</span></div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% if request.user.is_superuser %}
+        <div class="col-md-12 d-flex justify-content-start ml-3 mt-3">
+            <a style="font-size: small;" href="{% url 'layanan_urls:layanan_inovasi_update_view' id=data_detail.id %}" class="btn btn-outline-info">Edit</a>
+        </div>
+        {% endif %}
+    </div>
+{% endif %}
+                    

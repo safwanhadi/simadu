@@ -1,0 +1,45 @@
+<ul>
+    {% if file_kepeg.profil.file_ktp %}
+    <li><a href="{{file_kepeg.profil.file_ktp.url}}">KTP</a></li>
+    {% endif %}
+    {% if file_kepeg.profil.file_npwp %}
+    <li><a href="{{file_kepeg.profil.file_npwp.url}}">NPWP</a></li>
+    {% endif %}
+    {% if file_kepeg.profil.file_jkn %}
+    <li><a href="{{file_kepeg.profil.file_jkn.url}}">Kartu JKN</a></li>
+    {% endif %}
+    {% if file_kepeg.profil.file_taspen %}
+    <li><a href="{{file_kepeg.profil.file_taspen.url}}">BPJS Tenaga Kerja/Taspen</a></li>
+    {% endif %}
+    {% if file_kepeg.pendidikan.file_ijazah %}
+    <li><a href="{{file_kepeg.pendidikan.file_ijazah.url}}">Ijazah Terakhir</a></li>
+    {% endif %}
+    {% if file_kepeg.pendidikan.file_transkrip %}
+    <li><a href="{{file_kepeg.pendidikan.file_transkrip.url}}">Transkrip Terakhir</a></li>
+    {% endif %}
+    {% if file_kepeg.panggol.file %}
+    <li><a href="{{file_kepeg.panggol.file.url}}">SK KP Terakhir</a></li>
+    {% endif %}
+    {% if file_kepeg.pengangkatan_cpns.file_sk %}
+    <li><a href="{{file_kepeg.pengangkatan_cpns.file_sk.url}}">SK CPNS</a></li>
+    {% endif %}
+    {% if file_kepeg.pengangkatan.file_sk %}
+    <li><a href="{{file_kepeg.pengangkatan.file_sk.url}}">SK Pengangkatan ASN/Non ASN</a></li>
+    {% endif %}
+    {% if file_kepeg.pengangkatan.file_spmt %}
+    <li><a href="{{file_kepeg.pengangkatan.file_spmt.url}}">SPMT</a></li>
+    {% endif %}
+    {% if file_kepeg.pengangkatan.file_latsar %}
+    <li><a href="{{file_kepeg.pengangkatan.file_latsar.url}}">Latsar</a></li>
+    {% endif %}
+    {% if file_kepeg.pengangkatan.file_karpeg %}
+    <li><a href="{{file_kepeg.pengangkatan.file_karpeg.url}}">Karpeg</a></li>
+    {% endif %}
+    {% if file_kepeg.penempatan.file %}
+    <li><a href="{{file_kepeg.penempatan.file.url}}">SK Penempatan</a></li>
+    {% endif %}
+    {% if file_kepeg.berkala.file %}
+    <li><a href="{{file_kepeg.berkala.file.url}}">SK Gaji Berkala</a></li>
+    {% endif %}
+
+</ul>

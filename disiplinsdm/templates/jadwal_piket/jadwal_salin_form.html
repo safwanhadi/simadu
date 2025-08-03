@@ -1,0 +1,182 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex flex-row justify-content-between">
+                    <div class="d-flex flex-row mb-1">
+                        <div>
+                            <a href="{{url}}"><i class="fas fa-chevron-left mr-3 pt-1" style="font-size:x-large;"></i></a>
+                        </div>
+                        <p class="h4">{{title}}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-12">
+                        <form method="get">
+                            <div class="row d-flex">
+                                <div class="col-md-5">
+                                    <div class="form-group">
+                                        <label for="sumber" class="col-12">Sumber Data</label>
+                                        <div class="col-12">
+                                            <select name="sumber" class="form-control sdm" onchange="this.form.submit();" style="width: 100%;">
+                                                {% if selected_sumber %}
+                                                <option value="{{selected_sumber.pk}}">{{selected_sumber.full_name}}</option>
+                                                {% else %}
+                                                <option value="">---Pilih Pegawai---</option>
+                                                {% endif %}
+                                                {% for item in users %}
+                                                <option value="{{item.pk}}">{{item.full_name}}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="d-flex flex-column justify-content-center align-item-end m-2">
+                                    <span><i class="fas fa-exchange-alt fa-2x"></i></span>
+                                </div>
+                                <div class="col-md-5">
+                                    <div class="form-group">
+                                        <label for="sumber" class="col-12">Tujuan Data</label>
+                                        <div class="col-12">
+                                            <select name="tujuan" class="form-control sdm" onchange="this.form.submit();" style="width: 100%;">
+                                                {% if selected_tujuan %}
+                                                <option value="{{selected_tujuan.pk}}">{{selected_tujuan.full_name}}</option>
+                                                {% else %}
+                                                <option value="">---Pilih Pegawai---</option>
+                                                {% endif %}
+                                                {% for user in users %}
+                                                <option value="{{user.pk}}">{{user.full_name}}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-12">
+                                    <small class="text-muted">Pastikan instalasi <strong>sumber data</strong> dan <strong>tujuan data</strong> sama terlebih dahulu agar tidak terjadi kesalahan unit/instalasi saat pembuatan jadwal</small>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-12">
+                        <ul class="{% if selected_sumber and not selected_instalasi or selected_jadwal and selected_tujuan %}text-danger border border-danger rounded pt-2 pb-2 mt-2 mb-2{% endif %}">
+                            {% if selected_sumber and not selected_instalasi %}
+                                <li>Pegawai sumber data belum mendapatkan penempatan di Sistem ini, <a href="{% url 'riwayat_urls:riwayat_penempatan' %}" class="btn btn-outline-secondary">klik disini</a> untuk menambahkan riwayat Penempatan terkini</li>
+                            {% endif %}
+                            {% if selected_tujuan and selected_jadwal %}
+                                <li>Pegawai tujuan telah memiliki jadwal di bulan ini, <a href="{% url 'disiplinsdm_urls:jadwal_list' %}" class="btn btn-outline-secondary btn-small">klik disini</a> untuk melihat jadwal yang dimaksud</li>
+                            {% endif %}
+                        </ul>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-12">
+                        <form method="post" enctype="multipart/form-data">
+                            {% csrf_token %}
+                            {{ form|crispy }}
+                            
+                            <div style="display: flex; justify-content:flex-end;">
+                                <button class="btn btn-primary" style="margin-right: 10px;" type="submit">Simpan</button>
+                                <button class="btn btn-danger" style="margin-right: 10px;" type="button" onclick="window.location.href='{{url}}'">Batal</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+{% endblock %}
+
+
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+
+    $(document).ready(function() {
+        $('.sdm').select2();
+        selectOnClose: true
+    });
+</script>
+
+<script>
+    $(document).ready(function(){
+        $('.pegawai').hide();
+    });
+</script>
+
+<script>
+    $(document).ready(function() {
+        $('.sdm').select2({
+            placeholder: 'Cari Pegawai...',
+            minimumInputLength: 3,
+            ajax: {
+                url: "{% url 'myaccount_urls:ajax_pegawai_autocomplete' %}",
+                dataType: 'json',
+                delay: 250,
+                cache: false,  // ⛔ Nonaktifkan cache
+                data: function (params) {
+                    return {
+                        term: params.term, // keyword pencarian
+                    };
+                },
+                processResults: function (data) {
+                    return {
+                        results: data.results
+                    };
+                },
+            },
+
+            // Tambahan debugging (opsional)
+            escapeMarkup: function (markup) {
+                return markup;
+            },
+            templateSelection: function (data) {
+                return data.text;
+            },
+                allowClear: true 
+        });
+        // Tambahan untuk cek hasil final terpilih (opsional)
+        //$('#id_kode_barang').on('select2:select', function (e) {
+        //    console.log("Selected ID:", e.params.data.id);
+        //    console.log("Selected Text:", e.params.data.text);
+        //    console.log("Current value from select2('data'):", $('#id_kode_barang').select2('data'));
+        //});
+    });
+</script>
+
+{% endblock script %}

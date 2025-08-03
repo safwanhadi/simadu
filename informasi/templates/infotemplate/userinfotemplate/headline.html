@@ -1,0 +1,66 @@
+{% load static %}
+{% load humanize %}
+<div class="row mb-5 headline-container">
+    <div class="col-md-9 headline">
+        <div class="row">
+            <div class="content col-md-12 p-3">
+                <h1 style="font-family: 'Tempus Sans ITC', sans-serif; color:#02b9fc; " >{{headline.judul}}</h1>
+                <div class="col-md-12">
+                    <div class="user-panel mt-3 pb-3 mb-3 d-flex">
+                        <div class="mt-2">
+                            {% if headline.author.profil_user.foto %}
+                            <img src="{{headline.author.profil_user.foto.url}}" class="img-circle elevation-2" alt="User Image" height="80" width="80">
+                            {% else %}
+                            <img src="{% static 'dist/img/avatar5.png' %}" class="img-circle elevation-2" alt="User Image" height="80" width="80">
+                            {% endif %}
+                        </div>
+                        <div class="info">
+                            <span class="d-block">{{headline.author.first_name}} {{headline.author.last_name}}</span>
+                            <span>{{headline.created_at|naturaltime}}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="headline-image-container mb-3">
+                    {% if headline.gambar %}
+                        <img src="{{headline.gambar.url}}" alt="image" class="headline-image">
+                    {% else %}
+                        <img src="{% static '/img/picture_logo.png' %}" alt="image" height="200" width="200" >
+                    {% endif %}
+                </div>
+                <div class="headline-crop-content mb-3">
+                    {{headline.isi|safe}}
+                </div>
+                <a href="{% url 'informasi_urls:informasi_view' slug=headline.slug %}?case=detail" class="btn btn-outline-primary">Lanjutkan baca...</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 hot">
+        <!-- <h3 style="border-bottom: 3px solid black; padding-bottom:5px;">Informasi Terpopuler</h3> -->
+        <div class="row">
+            <div class="col-md-12 d-flex justify-content-start" style="padding-left: 1rem; padding-right:1rem;">
+                <div class="col-md-12">
+                    <h3 class="art-text">Info Populer</h3>
+                    <hr style="width:100%; height: 5px; border:0; background: linear-gradient(to right, #02b9fc, #c4e9ff);">
+                </div>
+            </div>
+        </div>
+        {% for item in info_populer %}
+        <a href="{% url 'informasi_urls:informasi_view' slug=item.slug %}?case=detail">
+            <div class="row mt-3" style="display: flex; flex-direction:column; gap:5px;">
+                <div class="col-md-12">
+                    <div class="informasi-card">
+                        <h4 class="card-crop-content">{{item.judul}}</h4>
+                        <h6 style="color: #404040;">{{item.kategori}}</h6>
+                        <div class="headline-crop-content mt-2">
+                            {{item.isi|safe}}
+                        </div>
+                        <div class="info-view">
+                        <span><i class="far fa-grin-hearts"></i> {{item.hit_count.hits}} view</span> 
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+</div>

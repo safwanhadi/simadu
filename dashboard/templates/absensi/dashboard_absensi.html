@@ -1,0 +1,218 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+  {{ title_page }}
+{% endblock %}
+
+{% block styles %}
+  <link rel="stylesheet" href="{% static 'dist/css/dash.css' %}">
+{% endblock %}
+
+{% block cardtitle %}
+{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-md-12 rounded mb-3">
+      <div class="row d-flex justify-content-end mr-3">
+          <div class="mb-2">
+              <form method="get">
+                  <div class="d-flex flex-row">
+                      <select name="periode" class="form-control ml-2 mr-2">
+                          <option value="bulanan" {% if periode == 'bulanan' %}selected{% endif %}>Bulanan</option>
+                          <option value="harian" {% if periode == 'harian' %}selected{% endif %}>Harian</option>
+                      </select>
+                      {% if periode == 'bulanan' %}
+                        <select name="bulan" class="form-control ml-2 mr-2">
+                          <option value="">--- Bulan ---</option>
+                          {% for value, label in bulan_list %}
+                              <option value="{{ value }}" {% if request.GET.bulan == value|stringformat:"s" %}selected{% endif %}>
+                                  {{ label }}
+                              </option>
+                          {% endfor %}
+                      </select>
+
+                      <select name="tahun" class="form-control mr-2">
+                          <option value="">--- Tahun ---</option>
+                          {% for t in tahun_list %}
+                              <option value="{{ t }}" {% if request.GET.tahun == t|stringformat:"s" %}selected{% endif %}>{{ t }}</option>
+                          {% endfor %}
+                      </select>
+                      {% else %}
+                        <input type="date" name="tgl" class="form-control ml-2 mr-2" value="{{ request.GET.tgl|default:kemarin_string }}"/>
+                      {% endif %}
+                      <div class="ml-2"><button class="btn btn-outline-info btn-sm">Tampilkan</button></div>
+                  </div>
+              </form>
+          </div>
+      </div>
+  </div>
+</div>
+<div class="row text-center mb-4">
+  {% for stat in statistik_kehadiran %}
+  <div class="col">
+    <div class="card bg-{{ stat.color }} bg-opacity-50">
+      <div class="card-body">
+        <h5>{{ stat.label }}</h5>
+        <h3>{{ stat.jumlah }}</h3>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% if periode == 'harian' %}
+  {% include 'absensi/absensi_harian.html' %}
+{% else %}
+  {% include 'absensi/absensi_bulanan.html' %}
+{% endif %}
+
+<h5 class="mt-5">Instalasi dengan Persentase Kehadiran Pegawai Tertinggi</h5>
+<canvas id="instalasiChart" height="80"></canvas>
+
+<h5 class="mt-5">Instalasi dengan TK dan Keterlambatan Pegawai Terbanyak</h5>
+<canvas id="instalasiTKChart" height="80"></canvas>
+{% endblock %}
+
+{% block script %}
+<!-- Chart: Persentase Kehadiran per Instalasi -->
+<script>
+  new Chart(document.getElementById("instalasiChart"), {
+    type: 'bar',
+    data: {
+      labels: {{ chart_instalasi_hadir_labels|safe }},
+      datasets: [{
+        label: 'Persentase Kehadiran',
+        data: {{ chart_instalasi_hadir_data|safe }},
+        backgroundColor: 'rgba(54, 162, 235, 0.7)'
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              return context.parsed.y + '%';
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          ticks: {
+            callback: function(value) {
+              return value + '%';
+            }
+          },
+          title: {
+            display: true,
+            text: 'Persentase (%)'
+          },
+          beginAtZero: true,
+          max: 100
+        }
+      }
+    }
+  });
+</script>
+
+<!-- Chart: Jumlah TK & Terlambat per Instalasi -->
+<script>
+  const dataLabels = {{ chart_instalasi_labels|safe }};
+  const dataTK = {{ chart_instalasi_tk_data|safe }};
+  const dataTerlambat = {{ chart_instalasi_terlambat_data|safe }};
+
+  new Chart(document.getElementById("instalasiTKChart"), {
+    type: 'bar',
+    data: {
+      labels: dataLabels,
+      datasets: [
+        {
+          label: 'Tidak Hadir',
+          data: dataTK,
+          backgroundColor: 'rgba(255, 99, 132, 0.7)'
+        },
+        {
+          label: 'Terlambat',
+          data: dataTerlambat,
+          backgroundColor: 'rgba(255, 159, 64, 0.7)'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        tooltip: { mode: 'index', intersect: false },
+        legend: { position: 'top' }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: {
+            display: true,
+            text: 'Jumlah Pegawai'
+          }
+        }
+      }
+    }
+  });
+</script>
+
+<!-- Chart: Top 10 Disiplin -->
+<script>
+  new Chart(document.getElementById("topDisiplinChart"), {
+    type: 'horizontalBar',
+    data: {
+      labels: {{ top_disiplin_labels|safe }},
+      datasets: [{
+        label: 'Tepat Waktu',
+        data: {{ top_disiplin_data|safe }},
+        backgroundColor: 'rgba(75, 192, 192, 0.7)'
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: {
+        legend: { display: false }
+      }
+    }
+  });
+</script>
+
+<!-- Chart: Top 10 Malas -->
+<script>
+  const pemalasData = {{ top_malas_data|safe }};
+  const pemalasLabels = {{ top_malas_labels|safe }};
+  new Chart(document.getElementById("topMalasChart"), {
+    type: 'horizontalBar',
+    data: {
+      labels: pemalasLabels,
+      datasets: [
+        {
+          label: 'Tidak Hadir',
+          data: pemalasData.map(item => item.tk),
+          backgroundColor: 'rgba(255, 99, 132, 0.7)'
+        },
+        {
+          label: 'Terlambat',
+          data: pemalasData.map(item => item.terlambat),
+          backgroundColor: 'rgba(255, 159, 64, 0.7)'
+        }
+      ]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: {
+        legend: { display: false }
+      }
+    }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,11 @@
+<ul class="nav nav-tabs">
+    <li class="nav-item">
+      <a class="nav-link {% if status == 'baru' %} active {% endif %}" href="{% url 'layanan_urls:layanan_cuti_view' status='baru' %}">Pegajuan Cuti Baru</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link {% if status == 'tunda' %} active {% endif %}" href="{% url 'layanan_urls:layanan_cuti_view' status='tunda' %}">Pengajuan Cuti Tunda</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link {% if status == 'ambil-tunda' %} active {% endif %}" href="{% url 'layanan_urls:layanan_cuti_tunda_view' %}">Pengambilan Cuti Tunda</a>
+    </li>
+  </ul>

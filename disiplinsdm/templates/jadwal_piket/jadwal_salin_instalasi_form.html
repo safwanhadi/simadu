@@ -1,0 +1,170 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex flex-row justify-content-between">
+                    <div class="d-flex flex-row mb-1">
+                        <div>
+                            <a href="{{url}}"><i class="fas fa-chevron-left mr-3 pt-1" style="font-size:x-large;"></i></a>
+                        </div>
+                        <p class="h4">{{title}}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-12">
+                        <form method="post">
+                            {% csrf_token %}
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <label for="id_instalasi">Instalasi</label>
+                                        <select name="instalasi" class="form-control" id="id_instalasi">
+                                        {% for inst in form.instalasi.field.queryset %}
+                                            <option value="{{ inst.pk }}">{{ inst }}</option>
+                                        {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="container-fluid">
+                                <div class="row border">
+                                    <div class="col-6 border">
+                                        <div class="form-row">
+                                            <div class="form-group col-md-12">
+                                                <label for="id_bulan_sumber">Bulan Sumber</label>
+                                                <select name="bulan_sumber" class="form-control" id="id_bulan_sumber">
+                                                    {% for val, label in form.bulan_sumber.field.choices %}
+                                                    <option value="{{ val }}">{{ label }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+
+                                            <div class="form-group col-md-12">
+                                                <label for="id_tahun_sumber">Tahun Sumber</label>
+                                                <input type="number" name="tahun_sumber" value="{{ form.tahun_sumber.value|default:form.tahun_sumber.initial }}" class="form-control" id="id_tahun_sumber">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-1 d-flex justify-content-center align-items-center border">
+                                        <span><i class="fas fa-exchange-alt fa-2x"></i></span>
+                                    </div>
+                                    <div class="col-5 border">
+                                        <div class="form-row">
+                                            <div class="form-group col-md-12">
+                                                <label for="id_bulan">Bulan Tujuan</label>
+                                                <select name="bulan" class="form-control" id="id_bulan">
+                                                    {% for val, label in form.bulan.field.choices %}
+                                                    <option value="{{ val }}">{{ label }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="form-group col-md-12">
+                                                <label for="id_tahun">Tahun Tujuan</label>
+                                                <input type="number" name="tahun" value="{{ form.tahun.value|default:form.tahun.initial }}" class="form-control" id="id_tahun">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary mt-3">Salin Jadwal</button>
+                            </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+{% endblock %}
+
+
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+
+    $(document).ready(function() {
+        $('.sdm').select2();
+        selectOnClose: true
+    });
+</script>
+
+<script>
+    $(document).ready(function(){
+        $('.pegawai').hide();
+    });
+</script>
+
+<script>
+    $(document).ready(function() {
+        $('.sdm').select2({
+            placeholder: 'Cari Pegawai...',
+            minimumInputLength: 3,
+            ajax: {
+                url: "{% url 'myaccount_urls:ajax_pegawai_autocomplete' %}",
+                dataType: 'json',
+                delay: 250,
+                cache: false,  // ⛔ Nonaktifkan cache
+                data: function (params) {
+                    return {
+                        term: params.term, // keyword pencarian
+                    };
+                },
+                processResults: function (data) {
+                    return {
+                        results: data.results
+                    };
+                },
+            },
+
+            // Tambahan debugging (opsional)
+            escapeMarkup: function (markup) {
+                return markup;
+            },
+            templateSelection: function (data) {
+                return data.text;
+            },
+                allowClear: true 
+        });
+        // Tambahan untuk cek hasil final terpilih (opsional)
+        //$('#id_kode_barang').on('select2:select', function (e) {
+        //    console.log("Selected ID:", e.params.data.id);
+        //    console.log("Selected Text:", e.params.data.text);
+        //    console.log("Current value from select2('data'):", $('#id_kode_barang').select2('data'));
+        //});
+    });
+</script>
+
+{% endblock script %}

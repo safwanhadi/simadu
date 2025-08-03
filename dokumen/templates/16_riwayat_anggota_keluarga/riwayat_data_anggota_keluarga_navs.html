@@ -1,0 +1,11 @@
+<ul class="nav nav-tabs">
+    <li class="nav-item">
+      <a class="nav-link {% if status == 'orang-tua' %} active {% endif %}" href="{% url 'riwayat_urls:riwayat_anggota_keluarga' status='orang-tua' keluarga_id=keluarga_id %}?form=none">Orang Tua</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link {% if status == 'pasangan' %} active {% endif %}" href="{% url 'riwayat_urls:riwayat_anggota_keluarga' status='pasangan' keluarga_id=keluarga_id %}?form=none">Pasangan</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link {% if status == 'anak' %} active {% endif %}" href="{% url 'riwayat_urls:riwayat_anggota_keluarga' status='anak' keluarga_id=keluarga_id %}?form=none">Anak</a>
+    </li>
+</ul>

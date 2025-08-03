@@ -1,0 +1,249 @@
+{% extends '7_layanan_diklat/layanan_diklat.html' %}
+{% load crispy_forms_tags %}
+{% load humanize %}
+
+{% block button %}
+    <a class="btn btn-outline-info" href="{% url 'layanan_urls:layanan_diklat_list_view' %}">Diklatku</a>
+    <a class="btn btn-outline-primary" href="{% url 'layanan_urls:layanan_diklat_staf_view' %}">Diklat Staf</a>
+{% endblock %}
+
+{% block child_content %}
+{% if error_penempatan == 0 %}
+    <h3>{{penempatan_notfound}}</h3>
+{% else %}
+    <div class="row">
+        <div class="col-md-9">
+            <div class="row">
+                <div class="col-md-4 text-bold">Pegawai</div>
+                <div class="col-md-8">: 
+                    {% for pegawai in riwayatobj.pegawai.all %}
+                    {{pegawai.full_name}}, 
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Instalasi</div>
+                <div class="col-md-8">: {{riwayatobj.pegawai.last.riwayatpenempatan_set.last.penempatan}}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Jenis Diklat</div>
+                <div class="col-md-8">: {{riwayatobj.jenis_diklat}}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Nama Diklat</div>
+                <div class="col-md-8">: {{riwayatobj.nama_diklat}}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Penyelenggara dan Metode Diklat</div>
+                <div class="col-md-8">: {{riwayatobj.penyelenggara}} / {{riwayatobj.metode}}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Tanggal Diklat</div>
+                <div class="col-md-8">: <strong>{{riwayatobj.tgl_mulai|date:'d M Y'}}</strong> s/d <strong>{{riwayatobj.tgl_selesai|date:'d M Y'}}</strong></div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Brosur dan TOR</div>
+                <div class="col-md-8">: {% if object.brosur %}<a class="btn btn-outline-primary" href="{{object.brosur.url}}">Brosur</a>{%else%}<button class="btn btn-outline-warning">Belum ada brosur</button>{% endif %} 
+                  /  {% if object.tor %} <a class="btn btn-warning" href="object.tor.url">TOR</a>{% else %}<button class="btn btn-outline-warning">Belum ada TOR</button>{% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 text-center">
+            <a href="{% url 'layanan_urls:layanan_diklat_pengalihan_view' pk=object.id %}" class="btn btn-outline-info p-3">Alihkan Diklat</a>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-12">
+            <div id="accordion">
+                <div class="card">
+                  <div class="card-header d-flex justify-content-between" id="headingOne">
+                    <h5 class="mb-0">
+                      <button class="btn btn-link" data-toggle="collapse" data-target="#collapseOne" aria-expanded="false" aria-controls="collapseOne">
+                        <strong>Justifikasi Usulan</strong>
+                      </button>
+                    </h5>
+                  </div>
+              
+                  <div id="collapseOne" class="collapse" aria-labelledby="headingOne" data-parent="#accordion">
+                    <div class="card-body">
+                      {{object.justifikasi|safe}}
+                    </div>
+                  </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-12">
+            <div id="accordion">
+                <div class="card">
+                  <div class="card-header d-flex justify-content-between" id="headingTwo">
+                    <div>
+                        <h5 class="mb-0">
+                            <button class="btn btn-link" data-toggle="collapse" data-target="#collapseTwo" aria-expanded="false" aria-controls="collapseOne">
+                              <strong>Catatan SDM</strong>
+                            </button>
+                          </h5>
+                    </div>
+
+                    {% if request.user.is_superuser %}
+                        <div><a class="btn btn-outline-info" href="{% url 'layanan_urls:catatan_sdm_update_view' pk=object.id %}">Buat catatan</a></div>
+                    {% endif %}
+                  </div>
+              
+                  <div id="collapseTwo" class="collapse" aria-labelledby="headingTwo" data-parent="#accordion">
+                    <div class="card-body">
+                      {{object.catatan_sdm|safe}}
+                    </div>
+                  </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-12 table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Atasan Langsung</th>
+                        <th>Pejabat Administrator</th>
+                        <th>Persetujuan Pimpinan</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>{{nama_verifikator.nama_atasan1}}</td>
+                        <td>{{nama_verifikator.nama_atasan2}}</td>
+                        <td>{{nama_verifikator.direktur}}</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            {% if request.user.is_staff and request.user.profil_user.nip == nama_verifikator.nip_atasan1 %}
+                            <a href="{% url 'layanan_urls:layanan_diklat_update_view' pk=object.id %}?case=proses&level=1#openModal" class="btn btn-outline-info mr-3" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% if object.verifikasidiklat.persetujuan1 %}
+                                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                                {% else %}
+                                    <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                                {% endif %}
+                            {% elif object.verifikasidiklat.persetujuan1 %}
+                            <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                            {% else %}
+                            <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if request.user.is_staff and request.user.profil_user.nip == nama_verifikator.nip_atasan2 %}
+                                {% if object.verifikasidiklat.persetujuan1 %}
+                                    <a href="{% url 'layanan_urls:layanan_diklat_update_view' pk=object.id %}?case=proses&level=2#openModal" class="btn btn-outline-info mr-3" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% else %}
+                                    <a href="#" class="btn btn-outline-info mr-3 disabled" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% endif %}
+                                {% if object.verifikasidiklat.persetujuan2 %}
+                                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                                {% else %}
+                                    <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                                {% endif %}
+                            {% elif object.verifikasidiklat.persetujuan2 %}
+                            <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                            {% else %}
+                            <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if request.user.is_staff and request.user.profil_user.nip == nama_verifikator.nip_direktur %}
+                                {% if object.verifikasidiklat.persetujuan2 %}
+                                    <a href="{% url 'layanan_urls:layanan_diklat_update_view' pk=object.id %}?case=proses&level=3#openModal" class="btn btn-outline-info mr-3" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% else %}
+                                    <a href="#" class="btn btn-outline-info mr-3 disabled" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% endif %}
+                                {% if object.verifikasidiklat.persetujuan3 %}
+                                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                                {% else %}
+                                    <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                                {% endif %}
+                            {% elif object.verifikasidiklat.persetujuan3 %}
+                            <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                            {% else %}
+                            <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            {% if object.verifikasidiklat %}
+                                {% if object.verifikasidiklat.catatan1 %}
+                                    <p>{{object.verifikasidiklat.catatan1}}</p>
+                                {% else %}
+                                    N/A
+                                {% endif %}    
+                            {% else %}
+                                <span class="text-muted">Catatan: </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if object.verifikasidiklat %}
+                                {% if object.verifikasidiklat.catatan2 %}
+                                    <p>{{object.verifikasidiklat.catatan2}}</p>
+                                {% else %}
+                                    N/A
+                                {% endif %}    
+                            {% else %}
+                                <span class="text-muted">Catatan: </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if object.verifikasidiklat %}
+                                {% if object.verifikasidiklat.catatan3 %}
+                                    <p>{{object.verifikasidiklat.catatan3}}</p>
+                                {% else %}
+                                    N/A
+                                {% endif %}    
+                            {% else %}
+                                <span class="text-muted">Catatan: </span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div> 
+    </div>
+    {% if request.user.is_superuser %}
+        <div class="row">
+            <div class="col-md-12 text-center pt-5">
+                <span>Klik Tombol Proses Usulan untuk konfirmasi kepada <span style="font-weight: bold; color:blue;">{{object.pegawai.full_name}}</span> bahwa usulannya sedang diproses untuk menentukan apakah usulan akan ditindaklanjut atau tidak</span><br><br>
+                <form method="post">
+                    {% if object.verifikasidiklat.persetujuan3 %}
+                    <div class="d-flex justify-content-center">
+                        {% csrf_token %}
+                        {{form | crispy}}
+                        {{riwayat_form | crispy}}
+                    </div>
+                    <button class="btn btn-outline-primary" type="submit">Proses Usulan &nbsp;&nbsp; <i class="fas fa-fast-forward"></i></button>
+                    {% else %}
+                    <div class="d-flex justify-content-center">
+                        <div id="div_id_layananusulandiklat_set-0-status" class="form-group">
+                            <div> 
+                                <select name="layananusulandiklat_set-0-status" class="select form-control" aria-describedby="id_layananusulandiklat_set-0-status_helptext" id="id_layananusulandiklat_set-0-status" disabled> 
+                                    <option value="proses">Proses</option> 
+                                    <option value="tidak ditindaklanjut">Tidak ditindaklanjut</option>
+                                </select> 
+                                <small id="hint_id_layananusulandiklat_set-0-status" class="form-text text-muted">Pilih salah satu pilihan Proses/Tidak ditindaklanjut</small> 
+                            </div> 
+                        </div> 
+                    </div>
+                    <button class="btn btn-outline-primary" type="submit" disabled>Proses Usulan &nbsp;&nbsp; <i class="fas fa-fast-forward"></i></button>
+                    {% endif %}
+                </form>
+            </div>  
+        </div>
+    {% endif %}
+{% endif %}    
+{% endblock %}
+{% block script %}
+
+<script>
+    $(document).ready(function(){
+        $('.pegawai').hide();
+    });
+</script>
+    
+{% endblock %}

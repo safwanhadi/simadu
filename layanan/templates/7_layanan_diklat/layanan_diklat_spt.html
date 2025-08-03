@@ -1,0 +1,41 @@
+{% extends '7_layanan_diklat/layanan_diklat.html' %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block button %}
+    <a class="btn btn-outline-info" href="{% url 'layanan_urls:layanan_diklat_usulan_view' %}">Usulan Diklat</a>
+{% endblock %}
+
+{% block child_content %}
+<div class="row pl-3 pr-3">
+    <div class="col-md-12 text-center">
+        <a href="{% url 'file_urls:text_spt_view' diklat_id=object.riwayatdiklat_set.last.id %}" class="btn btn-outline-warning p-5 mr-2" style="font-size: larger;">Tambah Text SPT</a>
+        {% if riwayatobj.pegawai.all|length > 1 %}
+            <a href="{% url 'file_urls:spt_diklat_multi_view' diklat_id=object.riwayatdiklat_set.last.id %}" class="btn btn-outline-info p-5" style="font-size: larger;" >Unduh draft SPT</a>
+        {% else %}
+            <a href="{% url 'file_urls:spt_diklat_view' diklat_id=object.riwayatdiklat_set.last.id %}" class="btn btn-outline-info p-5" style="font-size: larger;" >Unduh draft SPT</a>
+        {% endif %}
+        
+    </div> 
+    <div class="col-md-12 text-center pt-5">
+        <span>Unggah SPT dan Bukti Bayar lalu klik Tombol Lanjutkan untuk konfirmasi kepada <span style="font-weight: bold; color:blue;">{{detail.pegawai.full_name}}</span> bahwa usulan diklatnya disetujui</span><br><br>
+    </div>
+    <div class="col-md-12 d-flex justify-content-center">
+        <form method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            {{form | crispy}}
+            {{riwayat_form | crispy}}
+            <button class="btn btn-outline-primary" type="submit">Lanjutkan &nbsp;&nbsp; <i class="fas fa-fast-forward"></i></button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+    $(document).ready(function(){
+        $('.pegawai').hide();
+        $('.select2').select2();
+    });
+</script>    
+{% endblock %}

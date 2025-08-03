@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block cardtitle %}
+<strong>List Indikator Layanan</strong>
+{% endblock cardtitle %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex flex-row justify-content-between">
+                    <div class="d-flex flex-row mb-1">
+                        <a href="{% url 'layanan_urls:layanan_diklat_update_view' pk=layanan.id %}?case=spt" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
+                        <h5>Text Pada Surat Perintah Tugas</h5>
+                    </div>
+                    {% if form_view == 'none' %}
+                        <div><input type="button" class="btn btn-outline-success" id="add_data" value="Tambah Data"></div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row" id="form_data" style="display: {{form_view}};">
+                    {% include 'spt_text/add_spt_text.html' %}
+                </div>
+                <div class="row" id="list_data" style="display: {{data_view}};">
+                    {% include 'spt_text/list_spt_text.html' %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+{% endblock %}
+
+
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+</script>
+
+<script>
+    const btn = document.getElementById('add_data');
+    const form = document.getElementById('form_data');
+    const data = document.getElementById('list_data');
+    
+    btn.addEventListener('click', () => {
+    if (form.style.display === 'none' && data.style.display === 'block') {
+        // 👇️ this SHOWS the form
+        form.style.display = 'block';
+        data.style.display = 'none';
+        btn.value="Lihat Data"
+      } else {
+        // 👇️ this HIDES the form
+        form.style.display = 'none';
+        data.style.display = 'block';
+        btn.value="Tambah Data"
+      }
+});
+</script>
+    
+{% endblock script %}

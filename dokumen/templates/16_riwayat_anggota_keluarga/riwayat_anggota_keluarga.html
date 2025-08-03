@@ -1,0 +1,122 @@
+<div class="table table-responsive">
+    {% if status == 'orang-tua' %}
+            <table class="table" id="data_table">
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Pegawai</th>
+                        <th>Nama Orang Tua</th>
+                        <th>Status Hidup</th>
+                        <th>Pekerjaan</th>
+                        <th>Jenis Kelamin</th>
+                        <th>Agama</th>
+                        <th>Alamat</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in data %}
+                    <tr>
+                        <td>{{forloop.counter}}</td>
+                        <td>{{item.keluarga.pegawai.full_name}}</td>
+                        <td>{{item.nama}}</td>
+                        <td>
+                            {% if item.status_hidup %}
+                                Hidup
+                            {% else %}
+                                Meninggal
+                            {% endif %}
+                            </td>
+                        <td>{{item.pekerjaan}}</td>
+                        <td>{{item.jk}}</td>
+                        <td>{{item.agama}}</td>
+                        <td>{{item.alamat}}</td>
+                        <td>
+                            <a href="{% url 'riwayat_urls:riwayat_update_anggota_keluarga' status='orang-tua'  keluarga_id=item.keluarga.id id=item.id %}" class="btn btn-outline-info"><i class="fas fa-edit"></i></a>
+                            <!-- <a href="{% url 'riwayat_urls:riwayat_delete_anggota_keluarga' status='orang-tua'  keluarga_id=item.keluarga.id pk=item.id %}#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a> -->
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% elif status == 'pasangan' %}
+            <table class="table" id="data_table">
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Pegawai</th>
+                        <th>Nama Pasangan</th>
+                        <th>Hubungan</th>
+                        <th>Pasangan Ke</th>
+                        <th>TTL</th>
+                        <th>Jenis Kelamin</th>
+                        <th>Pekerjaan</th>
+                        <th>Telp/HP</th>
+                        <th>Agama</th>
+                        <th>Alamat</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in data %}
+                    <tr>
+                        <td>{{forloop.counter}}</td>
+                        <td>{{item.keluarga.pegawai.full_name}}</td>
+                        <td>{{item.nama}}</td>
+                        <td>{{item.keluarga.status_klg}}</td>
+                        <td>{{item.pasangan_ke}}</td>
+                        <td>{{item.tempat_lahir}} / {{item.tgl_lahir}}</td>
+                        <td>{{item.jk}}</td>
+                        <td>{{item.pekerjaan}}</td>
+                        <td>{{item.tlp}}</td>
+                        <td>{{item.agama}}</td>
+                        <td>{{item.alamat}}</td>
+                        <td><a href="{% url 'riwayat_urls:riwayat_update_anggota_keluarga' status='pasangan'  keluarga_id=item.keluarga.id id=item.id %}" class="btn btn-outline-info"><i class="fas fa-edit"></i></a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <table class="table" id="data_table">
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Pegawai</th>
+                        <th>Nama Anak</th>
+                        <th>TTL</th>
+                        <th>Status Hidup</th>
+                        <th>Jenis Kelamin</th>
+                        <th>Pekerjaan</th>
+                        <th>Telp/HP</th>
+                        <th>Agama</th>
+                        <th>Alamat</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in data %}
+                    <tr>
+                        <td>{{forloop.counter}}</td>
+                        <td>{{item.keluarga.pegawai.full_name}}</td>
+                        <td>{{item.nama}}</td>
+                        <td>{{item.tempat_lahir}} / {{item.tgl_lahir}}</td>
+                        <td>
+                            {% if item.status_hidup %}
+                                Hidup
+                            {% else %}
+                                Meninggal
+                            {% endif %}
+                        </td>
+                        <td>{{item.jk}}</td>
+                        <td>{{item.pekerjaan}}</td>
+                        <td>{{item.tlp}}</td>
+                        <td>{{item.agama}}</td>
+                        <td>{{item.alamat}}</td>
+                        <td><a href="{% url 'riwayat_urls:riwayat_update_anggota_keluarga' status='anak'  keluarga_id=item.keluarga.id id=item.id %}" class="btn btn-outline-info"><i class="fas fa-edit"></i></a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+</div>
+                    

@@ -1,0 +1,43 @@
+<div class="table table-responsive">
+    <table class="table" id="data_table">
+        <thead>
+            <tr>
+                <th>No</th>
+                <th>Pegawai</th>
+                <th>Nama Organisasi</th>
+                <th>Jabatan</th>
+                <th>No Anggota</th>
+                <th>Tanggal Gabung</th>
+                <th>Tanggal Keluar</th>
+                <th>File</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data %}
+            <tr>
+                <td>{{forloop.counter}}</td>
+                <td>{{item.pegawai.full_name}}</td>
+                <td>{{item.nama_org}}</td>
+                <td>{{item.jabatan}}</td>
+                <td>{{item.no_anggota}}</td>
+                <td>{{item.tgl_gabung}}</td>
+                <td>{{item.tgl_keluar}}</td>
+                <td>
+                    {% if item.file %}
+                    <a href="{{item.file.url}}"><i class="fas fa-file-download"></i></a>
+                    {% else %}
+                    <i class="fas fa-times" style="font-weight: bold; color:red"></i>
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="?nip={{item.pegawai.profil_user.nip}}" class="btn btn-primary"><i class="fas fa-user"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_update_organisasi' id=item.id %}" class="btn btn-primary"><i class="fas fa-edit"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_delete_organisasi' pk=item.id %}#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+                    

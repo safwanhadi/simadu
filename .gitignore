@@ -1,0 +1,66 @@
+# Python
+# File yang dihasilkan saat Python mengkompilasi kode.
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment, pastikan folder ini diabaikan agar tidak ter-commit.
+.venv/
+venv/
+env/
+
+# File distribusi dan instalasi.
+dist/
+build/
+*.egg-info/
+*.egg
+lib/
+parts/
+sdist/
+develop-eggs/
+wheels/
+downloads/
+.Python
+.installed.cfg
+MANIFEST
+
+# File log dan cache.
+*.log
+pip-log.txt
+pip-delete-this-directory.txt
+.cache
+.tox/
+.nox/
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# File konfigurasi sensitif yang tidak boleh di-push.
+.env
+.flaskenv
+
+# Django
+# Database lokal default Django.
+db.sqlite3
+
+# Folder untuk media yang diunggah oleh user.
+/media/
+
+# File statik hasil kompilasi.
+/static_collected/
+
+# File IDE (untuk Visual Studio Code)
+# Folder konfigurasi umum.
+.vscode/
+
+# Kecualikan beberapa file penting agar tetap di-commit,
+# seperti konfigurasi task, launch, atau setting bersama.
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json

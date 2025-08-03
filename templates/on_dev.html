@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="card">
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-12 p-5 text-center">
+                        <div class="d-flex flex-row justify-content-center">
+                            <div>
+                                <i class="fas fa-tools fa-4x mr-5 text-warning"></i>
+                            </div>
+                            <div>
+                                <h5>{{data}}</h5>
+                                <p>{{detail}}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+{% endblock %}
+
+
+
+{% block script %}
+
+{% endblock script %}

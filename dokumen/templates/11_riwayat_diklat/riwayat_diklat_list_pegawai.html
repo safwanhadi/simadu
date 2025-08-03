@@ -1,0 +1,66 @@
+{% extends '11_riwayat_diklat/riwayat_diklat.html' %}
+
+{% block button %}
+{% if request.user.is_superuser %}
+<a href="{% url 'riwayat_urls:riwayat_diklat_create' %}" class="btn btn-outline-primary">Tambah Riwayat</a>
+{% else %}
+<a href="{% url 'riwayat_urls:riwayat_diklat_detail' pk=request.user.id %}" class="btn btn-outline-info">Diklatku</a>
+{% endif %}
+{% endblock %}
+
+{% block child_content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="table table-responsive">
+            <table class="table" id="data_table">
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>NIP/NRP</th>
+                        <th>Pegawai</th>
+                        <th>Tahun Diklat</th>
+                        <th>Frekuensi Diklat</th>
+                        <th>Jam Diklat</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in data %}
+                    <tr>
+                        <td>{{forloop.counter}}</td>
+                        <td>{{item.profil_user__nip}}</td>
+                        <td>{{item.first_name}} {{item.last_name}}</td>
+                        <td>{{item.riwayatdiklat__tgl_mulai__year}}</td>
+                        <td>{{item.frekuensi_diklat}}</td>
+                        <td>{{item.jam_diklat}}</td>
+                        <td>
+                            <a href="{% url 'riwayat_urls:riwayat_diklat_detail' pk=item.id %}" class="btn btn-primary"><i class="fas fa-info"></i></a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+</script>
+
+{% endblock %}
+
+                    

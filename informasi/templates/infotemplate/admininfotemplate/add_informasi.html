@@ -1,0 +1,9 @@
+{% load i18n crispy_forms_tags %}
+<div class="col-md-12">
+    {{ form.media }}
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {{form | crispy}}
+        <input type="submit" value="Simpan" class="btn btn-success">
+    </form>
+</div>

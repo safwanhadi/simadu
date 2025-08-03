@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        {% if request.user.is_superuser %}
+        <h3>Daftar Pegawai Yang Belum Lengkap Mengisi Data</h3>
+        {% else %}
+        <h3>Kelengkapan Pengisian Data SIMADU BERDANSA</h3>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        <div class="tab-content m-3 mt-2" id="myTabContent">
+            <div class="table table-responsive">
+                {% if not request.user.is_superuser or nip %}
+                {% for item in kelengkapan %}
+                    {% if forloop.first %}
+                    <div class="row mb-3">
+                        <div class="col-md-3" style="font-weight:bold; font-size: large;">Nama</div>
+                        <div class="col-md-9" style="font-weight: bold; font-size:large;">{{item.pegawai.full_name}}</div>
+                    </div>
+                    {% endif %}
+                {% endfor %}
+                <table class="table" id="data_table">
+                    <thead>
+                        <tr>
+                            <th>Dokumen</th>
+                            <th>Status</th>
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in kelengkapan %}
+                        <tr>
+                            <td>{{item.dokumen}}</td>
+                            <td>
+                                {% if item.status == 'kosong' %}
+                                    Belum Lengkap
+                                {% else %}
+                                    Sudah diisi (mohon dicek kembali)
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if item.dokumen == 'pendidikan' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_pendidikan' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'panggol' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_panggol' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'jabatan' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_jabatan' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'pengangkatan' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_pengangkatan' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'penempatan' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_penempatan' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'berkala' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_berkala' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'kinerja' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_kinerja' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'penghargaan' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_penghargaan' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'hukuman' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_hukuman' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'cuti' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_cuti' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'diklat' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_diklat' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'organisasi' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_organisasi' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'profesi' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_profesi' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'bekerja' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_bekerja' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% elif item.dokumen == 'keluarga' %}
+                                    <a href="{% url 'riwayat_urls:riwayat_keluarga' %}" class="btn btn-outline-info">Lengkapi</a>
+                                {% else %}
+                                    <a href="{% url 'riwayat_urls:riwayat_view' %}" class="btn btn-outline-info">Riwayat Dokumen</a>
+                                {% endif %}
+                            </td>
+                        </tr>                            
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <table class="table" id="data_table">
+                    <thead>
+                        <tr>
+                            <th>Pegawai</th>
+                            <th>Status</th>
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in kelengkapan %}
+                        <tr>
+                            <td>{{item.user.full_name}}</td>
+                            <td>Belum Lengkap</td>
+                            {% if item.user.profil_user %}
+                            <td><a href="?nip={{item.user.profil_user.nip}}" class="btn btn-outline-success">Lihat Detail</a></td>
+                            {% else %}
+                            <td>Belum ada data</td>
+                            {% endif %}
+                        </tr>                            
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+                
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+</script>
+    
+{% endblock script %}

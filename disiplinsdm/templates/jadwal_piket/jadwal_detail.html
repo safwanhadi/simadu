@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+{% load form_helper %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <div class="d-flex flex-row justify-content-between">
+      <div class="d-flex flex-row mb-1">
+        {% querystring_filter 'q' 'inst' 'bulan' 'tahun' as filtered_query %}
+          <div>
+              <a href="{{url}}{% if filtered_query %}?{{ filtered_query }}{% endif %}"><i class="fas fa-chevron-left mr-3 pt-1" style="font-size:x-large;"></i></a>
+          </div>
+          <p class="h4">{{title}}</p>
+      </div>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="card-body">
+    <p><strong>Nama:</strong> {{ object.pegawai.full_name }}</p>
+    <p><strong>Profesi:</strong> {{ object.jenis_sdm }}</p>
+    <p><strong>Instalasi:</strong> {{ object.instalasi }}</p>
+    <hr>
+
+    {% for minggu in minggu_data %}
+    <h5 class="mt-4">Minggu ({{ minggu.range.0 }} - {{ minggu.range.6 }})</h5>
+    <table class="table table-sm table-bordered">
+        <thead class="thead-light">
+        <tr>
+            <th>Tanggal</th>
+            <th>Kategori Jadwal</th>
+            <th>Jam</th>
+            <th>Catatan</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for hari in minggu.data %}
+        <tr {% if hari.libur %}class="table-warning"{% endif %}>
+            <td>{{ hari.tanggal|date:"l, d M Y" }}</td>
+            <td>{{ hari.kategori }}</td>
+            <td>{{ hari.jam }} jam</td>
+            <td>{{ hari.catatan|default:"-" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="text-right mb-3">
+        Total jam minggu ini: <strong>{{ minggu.total_jam }} jam</strong>
+        {% if minggu.total_jam < 39 %}
+        <span class="badge badge-primary">Ringan 🔵</span>
+        {% elif minggu.total_jam <= 40 %}
+        <span class="badge badge-success">Ideal 🟢</span>
+        {% else %}
+        <span class="badge badge-danger">Overload 🔴</span>
+        {% endif %}
+    </div>
+    {% endfor %}
+
+    <hr>
+    <div class="text-right font-weight-bold">
+    Total jam kerja bulan ini: {{ total_bulanan }} jam<br>
+    Standar minimum: {{ standar_min }} jam<br>
+    Standar maksimum: {{ standar_max }} jam<br>
+    Selisih: {{ selisih }} jam
+    </div>
+  </div>
+  {% if object.status == 'ditolak' and object.alasan_penolakan %}
+        <div class="alert alert-danger mt-3">
+          <strong>Alasan Penolakan:</strong><br>
+          {{ object.alasan_penolakan }}
+        </div>
+    {% endif %}
+</div>
+{% endblock content %}

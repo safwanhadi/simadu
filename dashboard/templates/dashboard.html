@@ -1,0 +1,31 @@
+<div class="dash">
+    <div class="row d-flex justify-content-center" id="card-nakes">
+        {% for sdm in jenissdm %}
+        <div class="col-lg-3 col-6">
+            <div class="small-box bg-{{sdm.warna_card}}">
+                <div class="inner">
+                    <h3>{{sdm.jumlah}} Orang</h3>
+                    <p>{{sdm.jenis_sdm}}</p>
+                </div>
+                <div class="icon">
+                    <i class="ion ion-stats-bars"></i>
+                </div>
+                <a href="{% url 'dashboard_urls:dashboard_sdm_view' sdm=sdm.slug %}" class="small-box-footer">Lihat Detail <i class="fas fa-arrow-circle-right"></i></a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% if jenissdm|length >= 5 %}
+    <div class="row">
+        <hr class="left-line">
+        <div class="btn-detail text-center">
+            <button class="btn btn-primary text-center" id="btn_card_detail">
+                <i class="fas fa-angle-double-down fa-1x" id="btn_down" style="display: block;"></i>
+                <i class="fas fa-angle-double-up fa-1x" id="btn_up" style="display: none;"></i>
+            </button>
+        </div>
+        <hr class="right-line">
+    </div>
+    {% endif %}
+</div>
+

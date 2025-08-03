@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block content %}
+<div class="d-flex justify-content-center align-items-center">
+    <div class="col-md-5 card text-center p-3">
+        Apakah benar ingin menghapus jadwal 
+        <span style="font-weight: bold;">{{data.pegawai.full_name}}</span> 
+        bulan {% if data.bulan %} {{data.bulan | month_name}} {% endif %} 
+        tahun {{data.tahun}}?
+        
+        <form method="post" class="mt-3">
+            {% csrf_token %}
+            {{form}}
+            <div class="text-center">
+                <button class="btn btn-danger me-2" type="submit">Hapus</button>
+                <button class="btn btn-primary" type="button" onclick="window.location.href='{{url}}'">Batal</button>
+            </div>
+        </form>
+    </div>
+</div>
+        
+{% endblock %}

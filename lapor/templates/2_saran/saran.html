@@ -1,0 +1,25 @@
+<div class="table table-responsive">
+    <table class="table" id="data_table">
+        <thead>
+            <tr>
+                <th>No</th>
+                <th>Pegawai</th>
+                <th>Tanggal</th>
+                <th>Saran</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data %}
+            <tr>
+                <td>{{forloop.counter}}</td>
+                <td>{{item.pegawai.full_name}}</td>
+                <td>{{item.created_at}}</td>
+                <td>{{item.saran}}</td>
+                <td><a href="{% url 'laporan_urls:saran_update_view' id=item.id %}" class="btn btn-outline-info"><i class="fas fa-edit"></i></a> </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>        
+                    

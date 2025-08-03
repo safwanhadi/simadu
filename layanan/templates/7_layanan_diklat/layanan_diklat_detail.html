@@ -1,0 +1,76 @@
+{% extends '7_layanan_diklat/layanan_diklat.html' %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block button %}
+    <a class="btn btn-outline-info" href="{% url 'layanan_urls:layanan_diklat_usulan_view' %}">Usulan Diklat</a>
+{% endblock %}
+
+{% block child_content %}
+<div class="row">
+    <div class="col-md-12 mt-4">
+        <div class="row pl-3 pr-3">
+            <div class="col-md-6">
+                <div class="row">
+                    <div class="col-md-4 text-bold">Nama</div>
+                    <div class="col-md-8">: 
+                        {% if object.riwayatdiklat_set.first.pegawai.all|length > 1 %}
+                            <ol>
+                                {% for sdm in object.riwayatdiklat_set.first.pegawai.all %}
+                                    <li>{{sdm.full_name}}</li>
+                                {% endfor %}
+                            </ol>
+                        {% else %}
+                            {% for sdm in object.riwayatdiklat_set.first.pegawai.all %}
+                                {{sdm.full_name}}
+                            {% endfor %}
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Nama Diklat</div>
+                    <div class="col-md-8">: {{object.riwayatdiklat_set.first.nama_diklat}}</div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Penyelenggara</div>
+                    <div class="col-md-8">: {{object.riwayatdiklat_set.first.penyelenggara}}</div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Tgl Sertifikat</div>
+                    <div class="col-md-8">: {{object.riwayatdiklat_set.first.tgl_sertifikat}}</div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">No Sertifikat</div>
+                    <div class="col-md-8">: {{object.riwayatdiklat_set.first.no_sertifikat}}</div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Tgl Mulai</div>
+                    <div class="col-md-8">: {{object.riwayatdiklat_set.first.tgl_mulai}}</div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Tgl Selesai</div>
+                    <div class="col-md-8">: {{object.riwayatdiklat_set.first.tgl_selesai}}</div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Sertifikat</div>
+                    {% if object.riwayatdiklat_set.first.file %}
+                        <div class="col-md-8">: <a href="{{object.riwayatdiklat_set.first.file.url}}"><i class="fas fa-file-word"></i> Download sertifikat</a></div>
+                    {% else %}
+                    <div class="col-md-8">: <span>Belum ada file</span></div>
+                    {% endif %}
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Laporan</div>
+                    {% if object.riwayatdiklat_set.first.file_laporan %}
+                        <div class="col-md-8">: <a href="{{object.riwayatdiklat_set.first.file_laporan.url}}"><i class="fas fa-file-word"></i> Download Laporan</a></div>
+                    {% else %}
+                    <div class="col-md-8">: <span>Belum ada file</span></div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

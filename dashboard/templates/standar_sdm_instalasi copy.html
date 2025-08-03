@@ -1,0 +1,412 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block styles %}
+<link rel="stylesheet" href="{% static 'dist/css/dash.css'%}">
+{% endblock styles %}
+
+{% block breadcrumb %}
+<div class="col-sm-6">
+    <ol class="breadcrumb float-sm-right">
+      <li class="breadcrumb-item"><a href="#">{{page}}</a></li>
+      {% if sub_page %}
+      <li class="breadcrumb-item"><a href="#">{{sub_page}}</a></li>
+      {% endif %}
+      {% if title_page != page %}
+      <li class="breadcrumb-item active"><a href="#">{{title_page}}</a></li>
+      {% endif %}
+    </ol>
+  </div>
+{% endblock breadcrumb %}
+
+{% block cardtitle %}
+{% endblock cardtitle %}
+
+{% block content %}
+    <div class="container">
+        {% include 'dashboard.html' %}
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card card-solid">
+                    <div class="card-body">
+                        <div class="d-flex flex-row mb-1">
+                            {% if id_instalasi %}
+                            <a href="{% url 'dashboard_urls:dashboard_view' %}" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
+                            {% endif %}
+                            <h4>STANDARISASI KOMPETENSI INSTALASI</h4>
+                        </div>
+                        <div class="pt-2 pb-2">
+                            <h6>Keterangan:</h6>
+                            <div class="row">
+                                <div class="col-md-3 border border-danger bg-danger rounded p-2">Belum Standar</div>
+                                <div class="col-md-3 border border-success bg-success rounded p-2 ml-1">Sesuai Standar</div>
+                                <div class="col-md-3 border border-primary bg-primary rounded p-2 ml-1">Diatas Standar</div>
+                            </div>
+                        </div>
+                        {% if kompetensi %}
+                            N/A
+                        {% elif id_instalasi %}
+                        <div class="table table-responsive">
+                            <table class="display table table-striped table-bordered" id="">
+                                <thead>
+                                    <tr>
+                                        <th>No</th>
+                                        <th>Nama</th>
+                                        <th>Jabatan</th>
+                                        <th>Kompetensi</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item, status in data_fungsional %}
+                                    <tr>
+                                        {% if item.pegawai == status.pegawai %}
+                                            {% if status.pegawai and status.status == '1_kurang' %}
+                                            <td class="bg-danger">{{forloop.counter}}</td>
+                                            <td class="bg-danger">{{item.pegawai.full_name}}</td>
+                                            <td class="bg-danger">{{item.nama_jabatan}}</td>
+                                            <td class="bg-danger">
+                                                {% for item2 in item.kompetensi.all %}
+                                                    <p>{{item2.kompetensi.kompetensi}}</p>
+                                                {% endfor %}
+                                            </td>
+                                            {% elif status.pegawai and status.status == '2_bagus' %}
+                                            <td class="bg-success">{{forloop.counter}}</td>
+                                            <td class="bg-success">{{item.pegawai.full_name}}</td>
+                                            <td class="bg-success">{{item.nama_jabatan}}</td>
+                                            <td class="bg-success">
+                                                {% for item2 in item.kompetensi.all %}
+                                                    <p>{{item2.kompetensi.kompetensi}}</p>
+                                                {% endfor %}
+                                            </td>
+                                            {% elif status.pegawai and status.status == '3_mantap' %}
+                                            <td class="bg-primary">{{forloop.counter}}</td>
+                                            <td class="bg-primary">{{item.pegawai.full_name}}</td>
+                                            <td class="bg-primary">{{item.nama_jabatan}}</td>
+                                            <td class="bg-primary">
+                                                {% for item2 in item.kompetensi.all %}
+                                                    <p>{{item2.kompetensi.kompetensi}}</p>
+                                                {% endfor %}
+                                            </td>
+                                            {% endif %}    
+                                        {% else %}
+                                        <td class="bg-danger">{{forloop.counter}}</td>
+                                        <td class="bg-danger">{{item.pegawai.full_name}}</td>
+                                        <td class="bg-danger">{{item.nama_jabatan}}</td>
+                                        <td class="bg-danger">
+                                            {% for item2 in item.kompetensi.all %}
+                                                <p>{{item2.kompetensi.kompetensi}}</p>
+                                            {% endfor %}
+                                        </td>
+                                        {% endif %}
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="table table-responsive">
+                            <table class="display table table-striped table-bordered" id="">
+                                <thead>
+                                    <tr>
+                                        <th>No</th>
+                                        <th>Instalasi</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for instalasi, status in data %}
+                                    <tr>
+                                        {% if instalasi.instalasi == status.instalasi %}
+                                            {% if status.status == '2_bagus' %}
+                                            <td class="bg-success"><a href="{% url 'dashboard_urls:dashboard_view' %}?instalasi={{instalasi.id}}" class="btn btn-block text-left">{{forloop.counter}}</a></td>
+                                            <td class="bg-success"><a href="{% url 'dashboard_urls:dashboard_view' %}?instalasi={{instalasi.id}}" class="btn btn-block text-left">{{instalasi.instalasi}}</a></td>
+                                            {% elif status.status == '1_kurang' %}
+                                                <td class="bg-danger"><a href="{% url 'dashboard_urls:dashboard_view' %}?instalasi={{instalasi.id}}" class="btn btn-block text-left">{{forloop.counter}}</a></td>
+                                                <td class="bg-danger"><a href="{% url 'dashboard_urls:dashboard_view' %}?instalasi={{instalasi.id}}" class="btn btn-block text-left">{{instalasi.instalasi}}</a></td>
+                                            {% elif status.status == '3_mantap' %}
+                                                <td class="bg-primary"><a href="{% url 'dashboard_urls:dashboard_view' %}?instalasi={{instalasi.id}}" class="btn btn-block text-left">{{forloop.counter}}</a></td>
+                                                <td class="bg-primary"><a href="{% url 'dashboard_urls:dashboard_view' %}?instalasi={{instalasi.id}}" class="btn btn-block text-left">{{instalasi.instalasi}}</a></td>
+                                            {% endif %}
+                                        {% else %}
+                                        <td class="bg-danger"><a href="{% url 'dashboard_urls:dashboard_view' %}?instalasi={{instalasi.id}}" class="btn btn-block text-left">{{forloop.counter}}</a></td>
+                                        <td class="bg-danger"><a href="{% url 'dashboard_urls:dashboard_view' %}?instalasi={{instalasi.id}}" class="btn btn-block text-left">{{instalasi.instalasi}}</a></td>
+                                        {% endif %}
+                                        
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card card-solid">
+                    <div class="card-body">
+                        <div class="d-flex flex-row mb-1">
+                            {% if nip %}
+                            <a href="{% url 'dashboard_urls:dashboard_view' %}" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
+                            {% endif %}
+                            <h4>TAKAH PEGAWAI</h4>
+                        </div>
+                        {% if nip %}
+                        <div class="table-responsive">
+                            <table class="display table table-striped table-bordered", id="">
+                                <thead>
+                                    <tr>
+                                        <th>Nama File Kepegawaian</th>
+                                        <th>Download</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% include 'link_file_pegawai_dash.html' %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="table-responsive">
+                            <table class="display table table-striped table-bordered" id="">
+                                <thead>
+                                    <tr>
+                                        <th>No</th>
+                                        <th>Nama Pegawai</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in takah %}
+                                        {% if request.user.is_superuser %}
+                                            <tr>
+                                                <td>{{forloop.counter}}</td>
+                                                <td><a href="{% url 'dashboard_urls:dashboard_view' %}?nip={{item.profil_user.nip}}" class="btn btn-block text-left">{{item.full_name}}</a></td>                                            
+                                            </tr>
+                                        {% elif item.nip %}
+                                            <tr>
+                                                <td>{{forloop.counter}}</td>
+                                                <td><a href="{% url 'dashboard_urls:dashboard_view' %}?nip={{item.profil_user.nip}}" class="btn btn-block text-left">{{item.full_name}}</a></td>                                            
+                                            </tr>
+                                        {% endif %}
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                            <center>
+                                {%if takah.has_previous %} {# whether the previous page exists #}
+                                    <a href="?page={{takah.previous_page_number}}" style="text-decoration: none;"><i class="fas fa-chevron-left"  style="margin-right: 2em;"></i></a> {# link to the prev page #}
+                                {% endif %}
+                                <span>{{takah.number}}</span> {# the current page number #}
+                               
+                                {%if takah.has_next %} {# whether the next page exists #}
+                                    <a href="?page={{takah.next_page_number}}"><i class="fas fa-chevron-right" style="margin-left: 2em;"></i></a> {# link to the next page #}
+                                {% endif %}
+                            </center>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-12">
+            <form method="get">
+                <div class="form-group row d-flex justify-content-between">
+                    <input type="hidden" name="keg" class="form-control" required value="{{kegiatan.slug}}">
+                    <div class="col-md-6">
+                        <input type="date" name="tanggal" class="form-control" required value="{{tanggal}}" onchange="this.form.submit();">
+                        <small id="HelpTextInline" class="text-muted">
+                            Pastikan bulan sudah sesuai
+                        </small>
+                    </div>
+                    <div class="col-md-6">
+                        <select name="inst" class="form-control sdm" onchange="this.form.submit();">
+                            {% if instalasi %}
+                            <option value="{{instalasi.id}}">{{instalasi.instalasi}}</option>
+                            {% else %}
+                            <option value="">---Pilih Instalasi---</option>
+                            {% endif %}
+                            {% for item in list_instalasi %}
+                            <option value="{{item.id}}">{{item.instalasi}}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </form>
+        </div>
+        <div class="col-md-12">
+            <canvas id="kehadiran_chart" width="500" height="200"></canvas>
+        </div>
+        <div class="col-md-12">
+            <canvas id="kedisiplinan_instalasi_chart" width="500" height="200"></canvas>
+        </div>
+    </div>
+
+
+{% endblock %}
+
+
+
+{% block script %}
+
+<script>
+    //var indikator = '/home/grafik-kehadiran/?inst={{id_instalasi}}&tanggal={{tanggal}}'
+    var kehadiran = "{% url 'dashboard_urls:grafik_kehadiran_view' %}?inst={{inst}}&tanggal={{tanggal}}"
+    $(document).ready(function () {
+        $.ajax({
+            method: "GET",
+            url: kehadiran,
+            success: function (data) {
+                labels = data.label
+                values = data.data
+                setChart()
+            },
+            error: function (error_data) {
+                console.log("error")
+                console.log(error_data)
+            }
+        })
+
+        function setChart() {
+            var ctx = document.getElementById("kehadiran_chart").getContext('2d');
+            var myChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Kehadiran Apel',
+                        data: values,
+                        backgroundColor: 'rgba(200, 250, 0, 1)',
+                        borderColor: 'rgba(200, 250, 0, 1)',
+                        borderWidth: 2,
+                        fill: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        yAxes: [{
+                            ticks: {
+                                beginAtZero: true
+                            }
+                        }]
+                    }
+                }
+            });
+        }
+    })
+</script>
+
+<script>
+    var kedisiplinan = "{% url 'dashboard_urls:grafik_kedisiplinan_instalasi_view' %}?tanggal={{tanggal}}"
+    $(document).ready(function () {
+        $.ajax({
+            method: "GET",
+            url: kedisiplinan,
+            success: function (data) {
+                labels = data.label
+                values = data.data
+                setChart()
+            },
+            error: function (error_data) {
+                console.log("error")
+                console.log(error_data)
+            }
+        })
+
+        function setChart() {
+            var ctx = document.getElementById("kedisiplinan_instalasi_chart").getContext('2d');
+            var kedisiplinanChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Prosentase Kedisiplinan Bulan {{bulan|month_name}}',
+                        data: values,
+                        backgroundColor: [
+                            'rgba(20, 99, 80, 0.2)',
+                            'rgba(75, 192, 192, 0.2)',
+                            'rgba(54, 162, 235, 0.2)',
+                            'rgba(153, 102, 255, 0.2)',
+                            'rgba(201, 203, 207, 0.2)',
+                            'rgba(255, 159, 64, 0.2)',
+                            'rgba(255, 205, 86, 0.2)',
+                            'rgba(255, 99, 132, 0.2)',
+                            'rgba(20, 99, 80, 0.2)',
+                            'rgba(75, 192, 192, 0.2)',
+                            'rgba(54, 162, 235, 0.2)',
+                            'rgba(153, 102, 255, 0.2)',
+                            'rgba(201, 203, 207, 0.2)',
+                            'rgba(255, 159, 64, 0.2)',
+                            'rgba(255, 205, 86, 0.2)'
+                            ],
+                        borderColor: [
+                            'rgba(20, 99, 80, 1)',
+                            'rgba(75, 192, 192, 1)',
+                            'rgba(54, 162, 235, 1)',
+                            'rgba(153, 102, 255, 1)',
+                            'rgba(201, 203, 207, 1)',
+                            'rgba(255, 159, 64, 1)',
+                            'rgba(255, 205, 86, 1)',
+                            'rgba(255, 99, 132, 1)',
+                            'rgba(20, 99, 80, 1)',
+                            'rgba(75, 192, 192, 1)',
+                            'rgba(54, 162, 235, 1)',
+                            'rgba(153, 102, 255, 1)',
+                            'rgba(201, 203, 207, 1)',
+                            'rgba(255, 159, 64, 1)',
+                            'rgba(255, 205, 86, 1)'
+                          ],
+                        borderWidth: 2,
+                        fill: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        yAxes: [{
+                            ticks: {
+                                beginAtZero: true
+                            }
+                        }]
+                    }
+                }
+            });
+        }
+    })
+</script>
+
+<script>
+    $(document).ready(function () {
+        $('table.display').DataTable();
+    });
+</script>
+
+<script>
+    const btn = document.getElementById('btn_card_detail');
+    const btnup = document.getElementById('btn_up');
+    const btndown = document.getElementById('btn_down');
+    const card = document.getElementById('card-nakes');
+    btn.addEventListener('click', () => {
+        
+        if (window.matchMedia("(max-width: 1800px)").matches) {
+            if (card.style.height === 'auto' && btnup.style.display === 'block'){
+                btnup.style.display = 'none';
+                btndown.style.display = 'block';
+            }else{
+                card.style.height = 'auto';
+                btnup.style.display = 'block';
+                btndown.style.display = 'none';
+            }
+        }
+    })
+    
+</script>
+
+    
+{% endblock script %}

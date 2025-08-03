@@ -1,0 +1,88 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex flex-row justify-content-between">
+                    <div class="d-flex flex-row mb-1">
+                        <div>
+                            <a href="{{url}}"><i class="fas fa-chevron-left mr-3 pt-1" style="font-size:x-large;"></i></a>
+                        </div>
+                        <p class="h4">{{title}}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <nav class="mb-3">
+                    <div class="nav nav-tabs" id="nav-tab" role="tablist">
+                    <a class="nav-item nav-link" href="{% url 'disiplinsdm_urls:setujui_jadwal' pk=pengajuan.pk %}" role="tab" >Detail Jadwal Perubahan</a>
+                    <a class="nav-item nav-link active" href="{% url 'disiplinsdm_urls:verifikasi_jadwal' pk=pengajuan.pk %}" role="tab" >Semula Menjadi</a>
+                    </div>
+                </nav>
+                <table class="table table-bordered" cellpadding="6">
+                <thead>
+                    <tr>
+                    <th>Tanggal Jadwal</th>
+                    <th>Semula</th>
+                    <th>Menjadi</th>
+                    <th>Status Perubahan</th>
+                    <th>Catatan</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in perbandingan_jadwal %}
+                    <tr>
+                    <td>{{ item.tanggal }}</td>
+                    <td>{{ item.jadwal_approved }}</td>
+                    <td>{{ item.jadwal_draft }}</td>
+                    <td>{{ item.status }}</td>
+                    <td>{{ item.catatan }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                </table>
+
+                <hr class="mt-4">
+                <div class="text-right font-weight-bold">
+                Jam Aktual Draft: {{ jam_aktual }} <br>
+                Standar Minimum Efektif: {{ jam_min }} <br>
+                Standar Maksimum Efektif: {{ jam_max }} <br>
+                Selisih Jam Kerja: {{ selisih }} <br>
+                Total Jam Jadwal Disetujui Sebelumnya: {{ jam_disetujui }}
+                </div>
+
+                <form method="post">
+                    {% csrf_token %}
+                    {{ form|crispy }}
+                    <div class="text-right mt-4">
+                        <button type="submit" name="aksi" value="setujui" class="btn btn-success" onclick="return confirm('Setujui jadwal ini?')">
+                            <i class="fas fa-check"></i> Setujui Jadwal Ini
+                        </button>
+                        <button type="submit" name="aksi" value="tolak" class="btn btn-danger" onclick="return confirm('Yakin ingin menolak jadwal ini?')">
+                            <i class="fas fa-times"></i> Tolak Jadwal
+                        </button>
+                    </div>
+                </form>
+                
+            </div>
+        </div>
+    </div>
+
+{% endblock content %}

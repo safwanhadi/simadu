@@ -1,0 +1,37 @@
+<div class="table table-responsive">
+    <table class="table" id="data_table">
+        <thead>
+            <tr>
+                <th>No</th>
+                <th>Pegawai</th>
+                <th>Instansi</th>
+                <th>Jabatan</th>
+                <th>Periode Jabatan</th>
+                <th>Dokumen</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data %}
+            <tr>
+                <td>{{forloop.counter}}</td>
+                <td>{{item.pegawai.full_name}}</td>
+                <td>{{item.nama_instansi}}</td>
+                <td>{{item.jabatan}}</td>
+                <td>{{item.tgl_mulai}} s/d {{item.tgl_selesai}}</td>
+                <td>{% if item.file %}
+                    <a href="{{item.file.url}}"><i class="fas fa-file-download"></i></a>
+                    {% else %}
+                    <i class="fas fa-times" style="font-weight: bold; color:red"></i>
+                    {% endif %}</td>
+                <td>
+                    <a href="?nip={{item.pegawai.profil_user.nip}}" class="btn btn-primary"><i class="fas fa-user"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_update_bekerja' id=item.id %}" class="btn btn-primary"><i class="fas fa-edit"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_delete_bekerja' pk=item.id %}#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+                    

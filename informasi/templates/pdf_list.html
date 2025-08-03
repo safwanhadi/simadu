@@ -1,0 +1,34 @@
+<!-- templates/pdf_list.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PDF List</title>
+    <style>
+        .pdf-container {
+            width: 100%;
+            height: 100vh;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>PDF Files</h1>
+    <ul>
+        <li><a href="{% url 'informasi_urls:pdf_view' %}">View Example PDF</a></li>
+        <!-- Add more links as needed -->
+    </ul>
+    <div class="row">
+        <div class="col-md-12">
+            
+        </div>
+        <div class="col-md-12">
+            <iframe src="{% url 'informasi_urls:pdf_view' %}" class="pdf-container"></iframe>
+        </div>
+    </div>
+
+    <div>
+        <h1>Using embed</h1>
+        <embed src="{% url 'informasi_urls:pdf_viewer' %}" style="width: 100%; height: 600px;" frameborder="0">
+    </div>
+</body>
+</html>

@@ -1,0 +1,51 @@
+<div class="row">
+    <div class="col-md-12">
+        <div class="form-group row">
+            <div class="col-md-3">
+                NIP/NRK
+            </div>
+            <div class="col-md-9">
+                {{user.profil_user.nip}}
+            </div>
+        </div>
+        <div class="form-group row">
+            <div class="col-md-3">
+                Nama
+            </div>
+            <div class="col-md-9">
+                {{user.full_name}}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-12">
+        <div class="table table-responsive">
+            <table class="table" id="data_table">
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Bidang</th>
+                        <th>Judul</th>
+                        <th>Tanggal</th>
+                        <th>SK</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in data %}
+                    <tr>
+                        <td>{{forloop.counter}}</td>
+                        <td>{{item.bidang}}</td>
+                        <td>{{item.judul}}</td>
+                        <td>{{item.tanggal}}</td>
+                        <td>{% if item.file_sk %}
+                            <a href="{{item.file_sk.url}}"><i class="fas fa-file-download"></i></a>
+                            {% else %}
+                            <i class="fas fa-times" style="font-weight: bold; color:red"></i>
+                            {% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>        
+    </div>
+</div>
+                    

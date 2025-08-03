@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+    
+{% endblock title_page %}
+
+{% block content %}
+    <!-- Default box -->
+<div class="card card-solid">
+    <div class="card-body pb-0">
+        <div class="row">
+            <div class="col-12 d-flex align-items-stretch flex-column">
+                <div class="card bg-light d-flex flex-fill">
+                    <div class="card-header text-muted">
+                       <h4>Profil User</h4>
+                    </div>
+                    <div class="card-body">
+                        {% if object %}
+                            <div class="row">
+                                <div class="col-7">
+                                    <h2 class="lead"><b>{{object.user.full_name}}</b></h2>
+                                    <p class="text-muted text-sm"><b>Tentang Saya: </b>  </p>
+                                    <ul class="ml-4 fa-ul text-muted">
+                                        <li class="mt-2"><span class="fa-li"><i class="fas fa-md fa-building"></i></span> Alamat: {{object.alamat}}</li>
+                                        <li class="mt-2"><span class="fa-li"><i class="fas fa-md fa-phone"></i></span> No Tlp : {{object.no_hp}}</li>
+                                        <li class="mt-2"><span class="fa-li"><i class="fas fa-envelope-open-text"></i></span> Email : {{object.email_pribadi}}</li>
+                                    </ul>
+                                </div>
+                                <div class="col-5 text-center">
+                                    {% if object.foto %}
+                                    <img src="{{object.foto.url}}" alt="user-avatar" class="img-circle img-fluid">
+                                    {% else %}
+                                    <img src="{% static 'dist/img/avatar5.png' %}" alt="user-avatar" class="img-circle img-fluid">
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% else %}
+                            <div>Silahkan Lengkapi profil terlebih dahulu</div>
+                        {% endif %}
+                    </div>
+                    <div class="card-footer">
+                    <div class="text-right">
+                        <a class="btn btn-outline-success" href="{% url 'myaccount_urls:profil_update_view' pk=object.user.id %}">Update Profil</a>
+                        <a href="{% url 'myaccount_urls:ganti_password_view' %}" class="btn btn-sm bg-teal">Ubah Password</a>
+                    </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock content %}
+
+{% block script %}
+
+{% endblock script %}

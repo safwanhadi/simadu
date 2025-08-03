@@ -1,0 +1,24 @@
+<div class="row">
+    <div class="col-md-12 d-flex justify-content-around">
+        <div class="pt-2 pb-2 pr-2 pl-2 mb-4 {% if data_detail.status == 'usulan' %} border border-danger rounded {% endif %}">
+            <span class="pr-3">Usulan</span>
+            <span><i class="fab fa-dochub" style="color: red;"></i></span>
+        </div>
+        <div class="pt-2 pb-2 pr-2 pl-2 mb-4 {% if data_detail.status == 'proses' %} border border-warning rounded {% endif %}">
+            <span class="pr-3">Proses</span>
+            <span><i class="far fa-hourglass" style="color:rgb(255, 213, 0);"></i></span>
+        </div>
+        <div class="pt-2 pb-2 pr-2 pl-2 mb-4 {% if data_detail.status == 'tidak ditindaklanjut' %} border border-success rounded {% endif %}">
+            <span class="pr-3">Tidak di TL</span>
+            <span><i class="fas fa-times" style="color: red;"></i></span>
+        </div>
+        <div class="pt-2 pb-2 pr-2 pl-2 mb-4 {% if data_detail.status == 'tindaklanjut' %} border border-success rounded {% endif %}">
+            <span class="pr-3">Di TL</span>
+            <span><i class="fas fa-file-signature" style="color: greenyellow;"></i></span>
+        </div>
+        <div class="pt-2 pb-2 pr-2 pl-2 mb-4 {% if data_detail.status == 'selesai' %} border border-primary rounded {% endif %}">
+            <span class="pr-3">Selesai</span>
+            <span><i class="far fa-calendar-check" style="color: blue;"></i></span>
+        </div>
+    </div>
+</div>

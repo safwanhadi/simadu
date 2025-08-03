@@ -1,0 +1,217 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+{% load dict_utils %}
+{% load form_helper %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex flex-row justify-content-between">
+                    <div class="d-flex flex-row mb-1">
+                        <div>
+                            <a href="{{url}}"><i class="fas fa-chevron-left mr-3 pt-1" style="font-size:x-large;"></i></a>
+                        </div>
+                        <p class="h4">{{title}}</p>
+                    </div>
+                    <div>
+                        {% if status == 'Draft' %}
+                            <a href="{% url 'disiplinsdm_urls:draft_export_jadwal_excel' inst=inst bulan=bulan tahun=tahun %}" class="btn btn-warning">Draft Export Excel</a>
+                        {% else %}
+                            <a href="{% url 'disiplinsdm_urls:export_jadwal_excel' inst=inst bulan=bulan tahun=tahun %}" class="btn btn-success">Export excel</a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="container mt-4">
+                    {% if status == 'Draft' %}
+                    <nav class="mb-4">
+                        <div class="nav nav-tabs" id="nav-tab" role="tablist">
+                        <a class="nav-item nav-link {% if tab == 'draft' %}active{% endif %}" href="{% url 'disiplinsdm_urls:jadwal_pivot' inst=inst %}" role="tab" >Draft</a>
+                        <a class="nav-item nav-link {% if tab == 'approved' %}active{% endif %}" href="{% url 'disiplinsdm_urls:jadwal_pivot_approved' inst=inst %}" role="tab" >Jadwal Sebelumnya</a>
+                        </div>
+                    </nav>
+                    {% endif %}
+                    <h3 class="text-center">{{title}} Bulan {{ bulan }} Tahun {{ tahun }}</h3>
+                    <div class="form-group row">
+                        <label for="status" class="col-md-2">Status Jadwal</label>
+                        <div class="col-md-10">{{status}}</div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-bordered table-sm table-striped text-center mt-4">
+                            <thead>
+                                <tr>
+                                    <th>No</th>
+                                    <th>Nama Pegawai</th>
+                                    {% for tgl in tanggal_range %}
+                                        <th>{{ tgl }}</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in data %}
+                                    <tr>
+                                        <td>{{ forloop.counter }}</td>
+                                        <td class="text-left">{{ row.nama }}</td>
+                                        {% for tgl in tanggal_range %}
+                                            <td>
+                                                {% with row.jadwal|dict_get:tgl as shifts %}
+                                                    {% if shifts %}
+                                                    {{ shifts|join:", " }}
+                                                    {% else %}
+                                                    -
+                                                    {% endif %}
+                                                {% endwith %}
+                                            </td>
+                                        {% endfor %}
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="d-flex justify-content-between mb-5 mr-5">
+                        <div class="d-flex justify-content-center flex-column">
+                            <span>Diajukan,</span>
+                            <span>Pujut, {{tanggal_pengajuan|tanggal_indonesia}}</span>
+                            {% if pimpinan_instalasi == request.user %}
+                                {% if not object_draft %}
+                                    <img src="{{ qr_image_pengajuan }}" alt="QR dengan logo" style="width: 150px; height: 150px;"/>
+                                {% else %}
+                                    <form method="post" action="{% url 'disiplinsdm_urls:pengajuan_jadwal_instalasi' inst=inst bulan=bulan tahun=tahun %}" class="mb-3 mt-3">
+                                        {% csrf_token %}
+                                        <button class="btn btn-outline-danger">Pengajuan</button>
+                                    </form>
+                                {% endif %}
+                            {% else %}
+                                {% if not object_draft %}
+                                    <img src="{{ qr_image_pengajuan }}" alt="QR dengan logo" style="width: 150px; height: 150px;"/>
+                                {% else %}
+                                    <button type="button" class="btn btn-outline-danger mb-3 mt-3" disabled>Pengajuan</button>
+                                {% endif %}
+                            {% endif %}
+                            {% if pimpinan_instalasi %}
+                                <p>{{pimpinan_instalasi.full_name_2}}</p>
+                            {% else %}
+                                <p>N/A</p>
+                            {% endif %}
+                            
+                        </div>
+                        <!-- Buat persetujuan kepala seksi disini -->
+                        <div class="d-flex justify-content-center flex-column">
+                            <span>Mengetahui,</span>
+                            <span>Pujut, {{tanggal|tanggal_indonesia}}</span>
+                            {% if pimpinan == request.user %}
+                                {% if approved_jadwal and not object_pengajuan %}
+                                    <img src="{{ qr_image }}" alt="QR dengan logo" style="width: 150px; height: 150px;"/>
+                                {% elif object_pengajuan %}
+                                    <form method="post" action="{% url 'disiplinsdm_urls:approval_jadwal' inst=inst bulan=bulan tahun=tahun %}" class="mb-3 mt-3">
+                                        {% csrf_token %}
+                                        <button class="btn btn-outline-danger">Persetujuan</button>
+                                    </form>
+                                {% else %}
+                                <button class="btn btn-outline-danger" disabled>Persetujuan</button>
+                                {% endif %}
+                            {% else %}
+                                {% if approved_jadwal and not object_pengajuan %}
+                                    <img src="{{ qr_image }}" alt="QR dengan logo" style="width: 150px; height: 150px;"/>
+                                {% else %}
+                                    <button type="button" class="btn btn-outline-danger mb-3 mt-3" disabled>Persetujuan</button>
+                                {% endif %}
+                            {% endif %}
+                            <p>{{pimpinan.full_name_2}}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+{% endblock %}
+
+
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+
+    $(document).ready(function() {
+        $('.sdm').select2();
+        selectOnClose: true
+    });
+</script>
+
+<script>
+    $(document).ready(function(){
+        $('.pegawai').hide();
+    });
+</script>
+
+<script>
+    $(document).ready(function() {
+        $('.sdm').select2({
+            placeholder: 'Cari Pegawai...',
+            minimumInputLength: 3,
+            ajax: {
+                url: "{% url 'myaccount_urls:ajax_pegawai_autocomplete' %}",
+                dataType: 'json',
+                delay: 250,
+                cache: false,  // ⛔ Nonaktifkan cache
+                data: function (params) {
+                    return {
+                        term: params.term, // keyword pencarian
+                    };
+                },
+                processResults: function (data) {
+                    return {
+                        results: data.results
+                    };
+                },
+            },
+
+            // Tambahan debugging (opsional)
+            escapeMarkup: function (markup) {
+                return markup;
+            },
+            templateSelection: function (data) {
+                return data.text;
+            },
+                allowClear: true 
+        });
+        // Tambahan untuk cek hasil final terpilih (opsional)
+        //$('#id_kode_barang').on('select2:select', function (e) {
+        //    console.log("Selected ID:", e.params.data.id);
+        //    console.log("Selected Text:", e.params.data.text);
+        //    console.log("Current value from select2('data'):", $('#id_kode_barang').select2('data'));
+        //});
+    });
+</script>
+
+{% endblock script %}

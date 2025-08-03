@@ -1,0 +1,274 @@
+{% load crispy_forms_tags %}
+<div class="card card-solid">
+    <div class="card-body pl-3 pb-0 pt-3 pr-2 bg-light">
+        <div class="row">
+            <div class="col-md-12">
+                <h6>Keterangan status:</h6>
+            </div>
+        </div>
+        {% include '7_layanan_diklat/progress_indikator.html' %}
+    </div>
+</div>
+{% if case == 'proses' %}
+    {% if request.user.is_staff %}
+    <div class="row mb-5">
+        <div class="col-md-9">
+            <div class="row">
+                <div class="col-md-4 text-bold">Pegawai</div>
+                <div class="col-md-8">: {{detail.pegawai.full_name}}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Instalasi</div>
+                <div class="col-md-8">: {{detail.pegawai.riwayatpenempatan_set.last.penempatan}}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Jenis Diklat</div>
+                <div class="col-md-8">: {{detail.diklat.jenis_diklat}}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Nama Diklat</div>
+                <div class="col-md-8">: {{detail.diklat.nama_diklat}}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Penyelenggara dan Metode Diklat</div>
+                <div class="col-md-8">: {{detail.diklat.penyelenggara}} / {{detail.diklat.metode}}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Tanggal Diklat</div>
+                <div class="col-md-8">: <strong>{{detail.diklat.tgl_mulai|date:'d M Y'}}</strong> s/d <strong>{{detail.diklat.tgl_selesai|date:'d M Y'}}</strong></div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4 text-bold">Brosur dan TOR</div>
+                <div class="col-md-8">: {% if detail.brosur %}<a class="btn btn-outline-primary" href="{{detail.brosur.url}}">Brosur</a>{%else%}<button class="btn btn-outline-warning">Belum ada brosur</button>{% endif %} 
+                  /  {% if detail.tor %} <a class="btn btn-warning" href="detail.tor.url">TOR</a>{% else %}<button class="btn btn-outline-warning">Belum ada TOR</button>{% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 text-center">
+            <button class="btn btn-outline-info p-3">Buat Grup Diklat</button>
+            <a href="{% url 'layanan_urls:layanan_diklat_pengalihan_view' pk=detail.diklat.id %}" class="btn btn-outline-info p-3">Alihkan Diklat</a>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-12 table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Atasan Langsung</th>
+                        <th>Pejabat Administrator</th>
+                        <th>Persetujuan Pimpinan</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>{{nama_verifikator.nama_atasan1}}</td>
+                        <td>{{nama_verifikator.nama_atasan2}}</td>
+                        <td>{{nama_verifikator.direktur}}</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            {% if request.user.is_staff and request.user.profil_user.nip == nama_verifikator.nip_atasan1 %}
+                            <a href="{% url 'layanan_urls:layanan_diklat_update_view' id=detail.id %}?case=proses&level=1#openModal" class="btn btn-outline-info mr-3" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% if detail.verifikasidiklat.persetujuan1 %}
+                                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                                {% else %}
+                                    <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                                {% endif %}
+                            {% elif detail.verifikasidiklat.persetujuan1 %}
+                            <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                            {% else %}
+                            <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if request.user.is_staff and request.user.profil_user.nip == nama_verifikator.nip_atasan2 %}
+                                {% if detail.verifikasidiklat.persetujuan1 %}
+                                    <a href="{% url 'layanan_urls:layanan_diklat_update_view' id=detail.id %}?case=proses&level=2#openModal" class="btn btn-outline-info mr-3" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% else %}
+                                    <a href="#" class="btn btn-outline-info mr-3 disabled" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% endif %}
+                                {% if detail.verifikasidiklat.persetujuan2 %}
+                                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                                {% else %}
+                                    <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                                {% endif %}
+                            {% elif detail.verifikasidiklat.persetujuan2 %}
+                            <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                            {% else %}
+                            <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if request.user.is_staff and request.user.profil_user.nip == nama_verifikator.nip_direktur %}
+                                {% if detail.verifikasidiklat.persetujuan2 %}
+                                    <a href="{% url 'layanan_urls:layanan_diklat_update_view' id=detail.id %}?case=proses&level=3#openModal" class="btn btn-outline-info mr-3" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% else %}
+                                    <a href="#" class="btn btn-outline-info mr-3 disabled" id="openModalBtn"><i class="fas fa-edit"></i></a>
+                                {% endif %}
+                                {% if detail.verifikasidiklat.persetujuan3 %}
+                                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                                {% else %}
+                                    <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                                {% endif %}
+                            {% elif detail.verifikasidiklat.persetujuan3 %}
+                            <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                            {% else %}
+                            <span><i class="fas fa-times text-danger fa-1x"></i></span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            {% if detail.verifikasidiklat %}
+                                {% if detail.verifikasidiklat.catatan1 %}
+                                    <p>{{detail.verifikasidiklat.catatan1}}</p>
+                                {% else %}
+                                    N/A
+                                {% endif %}    
+                            {% else %}
+                                <span class="text-muted">Catatan: </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if detail.verifikasidiklat %}
+                                {% if detail.verifikasidiklat.catatan2 %}
+                                    <p>{{detail.verifikasidiklat.catatan2}}</p>
+                                {% else %}
+                                    N/A
+                                {% endif %}    
+                            {% else %}
+                                <span class="text-muted">Catatan: </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if detail.verifikasidiklat %}
+                                {% if detail.verifikasidiklat.catatan3 %}
+                                    <p>{{detail.verifikasidiklat.catatan3}}</p>
+                                {% else %}
+                                    N/A
+                                {% endif %}    
+                            {% else %}
+                                <span class="text-muted">Catatan: </span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div> 
+    {% endif %}
+    {% if request.user.is_superuser %}
+        <div class="row">
+            <div class="col-md-12 text-center pt-5">
+                <span>Klik Tombol Proses Usulan untuk konfirmasi kepada <span style="font-weight: bold; color:blue;">{{detail.pegawai.full_name}}</span> bahwa usulannya sedang diproses untuk menentukan apakah usulan akan ditindaklanjut atau tidak</span><br><br>
+                <form method="post">
+                    {% if detail.verifikasidiklat.persetujuan3 %}
+                    <div class="d-flex justify-content-center">
+                        {% csrf_token %}
+                        {{form | crispy}}
+                        {{riwayat_form | crispy}}
+                    </div>
+                    <button class="btn btn-outline-primary" type="submit">Proses Usulan &nbsp;&nbsp; <i class="fas fa-fast-forward"></i></button>
+                    {% else %}
+                    <div class="d-flex justify-content-center">
+                        <div id="div_id_layananusulandiklat_set-0-status" class="form-group">
+                            <div> 
+                                <select name="layananusulandiklat_set-0-status" class="select form-control" aria-describedby="id_layananusulandiklat_set-0-status_helptext" id="id_layananusulandiklat_set-0-status" disabled> 
+                                    <option value="proses">Proses</option> 
+                                    <option value="tidak ditindaklanjut">Tidak ditindaklanjut</option>
+                                </select> 
+                                <small id="hint_id_layananusulandiklat_set-0-status" class="form-text text-muted">Pilih salah satu pilihan Proses/Tidak ditindaklanjut</small> 
+                            </div> 
+                        </div> 
+                    </div>
+                    <button class="btn btn-outline-primary" type="submit" disabled>Proses Usulan &nbsp;&nbsp; <i class="fas fa-fast-forward"></i></button>
+                    {% endif %}
+                </form>
+            </div>  
+        </div>
+    {% endif %}
+{% elif case == 'spt' %}
+    <div class="row pl-3 pr-3">
+        <div class="col-md-12 text-center">
+            <a href="{% url 'file_urls:text_spt_view' layanan_id=detail.id %}" class="btn btn-outline-warning p-5 mr-2" style="font-size: larger;">Tambah Text SPT</a>
+            <a href="{% url 'file_urls:spt_diklat_view' layanan_id=detail.id %}" class="btn btn-outline-info p-5" style="font-size: larger;" >Unduh draft SPT</a>
+        </div> 
+        <div class="col-md-12 text-center pt-5">
+            <span>Unggah SPT dan Bukti Bayar lalu klik Tombol Lanjutkan untuk konfirmasi kepada <span style="font-weight: bold; color:blue;">{{detail.pegawai.full_name}}</span> bahwa usulan diklatnya disetujui</span><br><br>
+        </div>
+        <div class="col-md-12 d-flex justify-content-center">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                {{form | crispy}}
+                {{riwayat_form | crispy}}
+                <button class="btn btn-outline-primary" type="submit">Lanjutkan &nbsp;&nbsp; <i class="fas fa-fast-forward"></i></button>
+            </form>
+        </div>
+    </div>
+{% elif case == 'laporan' %}
+    <div class="row">
+        <div class="col-md-12">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                {{form | crispy}}
+                {{riwayat_form | crispy}}
+                <input type="submit" value="Simpan" class="btn btn-success">
+            </form>
+        </div>
+    </div>
+{% elif case == 'detail' %}
+<div class="row">
+    <div class="col-md-12 mt-4">
+        <div class="row pl-3 pr-3">
+            <div class="col-md-6">
+                <div class="row">
+                    <div class="col-md-4 text-bold">Nama</div>
+                    <div class="col-md-8">: {{detail.pegawai.full_name}}</div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Nama Diklat</div>
+                    <div class="col-md-8">: {{detail.diklat.nama_diklat}}</div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Penyelenggara</div>
+                    <div class="col-md-8">: {{detail.diklat.penyelenggara}}</div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Tgl Sertifikat</div>
+                    <div class="col-md-8">: {{detail.diklat.tgl_sertifikat}}</div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">No Sertifikat</div>
+                    <div class="col-md-8">: {{detail.diklat.no_sertifikat}}</div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Tgl Mulai</div>
+                    <div class="col-md-8">: {{detail.diklat.tgl_mulai}}</div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Tgl Selesai</div>
+                    <div class="col-md-8">: {{detail.diklat.tgl_selesai}}</div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Sertifikat</div>
+                    {% if detail.diklat.file %}
+                        <div class="col-md-8">: <a href="{{detail.diklat.file.url}}"><i class="fas fa-file-word"></i> Download sertifikat</a></div>
+                    {% else %}
+                    <div class="col-md-8">: <span>Belum ada file</span></div>
+                    {% endif %}
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-4 text-bold">Laporan</div>
+                    {% if detail.diklat.file_laporan %}
+                        <div class="col-md-8">: <a href="{{detail.diklat.file_laporan.url}}"><i class="fas fa-file-word"></i> Download Laporan</a></div>
+                    {% else %}
+                    <div class="col-md-8">: <span>Belum ada file</span></div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}

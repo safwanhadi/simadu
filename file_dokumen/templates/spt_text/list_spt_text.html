@@ -1,0 +1,42 @@
+<div class="col-md-12">
+    <div class="table table-responsive">
+        <table class="table" id="data_table">
+            <thead>
+                <tr>
+                    <th>No</th>
+                    <th>Pegawai</th>
+                    <th>Nama Diklat</th>
+                    <th>Dasar Pelaksanaan</th>
+                    <th>Untuk/Tujuan Pelaksanaan</th>
+                    <th>Aksi</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in data %}
+                <tr>
+                    <td>{{forloop.counter}}</td>
+                    <td>
+                        {% if item.diklat.riwayatdiklat_set.last.pegawai.all|length > 1 %}
+                        <ol>
+                            {% for item in item.diklat.riwayatdiklat_set.last.pegawai.all %}
+                                <li>{{item.full_name}}</li>
+                            {% endfor %}
+                        </ol>
+                        {% else %}
+                            {% for item in item.diklat.riwayatdiklat_set.last.pegawai.all %}
+                                {{item.full_name}}
+                            {% endfor %}
+                        {% endif %}
+                        
+                    </td>
+                    <td>{{item.diklat.riwayatdiklat_set.last.nama_diklat}}</td>
+                    <td>{{item.dasar_pelaksanaan | safe}}</td>
+                    <td>{{item.tujuan_pelaksanaan | safe}}</td>
+                    <td><a href="{% url 'file_urls:text_spt_update_view' diklat_id=item.diklat.riwayatdiklat_set.first.id id=item.id %}?f=block" class="btn btn-outline-info"><i class="fas fa-edit"></i></a> </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>        
+</div>
+                    

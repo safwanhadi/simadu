@@ -1,0 +1,57 @@
+<div class="row">
+    <div class="col-md-12">
+        <div class="form-group row">
+            <div class="col-md-3">
+                NIP/NRK
+            </div>
+            <div class="col-md-9">
+                {{user.profil_user.nip}}
+            </div>
+        </div>
+        <div class="form-group row">
+            <div class="col-md-3">
+                Nama
+            </div>
+            <div class="col-md-9">
+                {{user.first_name}} {{user.last_name}}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-12">
+        <div class="table table-responsive">
+            <table class="table" id="data_table">
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Jenis Cuti</th>
+                        <th>Alasan </th>
+                        <th>Tanggal </th>
+                        <th>Lama </th>
+                        <th>Tahun Cuti</th>
+                        <th>Status File</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in data %}
+                    <tr>
+                        <td>{{forloop.counter}}</td>
+                        <td>{{item.jenis_cuti}}</td>
+                        <td>{{item.alasan_cuti}}</td>
+                        <td>{{item.tgl_mulai_cuti}} s/d {{tgl_akhir_cuti}}</td>
+                        <td>{{item.lama_cuti}}</td>
+                        <td>{{item.tahun_cuti}}</td>
+                        <td>{% if item.file %}
+                            <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                            {% else %}
+                            <i class="fas fa-times" style="font-weight: bold; color:red"></i>
+                            {% endif %}</td>
+                        <td><button class="btn btn-outline-danger" disabled>Tidak ada aksi</button></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>        
+    </div>
+</div>
+                    

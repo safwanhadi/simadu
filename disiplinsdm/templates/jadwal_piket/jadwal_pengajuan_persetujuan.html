@@ -1,0 +1,114 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+{% load form_helper %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block content %}
+<div class="card">
+  {% querystring_filter 'q' 'inst' 'bulan' 'tahun' as filtered_query %}
+  <div class="card-header">
+    <div class="d-flex flex-row justify-content-between">
+      <div class="d-flex flex-row mb-1">
+        <div>
+          <a href="{{ url }}{% if filtered_query %}?{{filtered_query}}{% endif %}"><i class="fas fa-chevron-left mr-3 pt-1" style="font-size:x-large;"></i></a>
+        </div>
+        <p class="h4">{{ title }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="card-body">
+    {% if object.status == 'diajukan' %}
+      <nav class="mb-3">
+        <div class="nav nav-tabs" id="nav-tab" role="tablist">
+          <a class="nav-item nav-link active" href="{% url 'disiplinsdm_urls:setujui_jadwal' pk=object.pk %}{% if filtered_query %}?{{filtered_query}}{% endif %}" role="tab" >Detail Jadwal Perubahan</a>
+          <a class="nav-item nav-link" href="{% url 'disiplinsdm_urls:verifikasi_jadwal' pk=object.pk %}{% if filtered_query %}?{{filtered_query}}{% endif %}" role="tab" >Semula Menjadi</a>
+        </div>
+      </nav>
+    {% endif %}
+    
+    <p><strong>Profesi:</strong> {{ object.jenis_sdm }}</p>
+    <p><strong>Instalasi:</strong> {{ object.instalasi }}</p>
+    <hr>
+
+    {% for minggu in minggu_data %}
+    <h5 class="mt-4">Minggu ({{ minggu.range.0 }} - {{ minggu.range.6 }})</h5>
+    <table class="table table-sm table-bordered">
+        <thead class="thead-light">
+        <tr>
+            <th>Tanggal</th>
+            <th>Kategori Jadwal</th>
+            <th>Jam</th>
+            <th>Catatan</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for hari in minggu.data %}
+        <tr {% if hari.libur %}class="table-warning"{% endif %}>
+            <td>{{ hari.tanggal|date:"l, d M Y" }}</td>
+            <td>{{ hari.kategori }}</td>
+            <td>{{ hari.jam }} jam</td>
+            <td>{{ hari.catatan|default:"-" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="text-right mb-3">
+        Total jam minggu ini: <strong>{{ minggu.total_jam }} jam</strong>
+        {% if minggu.total_jam < 39 %}
+        <span class="badge badge-primary">Ringan 🔵</span>
+        {% elif minggu.total_jam <= 40 %}
+        <span class="badge badge-success">Ideal 🟢</span>
+        {% else %}
+        <span class="badge badge-danger">Overload 🔴</span>
+        {% endif %}
+    </div>
+    {% endfor %}
+
+    <hr>
+    <div class="text-right font-weight-bold">
+    Total jam kerja bulan ini: {{ total_bulanan }} jam<br>
+    Standar minimum: {{ standar_min }} jam<br>
+    Standar maksimum: {{ standar_max }} jam<br>
+    Selisih: {{ selisih }} jam
+    </div>
+    
+    <form method="post">
+      {% csrf_token %}
+      {% if object.status != 'draft' %}
+        <div class="form-group mt-4">
+          <label for="alasan_penolakan"><strong>Alasan Penolakan</strong> (opsional, jika ingin menolak jadwal):</label>
+          <textarea name="alasan_penolakan" rows="3" class="form-control" placeholder="Tuliskan alasan penolakan jika Anda menolak jadwal ini..."></textarea>
+        </div>
+      {% endif %}
+      <div class="text-right mt-4">
+        {% if object.status == 'draft' or object.status == 'ditolak' %}
+          <button type="submit" class="btn btn-success" onclick="return confirm('Ajukan jadwal ini?')">
+            <i class="fas fa-save"></i> Simpan pengajuan Ini
+          </button>
+        {% else %}
+          <button type="submit" name="aksi" value="setujui" class="btn btn-success" onclick="return confirm('Setujui jadwal ini?')">
+            <i class="fas fa-check"></i> Setujui Jadwal Ini
+          </button>
+          <button type="submit" name="aksi" value="tolak" class="btn btn-danger" onclick="return confirm('Yakin ingin menolak jadwal ini?')">
+            <i class="fas fa-times"></i> Tolak Jadwal
+          </button>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock content %}

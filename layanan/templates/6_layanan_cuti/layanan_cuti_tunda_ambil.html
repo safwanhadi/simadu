@@ -1,0 +1,136 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+Layanan cuti
+{% endblock title_page %}
+
+{% block styles %}
+<link rel="stylesheet" href="{% static 'dist/css/yancuti.css' %}">
+{% endblock styles %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block cardtitle %}
+<strong>Layanan Cuti</strong>
+{% endblock cardtitle %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="row">
+            <div class="col-md-9">
+                <div class="card mb-5">
+                    <div class="card-header">
+                        <div class="d-flex flex-row justify-content-between">
+                            <div class="d-flex flex-row mb-1">
+                                <a href="{% url 'layanan_urls:layanan_cuti_view' status='riwayat' %}" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
+                                <h5 id="card_title_cuti">{{card_title}}</h5>
+                            </div>
+                            <div>
+                                {% if status == 'riwayat' %}
+                                <a class="btn btn-outline-success" href="{% url 'layanan_urls:layanan_cuti_view' status='baru' %}" id="add_data" value="Ajukan Cuti">Ajukan Cuti</a>
+                                {% else %}
+                                <a class="btn btn-outline-success" href="{% url 'layanan_urls:layanan_cuti_view' status='riwayat' %}" id="add_data" value="Riwayat Cuti">Riwayat Cuti</a>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="row" id="form_data">
+                            <div class="col-md-12">
+                                <div class="row">
+                                    {% if not request.user.is_superuser %}
+                                    <div class="col-md-12 border border-success border-block rounded p-2" style="background-color: rgb(164, 233, 176);">
+                                        {% if cek_sisa_cuti > 0 %}
+                                            <span>
+                                                Sisa cuti tahunan anda {{cek_sisa_cuti}} hari
+                                                {% if cek_sisa_tunda_cuti > 0 %}
+                                                    dan sisa cuti tertunda {{cek_sisa_tunda_cuti}} hari
+                                                {% endif %}
+                                            </span> 
+                                        {% else %}
+                                            <span>
+                                                Jatah cuti tahunan anda sudah habis 
+                                                {% if cek_sisa_tunda_cuti > 0 %}
+                                                    dan sisa cuti tertunda {{cek_sisa_tunda_cuti}} hari
+                                                {% endif %}
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                <div class="mt-3">
+                                    {% include '6_layanan_cuti/layanan_cuti_navs.html' %}
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        <form method="post" id="add_cuti_tunda">
+                                            {% csrf_token %}
+                                                {{form | crispy}}
+                                                {{ layanan_form.management_form }}
+                                                {% for item_form in layanan_form %}
+                                                    {{ item_form | crispy }}
+                                                {% endfor %}
+                                                <input type="submit" value="Simpan" class="btn btn-success mt-3">
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        
+            <div class="col-md-3">
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-solid">
+                            <div class="card-body p-1">
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        <h5>Deskripsi Menu</h5>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-12" style="font-size: small;">
+                                        <ul>
+                                            <li><span style="font-weight: bold;">Ajukan Cuti</span> adalah menu tempat untuk pengajuan cuti baru ataupun cuti tunda</li>
+                                            <li><span style="font-weight: bold;">Riwayat Cuti</span> adalah menu yang menampilkan riwayat pengajuan cuti pegawai</li>
+                                            <li><span style="font-weight: bold;">Cuti Tunda</span> adalah penundaan cuti tahunan yang telah direncanakan diambil pada tahun berikutnya</li>
+                                            <li><span style="font-weight: bold;">Ambil Cuti Tunda</span> merupakan menu untuk mengklaim pengambilan cuti yang sempat ditunda sebelumnya</li>
+                                            <li><span style="font-weight: bold;">Ajukan Cuti Tunda</span> adalah menu tempat pengajuan penundaan cuti tahunan</li>
+                                            <li><span style="font-weight: bold;">Ajukan Cuti Baru</span> adalah menu untuk pengajuan cuti, baik cuti tahunan ataupun jenis cuti lainnya</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block script %}
+
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+</script>
+
+{% endblock script %}

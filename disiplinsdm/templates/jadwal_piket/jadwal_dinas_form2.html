@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <div class="d-flex flex-row justify-content-between">
+      <div class="d-flex flex-row mb-1">
+        <div>
+          <a href="{{ url }}"><i class="fas fa-chevron-left mr-3 pt-1" style="font-size:x-large;"></i></a>
+        </div>
+        <p class="h4">{{ title }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="row">
+      <div class="col-md-12">
+        <div class="form-group row">
+          <label for="nama" class="col-2">Nama Pegawai</label>
+          <div class="col-9">{{object.pegawai}}</div>
+        </div>
+        <div class="form-group row">
+          <label for="nama" class="col-2">Profesi</label>
+          <div class="col-9">{{object.jenis_sdm}}</div>
+        </div>
+      </div>
+    </div>
+    <hr>
+    <form method="post">
+      {% csrf_token %}
+      {{ formset.management_form }}
+
+      <div id="accordion">
+        {% for minggu in minggu_formsets %}
+        <div class="card">
+          <div class="card-header" id="heading{{ forloop.counter }}">
+            <h5 class="mb-0">
+              <button class="btn btn-link {% if not forloop.first %}collapsed{% endif %}" data-toggle="collapse"
+                data-target="#collapse{{ forloop.counter }}" aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}"
+                aria-controls="collapse{{ forloop.counter }}" type="button">
+                Minggu {{ forloop.counter }} ({{ minggu.range.0 }} – {{ minggu.range|last }})
+              </button>
+            </h5>
+          </div>
+
+          <div id="collapse{{ forloop.counter }}" class="collapse {% if forloop.first %}show{% endif %}"
+            aria-labelledby="heading{{ forloop.counter }}" data-parent="#accordion">
+            <div class="card-body">
+
+              <table class="table table-sm table-bordered">
+                <thead>
+                  <tr>
+                    <th>Tanggal</th>
+                    <th>Kategori Jadwal</th>
+                    <th>Hapus</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for f in minggu.formset %}
+                    <tr {% if f.is_hari_libur %}class="table-secondary"{% endif %}>
+                      {% for hidden in f.hidden_fields %}
+                        {{ hidden }}
+                      {% endfor %}
+                      <td>
+                        {{ f.tanggal }}
+                        {% if f.is_hari_libur %}
+                          <span class="badge badge-warning ml-1">Libur</span>
+                        {% endif %}
+                      </td>
+                      <td>
+                        {{ f.kategori_jadwal }}
+                      </td>
+                      <td>{{ f.DELETE }}</td>
+                    </tr>
+                  {% endfor %}
+
+                </tbody>
+              </table>
+
+              <div class="text-right small mt-2">
+                Total jam: <strong>{{ minggu.total_jam }} jam</strong>
+                {% if minggu.total_jam < 39 %}
+                  <span class="badge badge-primary">Ringan 🔵</span>
+                {% elif minggu.total_jam <= 40 %}
+                  <span class="badge badge-success">Ideal 🟢</span>
+                {% else %}
+                  <span class="badge badge-danger">Overload 🔴</span>
+                {% endif %}
+              </div>
+
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="text-right font-weight-bold mt-4">
+        Total jam kerja bulan ini: {{ total_bulanan }} jam
+      </div>
+
+      <button type="submit" class="btn btn-primary mt-3">Simpan Semua Jadwal</button>
+    </form>
+  </div>
+</div>
+{% endblock content %}

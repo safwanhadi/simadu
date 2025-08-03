@@ -1,0 +1,39 @@
+<div class="table table-responsive">
+    <table class="table" id="data_table">
+        <thead>
+            <tr>
+                <th>No</th>
+                <th>Pegawai</th>
+                <th>Jenis Penghargaan</th>
+                <th>Tahun Perolehan</th>
+                <th>No SK</th>
+                <th>Tanggal SK</th>
+                <th>Status File</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data %}
+            <tr>
+                <td>{{forloop.counter}}</td>
+                <td>{{item.pegawai.full_name}}</td>
+                <td>{{item.jenis_penghargaan}}</td>
+                <td>{{item.tahun_perolehan}}</td>
+                <td>{{item.no_srt_kep}}</td>
+                <td>{{item.tgl_srt_kep}}</td>
+                <td>{% if item.file %}
+                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                    {% else %}
+                    <i class="fas fa-times" style="font-weight: bold; color:red"></i>
+                    {% endif %}</td>
+                <td>
+                    <a href="?nip={{item.pegawai.profil_user.nip}}" class="btn btn-primary"><i class="fas fa-user"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_update_penghargaan' id=item.id %}" class="btn btn-outline-info"><i class="fas fa-edit"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_delete_penghargaan' pk=item.id %}#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+                    

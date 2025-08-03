@@ -1,0 +1,25 @@
+{% extends '11_riwayat_diklat/riwayat_diklat.html' %}
+{% load crispy_forms_tags %}
+
+{% block button %}
+    {% if request.user.is_staff and not request.user.is_superuser%}
+    <a href="{% url 'riwayat_urls:riwayat_diklat_detail' pk=request.user.id %}" class="btn btn-outline-info">Diklatku</a>
+    <a href="{% url 'riwayat_urls:riwayat_diklat' %}" class="btn btn-outline-success">Diklat Pegawai</a>
+    {% elif request.user.is_superuser %}
+    <a href="{% url 'riwayat_urls:riwayat_diklat' %}" class="btn btn-outline-success">Diklat Pegawai</a>
+    {% else %}
+    <a href="{% url 'riwayat_urls:riwayat_diklat_detail' pk=request.user.id %}" class="btn btn-outline-info">Diklatku</a>
+    {% endif %}
+{% endblock %}
+{% block child_content %}
+    <div class="row">
+        <div class="col-md-12">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                {{form | crispy}}
+                <input type="submit" value="Simpan" class="btn btn-success">
+            </form>
+        </div>
+
+    </div>
+{% endblock %}

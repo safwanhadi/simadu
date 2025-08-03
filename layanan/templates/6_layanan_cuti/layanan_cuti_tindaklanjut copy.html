@@ -1,0 +1,128 @@
+{% load crispy_forms_tags %}
+<div class="card card-solid">
+    <div class="card-body pl-3 pb-0 pt-3 pr-2 bg-light">
+        <div class="row">
+            <div class="col-md-12">
+                <h6>Keterangan status:</h6>
+            </div>
+        </div>
+        {% include '6_layanan_cuti/progress_indikator.html' %}
+    </div>
+</div>
+{% if case == 'dakung' %}
+    <div class="row">
+        <div class="col-md-12 mb-5 text-center">
+            <a href="{% url 'file_urls:usulan_cuti_docx' layanan_id=data_detail.id %}" class="btn btn-outline-info p-3">Draft Usulan Cuti</a>
+            <a href="{% url 'file_urls:dakung_docx' layanan_id=data_detail.id %}" class="btn btn-outline-info p-3">Draft Data Dukung</a>
+        </div>
+        <div class="col-md-12">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                {{form | crispy}}
+                {{riwayat_form | crispy}}
+                <input type="submit" value="Simpan" class="btn btn-success">
+            </form>
+        </div>
+    </div>
+{% elif case == 'tindaklanjut' %}
+    <div class="row">
+        <div class="col-md-12 text-center">
+            {% if data_detail.cuti.file_pengajuan %}
+                <a href="{{data_detail.cuti.file_pengajuan.url}}" class="btn btn-outline-info p-3">Usulan Cuti</a>
+            {% else %}
+                <span class="btn btn-outline-danger p-3">Usulan cuti belum diupload</span>
+            {% endif %}
+
+            {% if data_detail.cuti.file_pendukung %}
+                <a href="{{data_detail.cuti.file_pendukung.url}}" class="btn btn-outline-info p-3">Data dukung</a>
+            {% else %}
+                <span class="btn btn-outline-danger p-3">Data dukung belum diupload</span>
+            {% endif %}
+            <a href="{% url 'file_urls:cuti_docx' layanan_id=data_detail.id %}" class="btn btn-outline-dark p-3">Download Draft Cuti</a>
+        </div> 
+        <div class="col-md-12 text-center pt-5">
+            <span>Klik Tombol Tindaklanjut pengajuan untuk konfirmasi kepada <span style="font-weight: bold; color:blue;">{{data_detail.pegawai.full_name}}</span> bahwa pengajuan cutinya disetujui atau tidak</span><br><br>
+            <form method="post">
+                <div class="d-flex justify-content-center">
+                    {% csrf_token %}
+                    {{form | crispy}}
+                    {{riwayat_form | crispy}}
+                </div>
+                <button class="btn btn-outline-primary" type="submit">Tindaklanjut pengajuan &nbsp;&nbsp; <i class="fas fa-fast-forward"></i></button>
+            </form>
+        </div>  
+    </div>
+    {% elif case == 'final' %}
+    <div class="row">
+        <div class="col-md-12">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                {{form | crispy}}
+                {{riwayat_form | crispy}}
+                <input type="submit" value="Simpan" class="btn btn-success">
+            </form>
+        </div>
+    </div>
+    {% elif case == 'detail' %}
+    <div class="row">
+        <div class="col-md-12 mt-4">
+            <div class="row pl-3 pr-3">
+                <div class="col-md-12">
+                    <div class="row">
+                        <div class="col-md-4 text-bold">Pegawai</div>
+                        <div class="col-md-8">: {{data_detail.pegawai.full_name}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Status Cuti</div>
+                        <div class="col-md-8">: {{data_detail.cuti.status_cuti}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Jenis Cuti</div>
+                        <div class="col-md-8">: {{data_detail.cuti.jenis_cuti}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Tgl Cuti</div>
+                        <div class="col-md-8">: {{data_detail.inovasi.tanggal}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">No Surat Cuti</div>
+                        <div class="col-md-8">: {{data_detail.inovasi.no_sk}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Lama Cuti</div>
+                        <div class="col-md-8">: {{data_detail.cuti.lama_cuti}} Hari</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Tahun Cuti</div>
+                        <div class="col-md-8">: {{data_detail.cuti.tahun_cuti}}</div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Surat Pengganti Tugas</div>
+                        {% if data_detail.cuti.file_pendukung %}
+                            <div class="col-md-8">: <a href="{{data_detail.cuti.file_pendukung.url}}"><i class="fas fa-file-word"></i> Download Surat Pengganti Tugas</a></div>
+                        {% else %}
+                        <div class="col-md-8">: <span>Belum ada file</span></div>
+                        {% endif %}
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Surat Pengajuan Cuti</div>
+                        {% if data_detail.cuti.file_pengajuan %}
+                            <div class="col-md-8">: <a href="{{data_detail.cuti.file_pengajuan.url}}"><i class="fas fa-file-word"></i> Download Surat Pengajuan</a></div>
+                        {% else %}
+                        <div class="col-md-8">: <span>Belum ada file</span></div>
+                        {% endif %}
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4 text-bold">Surat Cuti</div>
+                        {% if data_detail.cuti.file %}
+                            <div class="col-md-8">: <a href="{{data_detail.cuti.file.url}}"><i class="fas fa-file-word"></i> Download Surat Cuti</a></div>
+                        {% else %}
+                        <div class="col-md-8">: <span>Belum ada file</span></div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endif %}
+                    

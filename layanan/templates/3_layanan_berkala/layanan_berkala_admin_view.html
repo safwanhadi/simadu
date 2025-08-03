@@ -1,0 +1,168 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+{% load l10n %}
+{% load humanize %}
+
+{% block title_page %}
+Gaji Berkala
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block cardtitle %}
+<strong>List Indikator Layanan</strong>
+{% endblock cardtitle %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="d-flex flex-row justify-content-between">
+                            <div class="d-flex flex-row mb-1">
+                                <a onclick="history.back()" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
+                                <h5 id="card_title">Dokumen Gaji Berkala</h5>
+                            </div>
+                            <!-- <div><input type="button" class="btn btn-outline-success" id="add_data" value="Buat Berkala"></div> -->
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="row" id="list_data" style="display: block;">
+                            <div class="col-md-12">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="row mb-2">
+                                            <div class="col-4">Nama</div>
+                                            <div class="col-8">{{detail.pegawai.first_name}} {{detail.pegawai.last_name}}</div>
+                                        </div>
+                                        <div class="row mb-2">
+                                            <div class="col-4">Berkala Sebelumnya</div>
+                                            <div class="col-8">{{detail.riwayat.tgl_srt_gaji}}</div>
+                                        </div>
+                                        <div class="row mb-2">
+                                            <div class="col-4">Berkala saat ini</div>
+                                            {% if detail.status == 'pengajuan' %}
+                                            <span class="pr-2 pl-2 bg-danger">Proses di Bagian SDM</span>
+                                            {% elif detail.status == 'proses' %}
+                                            <span class="pr-2 pl-2 bg-warning">Proses Pengesahan</span>
+                                            {% else %}
+                                            <span class="pr-2 pl-2 bg-info">{{detail.berkala.tgl_srt_gaji}}</span>
+                                            {% endif %}
+                                        </div>
+                                        <div class="row mb-2">
+                                            <div class="col-4">Status</div>
+                                            <div class="col-8">{{detail.status}}</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <a href="{% url 'file_urls:berkala_docx' layanan_id=layanan_id %}" class="btn btn-outline-info p-5">Draft Dokumen</a>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-12 mt-4">
+                                <h5>Riwayat Kenaikan Gaji Berkala</h5>
+                                <div class="table table-responsive">
+                                    <table class="table" id="data_table">
+                                        <thead>
+                                            <tr>
+                                                <th>No</th>
+                                                <th>Berkala sebelumnya</th>
+                                                <th>Tgl Surat</th>
+                                                <th>Gaji Pokok</th>
+                                                <th>TMT Gaji</th>
+                                                <th>Berkala terbaru</th>
+                                                <th>Aksi</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for item in data %}
+                                            <tr>
+                                                <td>{{forloop.counter}}</td>
+                                                <td>{{item.riwayat.no_srt_gaji}}</td>
+                                                <td>{{item.riwayat.tgl_srt_gaji}}</td>
+                                                <td>Rp.{{item.riwayat.gaji_pkk |floatformat:2|intcomma}}</td>
+                                                <td>{{item.riwayat.tmt_gaji}}</td>
+                                                <td>{{item.berkala.no_srt_gaji}}</td>
+                                                {% if item.status == 'pengajuan' %}
+                                                <td>
+                                                    <a href="{% url 'layanan_urls:layanan_berkala_admin_add_view' layanan_id=item.id nip=item.pegawai.profil_user.nip %}" class="btn btn-outline-success">Buat Berkala</a>
+                                                </td>
+                                                {% elif item.status == 'proses' %}
+                                                <td>
+                                                    <a href="{% url 'layanan_urls:layanan_berkala_admin_upload_view' berkala_id=item.berkala.id layanan_id=item.id nip=item.pegawai.profil_user.nip %}?action=upload" class="btn btn-outline-success">Upload File</a>
+                                                </td>
+                                                {% else %}
+                                                <td>
+                                                    <button type="button" class="btn btn-outline-success" disabled>Done</button>
+                                                    <a href="{% url 'layanan_urls:layanan_berkala_admin_upload_view' berkala_id=item.berkala.id layanan_id=item.id nip=item.pegawai.profil_user.nip %}?action=edit" class="btn btn-outline-success">Edit</a>
+                                                </td>
+                                                {% endif %}
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div> 
+        </div>
+    </div>
+
+<!-- Modal bootstap validasi pengajuan -->
+<!-- Validasi model 1 -->
+  <div class="modal fade" id="modal_pengajuan" tabindex="-1" role="dialog" aria-labelledby="modal_pengajuanTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" role="document">
+      <div class="modal-content">
+        <form method="post">
+            {% csrf_token %}
+            <div class="modal-header">
+                <h5 class="modal-title" id="exampleModalLongTitle">Gaji Berkala</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                Apakah anda ingin mengajukan usulan?
+                <input type="hidden" id="pegawai_val" name="pegawai" >
+                <input type="hidden" id="layanan_val" name="layanan">
+                <input type="hidden" id="status_val" name="status">
+                <input type="hidden" id="riwayat_val" name="riwayat">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Batal</button>
+                <button type="submit" class="btn btn-primary">Lanjutkan</button>
+            </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+{% endblock %}
+
+
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+</script>
+    
+{% endblock script %}

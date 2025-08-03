@@ -1,0 +1,33 @@
+<div class="table table-responsive">
+    <table class="table" id="data_table">
+        <thead>
+            <tr>
+                <th>No</th>
+                <th>Nama</th>
+                <th>No KK</th>
+                <th>File</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data %}
+            <tr>
+                <td>{{forloop.counter}}</td>
+                <td>{{item.pegawai.full_name}}</td>
+                <td>{{item.no_kk}}</td>
+                <td>{% if item.file %}
+                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                    {% else %}
+                    <i class="fas fa-times" style="font-weight: bold; color:red"></i>
+                    {% endif %}</td>
+                <td>
+                    <a href="{% url 'riwayat_urls:riwayat_update_keluarga' id=item.id %}" class="btn btn-outline-info"><i class="fas fa-edit"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_delete_keluarga' pk=item.id %}#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_anggota_keluarga' status='orang-tua' keluarga_id=item.id %}" class="btn btn-outline-success">Tambah Anggota Keluarga</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+                    

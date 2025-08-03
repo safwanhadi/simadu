@@ -1,0 +1,43 @@
+<div class="table table-responsive">
+    <table class="table" id="kunjungan">
+        <thead>
+            <tr>
+                <th>No</th>
+                <th>Nama Pegawai</th>
+                <th>Sub Bidang</th>
+                <th>Jenis Jabatan</th>
+                <th>Nama Jabatan</th>
+                <th>Eselon</th>
+                <th>TMT Jabatan</th>
+                <th>TMT Pelantikan</th>
+                <th>No SK</th>
+                <th>Tanggal SK</th>
+                <th>Status File</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data %}
+            <tr>
+                <td>{{forloop.counter}}</td>
+                <td>{{item.pegawai.first_name}} {{item.pegawai.last_name}}</td>
+                <td>{{item.sub_bidang}}</td>
+                <td>{{item.jns_jabatan}}</td>
+                <td>{{item.nama_jabatan}}</td>
+                <td>{{item.eselon}}</td>
+                <td>{{item.tmt_jabatan}}</td>
+                <td>{{item.tmt_pelatikan}}</td>
+                <td>{{item.no_sk}}</td>
+                <td>{{item.tgl_sk}}</td>
+                <td>{% if item.file %}
+                    <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
+                    {% else %}
+                    <i class="fas fa-times" style="font-weight: bold; color:red"></i>
+                    {% endif %}</td>
+                <td><a href="#" class="btn btn-primary">Riwayat Perpegawai</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+                    

@@ -1,0 +1,7 @@
+<ul class="nav nav-tabs">
+  {% for nakes in jenisnakes %}
+  <li class="nav-item">
+    <a class="nav-link {% if jenissdm.slug == nakes.slug %} active {% endif %}" href="{% url 'dashboard_urls:dashboard_sdm_view' sdm=nakes.slug %}" style="font-size:x-small;">{{nakes.jenis_sdm}}</a>
+  </li>
+  {% endfor %}
+</ul>

@@ -1,0 +1,55 @@
+{% extends 'auth_base.html' %}
+
+{% block title_page %}
+    Login
+{% endblock title_page %}
+
+{% block content %}
+<div class="login-box">
+    <!-- /.login-logo -->
+    <div class="card card-outline card-primary">
+      <div class="card-header text-center">
+        <a href="#" class="h3"><b>SIMADU BERDANSA</b></a>
+        <p><span style="margin-left:-15px; margin-right:-15px; font-size:small;"><span class="huruf">Si</span>stem <span class="huruf">Ma</span>najemen Terpa<span class="huruf">du</span> Sum<span class="huruf">ber</span> <span class="huruf">Da</span>ya Ma<span class="huruf">n</span>u<span class="huruf">s</span>i<span class="huruf">a</span></span> <br> Rumah Sakit Mandalika</p>
+      </div>
+      <div class="card-body">
+        <p class="login-box-msg">Login untuk menggunakan aplikasi</p>
+        {% if form.errors %}
+            <div class="alert alert-danger" id="msg" role="alert">
+                Invalid username or password.
+            </div>
+        {% endif %}
+        <form method="post">
+            {% csrf_token %}
+          <div class="input-group mb-3">
+            <input type="email" class="form-control" placeholder="Email" name="username">
+            <div class="input-group-append">
+              <div class="input-group-text">
+                <span class="fas fa-envelope"></span>
+              </div>
+            </div>
+          </div>
+          <div class="input-group mb-3">
+            <input type="password" class="form-control" placeholder="Password" name="password">
+            <div class="input-group-append">
+              <div class="input-group-text">
+                <span class="fas fa-lock"></span>
+              </div>
+            </div>
+          </div>
+          
+            <div class="col-12 mt-5">
+              <button type="submit" class="btn btn-primary btn-block">Sign In</button>
+            </div>
+            <!-- /.col -->
+          </div>
+        </form>
+  
+        </div>
+      <!-- /.card-body -->
+    </div>
+    <!-- /.card -->
+  </div>
+  <!-- /.login-box -->
+{% endblock content %}
+  

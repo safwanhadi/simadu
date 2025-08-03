@@ -1,0 +1,123 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block styles %}
+<link rel="stylesheet" href="{% static 'dist/css/riwayat.css' %}">
+{% endblock styles %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block cardtitle %}
+<strong>List Indikator Layanan</strong>
+{% endblock cardtitle %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex flex-row justify-content-between">
+                    <div class="d-flex flex-row mb-1">
+                        {% if update_form or request.user.is_superuser and nip %}
+                            <a href="{% url 'riwayat_urls:riwayat_pengangkatan' %}" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
+                        {% endif %}
+                        <h5>Data Riwayat Pengangkatan</h5>
+                    </div>
+                    <div>
+                        {% if not request.user.is_superuser %}
+                        <a href="{% url 'riwayat_urls:riwayat_pengangkatan_urutkan' pk=dok.id %}" class="btn btn-outline-info">Urutkan Dokumen</a>
+                        {% elif nip %}
+                        <a href="{% url 'riwayat_urls:riwayat_pengangkatan_urutkan' pk=dok.id %}?nip={{nip}}" class="btn btn-outline-info">Urutkan Dokumen</a>
+                        {% endif %}
+                        <input type="button" class="btn btn-outline-success" id="add_data" value="Tambah Data">
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row" id="form_data" style="display: {{form_view}};">
+                    <div class="col-md-12">
+                        <div class="text-mute">Kosongkan form yang tidak sesuai dengan pengangkatan anda saat ini.</div>
+                        <form method="post" enctype="multipart/form-data">
+                            {% csrf_token %}
+                            {{form | crispy}}
+                            <input type="submit" value="Simpan" class="btn btn-success">
+                        </form>
+                    </div>
+                </div>
+                <div class="row" id="list_data" style="display: {{data_view}};">
+                    <div class="col-md-12">
+                        {% if nip %}
+                            {% include '4_riwayat_pengangkatan/riwayat_pengangkatan_perorang.html' %}
+                        {% elif request.user.is_superuser  %}
+                            {% include '4_riwayat_pengangkatan/riwayat_pengangkatan.html' %}
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- modal delete data -->
+    <div id="deletedata" class="modal">
+        <!-- Modal content -->
+        <div class="modal-content">
+            <a href="#close" title="Close" class="close">&times;</a>
+            <h2>Delete Data</h2>
+            <p>Apakah benar anda akan menghapus "{{ object }}"?</p>
+            <div class="d-flex justify-content-center">
+                <form action="#close" method="post">{% csrf_token %}
+                    <button class="btn btn-outline-danger" type="submit">Delete</button>
+                </form>
+                <a href="{% url 'riwayat_urls:riwayat_pengangkatan' %}" class="btn btn-outline-info ml-3">Cancel</a>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+</script>
+
+<script>
+    const btn = document.getElementById('add_data');
+    
+    btn.addEventListener('click', () => {
+    const form = document.getElementById('form_data');
+    const data = document.getElementById('list_data');
+
+    if (form.style.display === 'none' && data.style.display === 'block') {
+        // 👇️ this SHOWS the form
+        form.style.display = 'block';
+        data.style.display = 'none';
+        btn.value="Lihat Data"
+      } else {
+        // 👇️ this HIDES the form
+        form.style.display = 'none';
+        data.style.display = 'block';
+        btn.value="Tambah Data"
+      }
+});
+</script>
+    
+{% endblock script %}

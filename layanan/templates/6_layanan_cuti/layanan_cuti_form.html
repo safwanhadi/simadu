@@ -1,0 +1,7 @@
+{% load crispy_forms_tags %}
+<form method="post" id="add_cuti_tunda">
+    {% csrf_token %}
+        {{riwayat_form | crispy}}
+        {{form | crispy}}
+        <input type="submit" value="Simpan" class="btn btn-success mt-3">
+</form>

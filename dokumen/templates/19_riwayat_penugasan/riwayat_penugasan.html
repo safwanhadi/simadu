@@ -1,0 +1,37 @@
+<div class="table table-responsive">
+    <table class="table" id="data_table">
+        <thead>
+            <tr>
+                <th>No</th>
+                <th>Pegawai</th>
+                <th>Jabatan</th>
+                <th>Nama Kegiatan</th>
+                <th>Tempat Kegiatan</th>
+                <th>Sumber Anggaran</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in object_list %}
+            <tr>
+                <td>{{forloop.counter}}</td>
+                <td>{{item.pegawai.full_name}}</td>
+                <td>{{item.jabatan}}</td>
+                <td>{{item.nama_keg}}</td>
+                <td>{{item.tempat_keg}}</td>
+                <td>{% if item.anggaran %}
+                    {{item.sumber_angg}}
+                    {% else %}
+                    Tanpa anggaran
+                    {% endif %}</td>
+                <td>
+                    <a href="?nip={{item.pegawai.profil_user.nip}}" class="btn btn-primary"><i class="fas fa-user"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_update_penghargaan' id=item.id %}" class="btn btn-outline-info"><i class="fas fa-edit"></i></a>
+                    <a href="{% url 'riwayat_urls:riwayat_delete_penghargaan' pk=item.id %}#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+                    

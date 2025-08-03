@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block breadcrumb %}
+<div class="col-sm-6">
+    <ol class="breadcrumb float-sm-right">
+      <li class="breadcrumb-item"><a href="#">{{page}}</a></li>
+      {% if sub_page %}
+      <li class="breadcrumb-item"><a href="#">{{sub_page}}</a></li>
+      {% endif %}
+      {% if title_page %}
+      <li class="breadcrumb-item active"><a href="#">{{title_page}}</a></li>
+      {% endif %}
+    </ol>
+  </div>
+{% endblock breadcrumb %}
+{% block content %}
+{% block subcontent %}{% endblock subcontent %}
+{% endblock content %}
