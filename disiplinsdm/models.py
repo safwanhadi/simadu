@@ -241,44 +241,36 @@ class DaftarKegiatanPegawai(models.Model):
         return f'{self.pegawai.full_name}-{self.kegiatan} ({self.bulan}/{self.tahun})'
     
     @property
+    def visite(self):
+        """
+        Menghitung total kehadiran dengan keterangan 'visite' untuk instance 
+        DaftarKegiatanPegawai ini.
+        Ini adalah cara yang lebih efisien dan lebih 'Django-native'.
+        """
+        # 1. Ambil semua objek terkait dari KehadiranKegiatan.
+        # 2. Filter objek-objek tersebut yang memiliki ket 'visite'.
+        # 3. Hitung jumlahnya.
+        return self.kehadirankegiatan_set.filter(ket__icontains='visite', pegawai__pegawai__profil_user__is_dokter_spesialis=True).count()
+    
+    @property
+    def terjadwal(self):
+        return self.kehadirankegiatan_set.filter(ket__icontains='Sesuai').count()
+    
+    @property
     def jumlah_hadir(self):
-        status_hadir = self.kehadirankegiatan_set.values('pegawai__instalasi').annotate(
-            jlh_hadir = Count(Case(When(Q(hadir=True), then=F('id'))))
-        )
-        hadir = 0
-        if status_hadir:
-            hadir = status_hadir[0]['jlh_hadir']
-        return hadir
+        return self.kehadirankegiatan_set.filter(hadir=True).count()
     
     @property
     def jumlah_tk(self):
-        status_hadir = self.kehadirankegiatan_set.values('pegawai__instalasi').annotate(
-                jlh_tk = Count(Case(When(Q(alasan__alasan='Tanpa Keterangan') & Q(hadir=False), then=F('id'))))
-        )
-        tk = 0
-        if status_hadir:
-            tk = status_hadir[0]['jlh_tk']
-        return tk
+        return self.kehadirankegiatan_set.filter(alasan__alasan__icontains='Tanpa Keterangan').count()
     
     @property
     def jumlah_izin(self):
-        status_hadir = self.kehadirankegiatan_set.values('pegawai__instalasi').annotate(
-            jlh_izin = Count(Case(When(Q(alasan__alasan='Izin') & Q(hadir=False), then=F('id'))))
-        )
-        izin = 0
-        if status_hadir:
-            izin = status_hadir[0]['jlh_izin']
-        return izin
-    
+        return self.kehadirankegiatan_set.filter(alasan__alasan__icontains='Izin').count()
+        
     @property
     def jumlah_sakit(self):
-        status_hadir = self.kehadirankegiatan_set.values('pegawai__instalasi').annotate(
-            jlh_sakit = Count(Case(When(Q(alasan__alasan='Sakit') & Q(hadir=False), then=F('id'))))
-        )
-        sakit = 0
-        if status_hadir:
-            sakit = status_hadir[0]['jlh_sakit']
-        return sakit
+        return self.kehadirankegiatan_set.filter(alasan__alasan='Sakit').count()
 
 
 STATUS_KEHADIRAN = (

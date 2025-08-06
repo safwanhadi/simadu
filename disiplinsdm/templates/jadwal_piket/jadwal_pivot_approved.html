@@ -70,19 +70,40 @@
                                         <td>{{ forloop.counter }}</td>
                                         <td class="text-left">{{ row.nama }}</td>
                                         {% for tgl in tanggal_range %}
-                                            <td>
-                                                {% with row.jadwal|dict_get:tgl as shifts %}
+                                            {% with row.jadwal|dict_get:tgl as shifts %}
+                                                {# Terapkan style langsung pada <td> #}
+                                                <td {% if 'L' in shifts or 'LX' in shifts %}style="background-color: #ffcccc;"{% endif %}>
                                                     {% if shifts %}
-                                                    {{ shifts|join:", " }}
+                                                        {{ shifts|join:", " }}
                                                     {% else %}
-                                                    -
+                                                        -
                                                     {% endif %}
+                                                </td>
+                                            {% endwith %}
+                                        {% endfor %}
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                            <tfoot>
+                                {% for config in shift_summary_config %}
+                                    <tr style="background-color: #e9ecef; font-weight: bold;">
+                                        {# Kolom untuk label Total #}
+                                        <td colspan="2" class="text-left pl-3">TOTAL {{ config.label }} ({{ config.acr }})</td>
+                                        
+                                        {# Looping untuk setiap tanggal #}
+                                        {% for tgl in tanggal_range %}
+                                            <td class="text-center">
+                                                {# Mengambil nilai count dari summary_data #}
+                                                {% with daily_counts=summary_data|dict_get:tgl %}
+                                                    {% with count=daily_counts|dict_get:config.acr %}
+                                                        {{ count|default:0 }}
+                                                    {% endwith %}
                                                 {% endwith %}
                                             </td>
                                         {% endfor %}
                                     </tr>
                                 {% endfor %}
-                            </tbody>
+                            </tfoot>
                         </table>
                     </div>
                     <div class="d-flex justify-content-between mb-5 mr-5">

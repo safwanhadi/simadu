@@ -19,9 +19,10 @@ from .views import (
     VerifikasiJadwalView,
     
     KehadiranListView,
+    KehadiranSpesialisListView,
     KehadiranCreateView,
     KehadiranUpdateView,
-    DetailKehadiranListView,
+    DetailKehadiranView,
     FingerprintAutoUploadView,
     
     HariLiburView,
@@ -51,9 +52,10 @@ urlpatterns = [
     path('verifikasi-jadwal/<int:pk>/', VerifikasiJadwalView.as_view(), name='verifikasi_jadwal'),# verifikasi perubahan jadwal yang diajukan
     
     path('kehadiran/', KehadiranListView.as_view(), name='kehadiran_list'),
+    path('kehadiran-spesialis/', KehadiranSpesialisListView.as_view(), name='kehadiran_spesialis_list'),
     path('kehadiran/add/', KehadiranCreateView.as_view(), name='kehadiran_create'),
     path('kehadiran/<int:pk>/update/', KehadiranUpdateView.as_view(), name='kehadiran_update'),
-    path('kehadiran/user/<int:id>/', DetailKehadiranListView.as_view(), name='kehadiran_detail_user'),
+    path('kehadiran/user/<int:pk>/', DetailKehadiranView.as_view(), name='kehadiran_detail_user'),
     path('kehadiran/upload-fingerprint/', FingerprintAutoUploadView.as_view(), name='kehadiran_upload_fingerprint'),
     
     path('harilibur/', HariLiburView.as_view(), name='harilibur_list'),
