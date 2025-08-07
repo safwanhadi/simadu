@@ -3253,18 +3253,20 @@ class FingerprintProcessor:
             unmatched_scans = list(scans_for_day)
 
             for jadwal in daftar_jadwal:
-                kategori_dinas = jadwal.kategori_jadwal.kategori_dinas.kategori_dinas
-                if kategori_dinas not in ['Reguler', 'Piket']: continue
+                if not jadwal.kategori_jadwal or not jadwal.kategori_jadwal.waktu_datang:
+                    continue
                 
+                kategori_dinas = jadwal.kategori_jadwal.kategori_dinas.kategori_dinas if hasattr(jadwal.kategori_jadwal, 'kategori_dinas') else '-'
                 datang_scan = self._find_and_remove_matching_scan(unmatched_scans, jadwal, self.TIPE_DATANG)
                 self._find_and_remove_matching_scan(unmatched_scans, jadwal, self.TIPE_PULANG)
 
                 if not datang_scan:
+                    waktu_datang = jadwal.kategori_jadwal.waktu_datang if hasattr(jadwal.kategori_jadwal, 'waktu_datang') else None
                     daftar = self._get_or_create_daftar_kegiatan(pengguna, kegiatan_datang, tanggal)
                     KehadiranKegiatan.objects.get_or_create(
                         pegawai=daftar,
-                        tanggal=make_aware(datetime.combine(tanggal, jadwal.kategori_jadwal.waktu_datang or time.min)),
-                        defaults={'hadir': False, 'alasan': alasan_tk, 'ket': f'Tidak hadir untuk jadwal {jadwal.kategori_jadwal.kategori_jadwal}'}
+                        tanggal=make_aware(datetime.combine(tanggal, waktu_datang or time.min)),
+                        defaults={'hadir': False, 'alasan': alasan_tk, 'ket': f'Tidak hadir untuk jadwal {kategori_dinas}'}
                     )
 
     def _find_and_remove_matching_scan(self, available_scans, schedule, scan_type):
