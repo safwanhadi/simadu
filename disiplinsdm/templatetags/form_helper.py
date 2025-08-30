@@ -33,3 +33,28 @@ def querystring_filter(context, *keys):
         if k not in keys:
             del params[k]
     return params.urlencode()
+
+
+@register.filter(name='to_month_name')
+def to_month_name(month_number):
+    """
+    Mengonversi angka (integer) 1-12 menjadi nama bulan Indonesia.
+    """
+    # Pastikan input adalah integer
+    try:
+        month_number = int(month_number)
+    except (ValueError, TypeError):
+        return month_number # Kembalikan nilai asli jika bukan angka
+
+    # Daftar nama bulan (index 0 dikosongkan agar index 1 = Januari)
+    months = [
+        None, 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+        'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ]
+
+    # Periksa apakah angka berada dalam rentang yang valid (1-12)
+    if 1 <= month_number <= 12:
+        return months[month_number]
+    
+    # Kembalikan nilai asli jika angka tidak valid
+    return month_number

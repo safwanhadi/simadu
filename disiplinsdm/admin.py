@@ -9,7 +9,8 @@ from .models import (
     AlasanTidakHadir, 
     JenisKegiatan, 
     DaftarKegiatanPegawai,
-    HariLibur
+    HariLibur,
+    AturanToleransiKeterlambatan
     )
 
 # Register your models here.
@@ -36,6 +37,13 @@ class DaftarKegiatanPegawaiAdmin(admin.ModelAdmin):
         return obj.pegawai.full_name
     get_pegawai.short_description = 'Pegawai'
     get_pegawai.admin_order_field = 'pegawai__full_name'
+
+
+@admin.register(AturanToleransiKeterlambatan)
+class AturanToleransiAdmin(admin.ModelAdmin):
+    list_display = ('nama_aturan', 'urutan', 'batas_atas_menit', 'status_yang_dihasilkan', 'is_aktif')
+    list_editable = ('is_aktif', 'urutan', 'batas_atas_menit', 'status_yang_dihasilkan')
+    list_filter = ('is_aktif',)
 
 admin.site.register(KategoriJadwalDinas)
 admin.site.register(DetailKategoriJadwalDinas, DetailKategoriJadwalDinasAdmin)

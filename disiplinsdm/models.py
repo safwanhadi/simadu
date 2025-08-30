@@ -204,6 +204,42 @@ class ApprovedJadwalDinasSDM(models.Model):
         return f'{self.pegawai.pegawai.full_name} - {self.kategori_jadwal} ({self.tanggal})'
 
 
+# Pastikan choices ini ada dan digunakan oleh KehadiranKegiatan.status_ketepatan
+STATUS_KEHADIRAN = (
+    ('Tepat Waktu', 'Tepat Waktu'),
+    ('Terlambat Ringan', 'Terlambat Ringan'),
+    ('Terlambat Sedang', 'Terlambat Sedang'),
+    ('Terlambat Berat', 'Terlambat Berat'),
+    ('Cepat Pulang', 'Cepat Pulang'),
+)
+
+class AturanToleransiKeterlambatan(models.Model):
+    nama_aturan = models.CharField(max_length=100, help_text="Deskripsi singkat aturan, misal: Toleransi Tepat Waktu")
+    batas_atas_menit = models.PositiveIntegerField(help_text="Batas atas keterlambatan dalam menit untuk aturan ini.")
+    status_yang_dihasilkan = models.CharField(
+        max_length=30, 
+        choices=STATUS_KEHADIRAN,
+        help_text="Status yang akan diberikan jika keterlambatan memenuhi aturan ini."
+    )
+    urutan = models.PositiveSmallIntegerField(
+        default=0, 
+        help_text="Urutan evaluasi aturan, dari yang terkecil (paling ketat) ke terbesar."
+    )
+    is_aktif = models.BooleanField(default=True, help_text="Aktifkan atau nonaktifkan aturan ini.")
+
+    class Meta:
+        ordering = ['urutan']
+        verbose_name = "Aturan Toleransi Keterlambatan"
+        verbose_name_plural = "Aturan Toleransi Keterlambatan"
+
+    def __str__(self):
+        return f"{self.urutan}. Jika terlambat <= {self.batas_atas_menit} menit -> {self.status_yang_dihasilkan}"
+
+# Setelah menambahkan model ini, jalankan:
+# python manage.py makemigrations
+# python manage.py migrate
+
+
 class AlasanTidakHadir(models.Model):
     alasan = models.CharField(max_length=50)
     update_at = models.DateTimeField(auto_now=True)
@@ -272,12 +308,6 @@ class DaftarKegiatanPegawai(models.Model):
     def jumlah_sakit(self):
         return self.kehadirankegiatan_set.filter(alasan__alasan='Sakit').count()
 
-
-STATUS_KEHADIRAN = (
-    ('Tepat Waktu', 'Tepat Waktu'),
-    ('Terlambat', 'Terlambat'),
-    ('Cepat Pulang', 'Cepat Pulang'),
-)
 
 
 class KehadiranKegiatan(models.Model):

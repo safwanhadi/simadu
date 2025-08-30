@@ -6,7 +6,7 @@ from django.views.generic.edit import FormView
 from django.db.models.query import QuerySet
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib import messages
-from django.db.models import Sum, Case, When, F, Q, Min, Max, Value, CharField, Count
+from django.db.models import Q, Min, Max, Value, CharField, Count
 from django.db.models.functions import Extract, Cast, TruncDate
 from django.core.paginator import Paginator
 from django.contrib.staticfiles import finders
@@ -16,20 +16,16 @@ from django.utils.functional import cached_property
 from dateutil.relativedelta import relativedelta
 from dateutil.parser import parse
 from datetime import date, datetime, time, timedelta
-from django.utils.timezone import make_aware, localtime
-from openpyxl.utils.datetime import from_excel
-import pandas as pd
-import os
+from django.utils.timezone import make_aware, get_current_timezone
 from calendar import monthrange, month_name
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from django.http import HttpResponse
 from collections import defaultdict
 from decimal import Decimal
-from django.utils import timezone
 from openpyxl.drawing.image import Image as XLImage
 
-
+from django.utils import timezone
 from .utils import get_mingguan_lengkap, hitung_total_jam, is_user_authorized_to_approve
 from openpyxl import load_workbook
 import calendar
@@ -38,6 +34,9 @@ from io import BytesIO
 import base64
 from PIL import Image
 from openpyxl.utils import get_column_letter
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 from strukturorg.models import SatuanKerjaInduk, UnitOrganisasi, Bidang, SubBidang
@@ -52,6 +51,7 @@ from .models import (
     JenisKegiatan,
     DetailKategoriJadwalDinas,
     HariLibur,
+    AturanToleransiKeterlambatan,
 )
 from dokumen.models import RiwayatPenempatan, RiwayatJabatan
 from strukturorg.models import UnitInstalasi
@@ -2285,7 +2285,7 @@ class JadwalDinasDetailView(LoginRequiredMixin, generic.DetailView):#view untuk 
             'selisih': obj.selisih_jam_kerja,
             'can_approve': self.request.user.is_staff,
         })
-        context['url'] = self.back_url()
+        context['url'] = reverse('disiplinsdm_urls:jadwal_list')
         context['title'] = 'Lihat Jadwal Pegawai'
         context['title_page'] = 'Lihat Jadwal'
         context['riwayat'] = 'active'
@@ -2295,121 +2295,149 @@ class JadwalDinasDetailView(LoginRequiredMixin, generic.DetailView):#view untuk 
 
 class SalinJadwalView(LoginRequiredMixin, UserPassesTestMixin, View):
     template_name = 'jadwal_piket/jadwal_salin_form.html'
-    
+    success_url_name = 'disiplinsdm_urls:jadwal_list'
+    failure_url_name = 'disiplinsdm_urls:salin_jadwal'
+    # NOTE: pastikan nama namespace ini konsisten di urls.py
+
+    # ===== Utilities =====
+    def _url_with_query(self, urlname):
+        base = reverse(urlname)
+        qp = self.request.GET.copy()
+        return f'{base}?{qp.urlencode()}' if qp else base
+
     def get_success_url(self):
-        query_params = self.request.GET.copy()
-        if query_params:
-            return f'{reverse("disiplinsdm_urls:jadwal_list")}?{query_params.urlencode()}'
-        return reverse('disiplinsdm_urls:jadwal_list')
-    
+        return self._url_with_query(self.success_url_name)
+
     def get_failure_url(self):
-        query_params = self.request.GET.copy()
-        if query_params:
-            return f'{reverse("disiplinsdm_urls:salin_jadwal")}?{query_params.urlencode()}'
-        return reverse('disiplinsdm_urls:salin_jadwal')
-    
+        return self._url_with_query(self.failure_url_name)
+
+    # ===== Permissions =====
     def test_func(self):
-        if self.request.user.is_staff:
-            return True
-        return False
+        return self.request.user.is_staff
 
     def handle_no_permission(self):
-        # Bisa redirect atau tampilkan pesan khusus
         messages.error(self.request, 'Anda tidak memiliki izin untuk menyalin data.')
-        return redirect(self.get_success_url())
+        return redirect(self.get_failure_url())
 
-    
-    def get_instalasi(self, user):
-        penempatan = None
-        if user:
-            penempatan = RiwayatPenempatan.objects.filter(pegawai=user, status=True).first()
-        return penempatan
-    
-    def get_initial_jadwal(self, user, bulan, tahun):
-        jadwal = None
-        if user and bulan and tahun:
-            jadwal = JenisSDMPerinstalasi.objects.filter(pegawai=user, bulan=bulan, tahun=tahun)
-        return jadwal
-    
-    def get_pegawai(self, pk):
-        try:
-            if pk:
-                data = Users.objects.get(pk=pk)
-                return data
-            else:
-                return None
-        except Users.DoesNotExist:
+    # ===== Data helpers =====
+    def get_instalasi(self, pegawai):
+        if not pegawai:
             return None
+        # Jika pegawai bisa berupa pk/int, amankan:
+        qs = RiwayatPenempatan.objects.filter(pegawai=pegawai, status=True)
+        return qs.select_related(
+            'penempatan_level1','penempatan_level2','penempatan_level3','penempatan_level4'
+        ).first()
 
-    def get(self, request):
-        login_user = self.request.user
-        sumber = request.GET.get('sumber')
-        tujuan = request.GET.get('tujuan')
-        tgl = request.GET.get('tanggal')
-        tanggal = get_date_from_string(tgl)
-        data_user = Users.objects.all().exclude(is_superuser=True, is_active=False).prefetch_related('riwayatpenempatan_set')
+    def get_jadwal_meta(self, pegawai, bulan, tahun):
+        if not all([pegawai, bulan, tahun]):
+            return None
+        return (JenisSDMPerinstalasi.objects
+                .filter(pegawai=pegawai, bulan=bulan, tahun=tahun)
+                .select_related('unor','bidang','sub_bidang','instalasi','jenis_sdm')
+                .first())
+
+    def get_pegawai(self, pk):
+        if not pk:
+            return None
+        return Users.objects.filter(pk=pk).first()
+
+    def _parse_params(self, request):
+        sumber_pk = request.GET.get('sumber')
+        tujuan_pk = request.GET.get('tujuan')
+        tgl_str  = request.GET.get('tanggal')
+
+        tanggal = get_date_from_string(tgl_str) if tgl_str else timezone.now().date()
+        sumber  = self.get_pegawai(sumber_pk)
+        tujuan  = self.get_pegawai(tujuan_pk)
+        return sumber, tujuan, tanggal
+
+    def _users_queryset_for_login(self, login_user):
+        base = (Users.objects
+                .exclude(is_superuser=True, is_active=False)
+                .prefetch_related('riwayatpenempatan_set'))
+
+        users = base.none()
         if login_user.is_superuser:
-            users = data_user
+            users = base
         elif login_user.is_staff and not login_user.is_superuser:
-            if login_user.profil_admin.instalasi.exists():
-                users = data_user.filter(riwayatpenempatan__penempatan_level4__in = login_user.profil_admin.instalasi.values_list('pk', flat=True), riwayatpenempatan__status=True)
-            elif login_user.profil_admin.sub_bidang:
-                users = data_user.filter(riwayatpenempatan__penempatan_level3 = login_user.profil_admin.sub_bidang, riwayatpenempatan__status=True)
-            elif login_user.profil_admin.bidang:
-                users = data_user.filter(riwayatpenempatan__penempatan_level2 = login_user.profil_admin.bidang, riwayatpenempatan__status=True)
-            elif login_user.profil_admin.unor:
-                users = data_user.filter(riwayatpenempatan__penempatan_level1 = login_user.profil_admin.unor, riwayatpenempatan__status=True)
-        
-        bulan = tanggal.month
-        tahun = tanggal.year
+            pa = getattr(login_user, 'profil_admin', None)
+            if not pa:
+                return base.none()
+
+            filt = Q(riwayatpenempatan__status=True)
+            if getattr(pa, 'instalasi', None) and pa.instalasi.exists():
+                filt &= Q(riwayatpenempatan__penempatan_level4__in=pa.instalasi.values_list('pk', flat=True))
+            elif getattr(pa, 'sub_bidang', None):
+                filt &= Q(riwayatpenempatan__penempatan_level3=pa.sub_bidang)
+            elif getattr(pa, 'bidang', None):
+                filt &= Q(riwayatpenempatan__penempatan_level2=pa.bidang)
+            elif getattr(pa, 'unor', None):
+                filt &= Q(riwayatpenempatan__penempatan_level1=pa.unor)
+            else:
+                # fallback aman: tidak melihat siapa pun
+                return base.none()
+
+            users = base.filter(filt).distinct()
+        return users
+
+    # ===== HTTP methods =====
+    def get(self, request):
+        login_user = request.user
+        sumber, tujuan, tanggal = self._parse_params(request)
+        bulan, tahun = tanggal.month, tanggal.year
+
+        users = self._users_queryset_for_login(login_user)
+
         selected_instalasi = self.get_instalasi(sumber)
-        selected_sumber = self.get_pegawai(sumber)
-        selected_tujuan = self.get_pegawai(tujuan)
-        selected_jadwal = self.get_initial_jadwal(tujuan, bulan, tahun)
+        selected_jadwal    = self.get_jadwal_meta(tujuan, bulan, tahun)
+
         initial = {
             'instalasi': selected_instalasi,
-            'sumber': selected_sumber,
-            'tujuan': selected_tujuan,
-            'bulan':bulan,
-            'tahun':tahun
+            'sumber': sumber,
+            'tujuan': tujuan,
+            'bulan': bulan,
+            'tahun': tahun,
+            'tanggal': tanggal,
         }
-        form = SalinJadwalForm(initial=initial, instance={
-            'sumber':selected_sumber, 
-            'tujuan':selected_tujuan, 
-            'instalasi':selected_instalasi}
-        )
+
+        form = SalinJadwalForm(initial=initial)
+
         context = {
-            'users':users,
-            'form':form,
-            'title':'Copy jadwal pegawai',
+            'users': users,
+            'form': form,
+            'title': 'Copy jadwal pegawai',
             'selected_instalasi': selected_instalasi,
-            'selected_sumber':selected_sumber,
-            'selected_tujuan':selected_tujuan,
-            'selected_jadwal':selected_jadwal,
-            'url': reverse('disiplinsdm_urls:jadwal_list'),
-            'riwayat':'active',
+            'selected_sumber': sumber,
+            'selected_tujuan': tujuan,
+            'selected_jadwal': selected_jadwal,
+            'url': reverse(self.success_url_name),
+            'riwayat': 'active',
             'selected': 'disiplin',
         }
         return render(request, self.template_name, context)
 
     def post(self, request):
         form = SalinJadwalForm(request.POST)
-        if form.is_valid():
-            sumber = form.cleaned_data['sumber']
-            tujuan = form.cleaned_data['tujuan']
-            bulan = form.cleaned_data['bulan']
-            tahun = form.cleaned_data['tahun']
+        if not form.is_valid():
+            return redirect(self.get_failure_url())
 
-            sumber_inst = JenisSDMPerinstalasi.objects.filter(
-                pegawai=sumber, bulan=bulan, tahun=tahun
-            ).first()
+        sumber = form.cleaned_data['sumber']
+        tujuan = form.cleaned_data['tujuan']
+        bulan = form.cleaned_data['bulan']
+        tahun = form.cleaned_data['tahun']
 
-            if not sumber_inst:
-                messages.warning(request, "Pegawai sumber belum memiliki metadata jadwal bulan ini.")
-                return render(request, self.template_name, {'form': form})
-            
-            # Cek/siapkan metadata untuk pegawai tujuan
-            tujuan_inst, _ = JenisSDMPerinstalasi.objects.get_or_create(
+        sumber_inst = (JenisSDMPerinstalasi.objects
+                       .filter(pegawai=sumber, bulan=bulan, tahun=tahun)
+                       .select_related('unor','bidang','sub_bidang','instalasi','jenis_sdm')
+                       .first())
+
+        if not sumber_inst:
+            messages.warning(request, "Pegawai sumber belum memiliki metadata jadwal bulan ini.")
+            return render(request, self.template_name, {'form': form})
+
+        with transaction.atomic():
+            tujuan_inst, created = JenisSDMPerinstalasi.objects.get_or_create(
                 pegawai=tujuan,
                 bulan=bulan,
                 tahun=tahun,
@@ -2418,37 +2446,44 @@ class SalinJadwalView(LoginRequiredMixin, UserPassesTestMixin, View):
                     'bidang': sumber_inst.bidang,
                     'sub_bidang': sumber_inst.sub_bidang,
                     'instalasi': sumber_inst.instalasi,
-                    'jenis_sdm': sumber_inst.jenis_sdm
+                    'jenis_sdm': sumber_inst.jenis_sdm,
                 }
             )
 
-            # Hapus jadwal lama (jika ada)
-            JadwalDinasSDM.objects.filter(pegawai=tujuan_inst).delete()
+            if not created:
+                messages.warning(
+                    request,
+                    f"Jadwal pegawai atas nama {tujuan_inst.pegawai.full_name} sudah ada!"
+                )
+                # pastikan namespace url benar:
+                return redirect(reverse('disiplinsdm_urls:jadwal_auto_create', kwargs={'pk': tujuan_inst.pk}))
 
-            # Ambil semua jadwal dari pegawai sumber
-            jadwal_sumber = JadwalDinasSDM.objects.filter(
-                pegawai=sumber_inst
-            ).only('tanggal', 'kategori_jadwal')  # Optimasi: ambil field yang dibutuhkan saja
+            # Ambil jadwal sumber (hanya field perlu)
+            jadwal_sumber = (JadwalDinasSDM.objects
+                             .filter(pegawai=sumber_inst)
+                             .only('tanggal', 'kategori_jadwal'))
 
-            # Siapkan list untuk bulk_create
             jadwal_baru = []
-
             for j in jadwal_sumber:
                 try:
                     tanggal_baru = j.tanggal.replace(month=bulan, year=tahun)
-                    jadwal_baru.append(JadwalDinasSDM(
-                        pegawai=tujuan_inst,
-                        tanggal=tanggal_baru,
-                        kategori_jadwal=j.kategori_jadwal
-                    ))
                 except ValueError:
-                    continue  # Lewati error tanggal (misalnya 31 ke Februari)
+                    # mis. 31 → Februari
+                    continue
+                jadwal_baru.append(JadwalDinasSDM(
+                    pegawai=tujuan_inst,
+                    tanggal=tanggal_baru,
+                    kategori_jadwal=j.kategori_jadwal
+                ))
 
-            # Simpan sekaligus ke database
-            JadwalDinasSDM.objects.bulk_create(jadwal_baru)
-            messages.success(request,f"Berhasil menyalin {len(jadwal_baru)} entri jadwal dari {sumber.full_name} ke {tujuan.full_name}.")
-            return redirect(self.get_success_url())
-        return redirect(self.get_failure_url())
+            JadwalDinasSDM.objects.bulk_create(jadwal_baru, ignore_conflicts=True)
+
+        messages.success(
+            request,
+            f"Berhasil menyalin {len(jadwal_baru)} entri jadwal dari {sumber.full_name} ke {tujuan.full_name}."
+        )
+        return redirect(self.get_success_url())
+
 
 
 class SalinJadwalInstalasiView(LoginRequiredMixin, UserPassesTestMixin, View):
@@ -2582,7 +2617,7 @@ class JadwalUpdateView(LoginRequiredMixin, UserPassesTestMixin, generic.UpdateVi
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['title'] = 'Edit jadwal pegawai'
-        context['url'] = self.get_success_url()
+        context['url'] =reverse('disiplinsdm_urls:jadwal_list')
         return context
     
     
@@ -3100,249 +3135,248 @@ class KehadiranUpdateView(LoginRequiredMixin, UserPassesTestMixin, generic.Updat
         return url
 
 
-# finger setelah ditambahkan dokter spesialis
-import logging
-
-# Asumsi model-model ini ada di aplikasi Anda
-# from .models import (
-#     ProfilSDM, JenisKegiatan, DaftarKegiatanPegawai, KehadiranKegiatan,
-#     ApprovedJadwalDinasSDM, AlasanTidakHadir, JenisSDMPerInstalasi
-# )
-
-logger = logging.getLogger(__name__)
-
-def from_excel(excel_time):
-    """Konversi waktu float dari Excel ke objek datetime."""
-    return datetime(1899, 12, 30) + timedelta(days=excel_time)
-
 class FingerprintProcessor:
     """
-    Memproses file fingerprint dari Excel, dengan dukungan untuk jadwal ganda per hari
-    dan logika absensi yang akurat per jadwal.
+    Versi final FingerprintProcessor dengan logika canggih:
+    1. Sistem Keterlambatan Bertingkat yang Dinamis dari Database.
+    2. Sistem Slot Datang-Pulang untuk menangani shift ganda/los shift.
+    3. Penanganan shift malam lintas hari.
+    4. Bekerja sepenuhnya dengan datetime NAIF (tanpa timezone).
     """
     COL_WAKTU, COL_NIP, COL_IO_FLAG = 0, 4, 10
     TIPE_DATANG, TIPE_PULANG = 'Absen Datang', 'Absen Pulang'
 
-    def __init__(self, file):
-        self.file = file
-        self.scan_record = {}
-        self.tanggal_diproses = set()
+    def __init__(self, file_path):
+        self.file_path = file_path
         self.profil_cache = {}
         self.jadwal_cache = {}
         self.relasi_sdm_cache = {}
+        
+        # Mengambil aturan toleransi dinamis dari database saat inisialisasi
+        self.aturan_toleransi = list(
+            AturanToleransiKeterlambatan.objects.filter(is_aktif=True).order_by('urutan')
+        )
+        if not self.aturan_toleransi:
+            logger.warning("Peringatan: Tidak ada aturan toleransi aktif di database.")
+            
+        # Pelacak Slot: Menyimpan jadwal yang slotnya (datang/pulang) sudah terisi
+        self.matched_schedule_slots = defaultdict(lambda: defaultdict(dict))
 
     def run(self):
-        """Titik masuk utama untuk menjalankan proses."""
-        wb = load_workbook(self.file, read_only=True)
-        ws = wb.active
-        rows = list(ws.iter_rows(min_row=3))
-        self._prefetch_data(rows)
-        self._proses_semua_scan(rows)
-        self._tandai_semua_tidak_hadir()
+        """Titik masuk utama untuk menjalankan seluruh proses."""
+        try:
+            wb = load_workbook(self.file_path, read_only=True)
+            ws = wb.active
+        except Exception as e:
+            logger.error(f"Gagal membuka file Excel: {e}")
+            return
 
-    def _prefetch_data(self, rows):
-        """Mengambil semua data yang diperlukan dari database sebelum loop."""
-        all_nips = set()
+        rows = list(ws.iter_rows(min_row=3))
+        if not rows: return
+
+        all_dates = self._get_all_dates_from_rows(rows)
+        self._prefetch_related_data(rows, all_dates)
+        
+        scans_by_employee = self._group_and_sort_scans(rows)
+        
+        for (user_id, scan_date), scans in scans_by_employee.items():
+            self._process_scans_for_employee_day(user_id, scan_date, scans)
+            
+        self._mark_absent_employees()
+
+    # --- TAHAP 1: PERSIAPAN DATA ---
+
+    def _get_all_dates_from_rows(self, rows):
+        """Mendapatkan semua tanggal unik dari file Excel untuk prefetch."""
+        dates = set()
         for row in rows:
-            nip_val = row[self.COL_NIP].value
-            if nip_val:
-                all_nips.add(str(nip_val).strip().replace(' ', ''))
             waktu_scan = self._parse_waktu(row[self.COL_WAKTU].value)
             if waktu_scan:
-                self.tanggal_diproses.add(waktu_scan.date())
+                dates.add(waktu_scan.date())
+        return dates
 
+    def _prefetch_related_data(self, rows, all_dates):
+        """Mengambil semua data yang diperlukan dari database dalam satu kali query."""
+        all_nips = {str(r[self.COL_NIP].value).strip().replace(" ", "") for r in rows if r[self.COL_NIP].value}
         if not all_nips: return
 
-        self.profil_cache = {p.nip: p for p in ProfilSDM.objects.filter(nip__in=all_nips).select_related('user', 'user__profil_user')}
+        self.profil_cache = {p.nip: p for p in ProfilSDM.objects.filter(nip__in=all_nips)}
+        user_ids = [p.user_id for p in self.profil_cache.values()]
         
-        all_user_ids = [p.user.id for p in self.profil_cache.values()]
-        jadwals = ApprovedJadwalDinasSDM.objects.filter(
-            pegawai__pegawai_id__in=all_user_ids,
-            tanggal__in=self.tanggal_diproses
-        ).select_related('pegawai__pegawai', 'kategori_jadwal', 'kategori_jadwal__kategori_dinas')
+        # Ambil jadwal H-1 untuk menangani shift malam
+        dates_to_fetch = all_dates.copy()
+        for d in all_dates:
+            dates_to_fetch.add(d - timedelta(days=1))
         
-        for jadwal in jadwals:
-            key = (jadwal.pegawai.pegawai.id, jadwal.tanggal)
-            if key not in self.jadwal_cache:
-                self.jadwal_cache[key] = []
-            self.jadwal_cache[key].append(jadwal)
-            
-        for tanggal in self.tanggal_diproses:
-            relasi_list = JenisSDMPerinstalasi.objects.filter(pegawai_id__in=all_user_ids, bulan=tanggal.month, tahun=tanggal.year)
-            for relasi in relasi_list:
-                key = (relasi.pegawai_id, tanggal.month, tanggal.year)
-                if key not in self.relasi_sdm_cache:
-                    self.relasi_sdm_cache[key] = relasi
+        schedules = ApprovedJadwalDinasSDM.objects.filter(
+            pegawai__pegawai_id__in=user_ids, tanggal__in=dates_to_fetch
+        ).select_related('pegawai__pegawai', 'kategori_jadwal')
+
+        for jadwal in schedules:
+            self.jadwal_cache.setdefault((jadwal.pegawai.pegawai_id, jadwal.tanggal), []).append(jadwal)
+        
+        for date in all_dates:
+            relations = JenisSDMPerinstalasi.objects.filter(pegawai_id__in=user_ids, bulan=date.month, tahun=date.year)
+            for relasi in relations:
+                self.relasi_sdm_cache[(relasi.pegawai_id, date.month, date.year)] = relasi
 
     def _parse_waktu(self, waktu_value):
-        """Mengurai nilai waktu dari berbagai format di Excel."""
-        if not waktu_value: return None
-        try:
-            if isinstance(waktu_value, str): return parse(waktu_value.replace('.', ':'), dayfirst=True)
-            if isinstance(waktu_value, float): return from_excel(waktu_value)
-            if isinstance(waktu_value, datetime): return waktu_value
-        except (ValueError, TypeError) as e:
-            logger.warning(f"Gagal mengurai waktu: {waktu_value}. Error: {e}")
+        """Mengurai nilai waktu dari Excel menjadi objek datetime naif."""
+        if isinstance(waktu_value, datetime): return waktu_value
+        if isinstance(waktu_value, str):
+            try: return parse(waktu_value.replace('.', ':'), dayfirst=True)
+            except (ValueError, TypeError): return None
         return None
 
-    def _proses_semua_scan(self, rows):
-        """Memproses semua baris data scan dan mencocokkannya dengan jadwal terdekat."""
-        kegiatan_datang, _ = JenisKegiatan.objects.get_or_create(jenis_kegiatan=self.TIPE_DATANG)
-        kegiatan_pulang, _ = JenisKegiatan.objects.get_or_create(jenis_kegiatan=self.TIPE_PULANG)
-
+    def _group_and_sort_scans(self, rows):
+        """Mengelompokkan scan per pegawai per hari dan mengurutkannya secara kronologis."""
+        scans_by_employee = defaultdict(list)
         for row in rows:
             waktu_scan = self._parse_waktu(row[self.COL_WAKTU].value)
-            nip_val = row[self.COL_NIP].value
-            io_flag = row[self.COL_IO_FLAG].value
+            nip_val, io_flag = row[self.COL_NIP].value, row[self.COL_IO_FLAG].value
+            if not all([waktu_scan, nip_val, io_flag in [1, 2]]): continue
 
-            if not waktu_scan or not nip_val or io_flag not in [1, 2]: continue
-            
-            nip_bersih = str(nip_val).strip().replace(' ', '')
-            profil = self.profil_cache.get(nip_bersih)
+            profil = self.profil_cache.get(str(nip_val).strip().replace(" ", ""))
             if not profil: continue
-                
-            pengguna = profil.user
+            
             tipe_kegiatan = self.TIPE_DATANG if io_flag == 1 else self.TIPE_PULANG
-            kegiatan = kegiatan_datang if tipe_kegiatan == self.TIPE_DATANG else kegiatan_pulang
-            
-            scan_key = (nip_bersih, waktu_scan.date())
-            if scan_key not in self.scan_record:
-                self.scan_record[scan_key] = []
-            self.scan_record[scan_key].append((waktu_scan, tipe_kegiatan))
-            
-            daftar = self._get_or_create_daftar_kegiatan(pengguna, kegiatan, waktu_scan.date())
-            
-            tanggal_scan = waktu_scan.date()
-            daftar_jadwal_hari_ini = self.jadwal_cache.get((pengguna.id, tanggal_scan), [])
-            
-            # --- PERUBAHAN KUNCI: Cari jadwal dan selisih waktunya ---
-            jadwal_dinas, selisih = self._cari_jadwal_terdekat(daftar_jadwal_hari_ini, waktu_scan, tipe_kegiatan)
+            scans_by_employee[(profil.user_id, waktu_scan.date())].append({'waktu': waktu_scan, 'tipe': tipe_kegiatan})
+        
+        for key in scans_by_employee:
+            scans_by_employee[key].sort(key=lambda x: x['waktu'])
+        return scans_by_employee
 
-            if not jadwal_dinas and tipe_kegiatan == self.TIPE_PULANG:
-                malam_sebelumnya = tanggal_scan - timedelta(days=1)
-                daftar_jadwal_kemarin = self.jadwal_cache.get((pengguna.id, malam_sebelumnya), [])
-                jadwal_malam_kemarin = [j for j in daftar_jadwal_kemarin if j.kategori_jadwal.kategori_jadwal == 'Malam']
+    # --- TAHAP 2: PROSES INTI ---
+
+    def _process_scans_for_employee_day(self, user_id, scan_date, scans):
+        """Memproses semua scan untuk satu pegawai pada satu hari secara kronologis."""
+        profil = next((p for p in self.profil_cache.values() if p.user_id == user_id), None)
+        if not profil: return
+
+        for scan in scans:
+            tipe_kegiatan_scan, waktu_scan = scan['tipe'], scan['waktu']
+            kegiatan = JenisKegiatan.objects.get(jenis_kegiatan=tipe_kegiatan_scan)
+            
+            jadwal_dinas = None
+            
+            # 1. Cari jadwal di hari yang sama terlebih dahulu
+            available_schedules_today = self._get_available_schedules(user_id, scan_date, tipe_kegiatan_scan)
+            if available_schedules_today:
+                jadwal_dinas, _ = self._calculate_best_schedule_fit(available_schedules_today, waktu_scan, tipe_kegiatan_scan)
+
+            # 2. Jika ini scan PULANG dan tidak ada jadwal cocok hari ini, cari di jadwal shift malam kemarin
+            if not jadwal_dinas and tipe_kegiatan_scan == self.TIPE_PULANG:
+                kemarin = scan_date - timedelta(days=1)
+                available_schedules_kemarin = self._get_available_schedules(user_id, kemarin, tipe_kegiatan_scan)
+                jadwal_malam_kemarin = [j for j in available_schedules_kemarin if 'malam' in j.kategori_jadwal.kategori_jadwal.lower()]
                 if jadwal_malam_kemarin:
-                    jadwal_dinas, selisih = self._cari_jadwal_terdekat(jadwal_malam_kemarin, waktu_scan, tipe_kegiatan)
+                    jadwal_dinas, _ = self._calculate_best_schedule_fit(jadwal_malam_kemarin, waktu_scan, tipe_kegiatan_scan)
+            
+            # 3. Jika jadwal ditemukan (baik hari ini atau kemarin), proses
+            if jadwal_dinas:
+                daftar_kegiatan = self._get_or_create_daftar_kegiatan(profil.user, kegiatan, jadwal_dinas.tanggal)
+                jam_referensi = self._get_schedule_ref_time(jadwal_dinas, tipe_kegiatan_scan)
+                status = self._cek_status_ketepatan(waktu_scan.time(), jam_referensi, tipe_kegiatan_scan)
+                
+                self._save_kehadiran(
+                    daftar_kegiatan, waktu_scan,
+                    hadir=True, status=status,
+                    ket=f"Sesuai jadwal {jadwal_dinas.kategori_jadwal.kategori_jadwal}"
+                )
+                
+                slot_key = 'datang' if tipe_kegiatan_scan == self.TIPE_DATANG else 'pulang'
+                self.matched_schedule_slots[(user_id, jadwal_dinas.tanggal)][jadwal_dinas.id][slot_key] = True
 
-            if profil.is_dokter_spesialis and not jadwal_dinas:
-                KehadiranKegiatan.objects.get_or_create(pegawai=daftar, tanggal=make_aware(waktu_scan), defaults={'hadir': True, 'status_ketepatan': None, 'ket': 'Visite atau cyto spesialis'})
-                continue
+    def _get_available_schedules(self, user_id, scan_date, tipe_kegiatan_scan):
+        """Mendapatkan daftar jadwal yang slotnya (datang/pulang) masih kosong."""
+        all_schedules = self.jadwal_cache.get((user_id, scan_date), [])
+        slot_key = 'datang' if tipe_kegiatan_scan == self.TIPE_DATANG else 'pulang'
+        return [j for j in all_schedules if not self.matched_schedule_slots[(user_id, scan_date)][j.id].get(slot_key)]
 
-            # --- PERBAIKAN: Hanya proses jika jadwal ditemukan DAN dalam rentang 4 jam ---
-            if jadwal_dinas and selisih < timedelta(hours=4):
-                jam_referensi_attr = 'waktu_datang' if tipe_kegiatan == self.TIPE_DATANG else 'waktu_pulang'
-                jam_referensi = getattr(jadwal_dinas.kategori_jadwal, jam_referensi_attr, None)
-                status = self._cek_status_ketepatan(tipe_kegiatan, waktu_scan.time(), jam_referensi)
+    def _calculate_best_schedule_fit(self, jadwal_list, waktu_scan, tipe_kegiatan_scan):
+        """Menghitung jadwal terbaik berdasarkan tipe scan menggunakan datetime naif."""
+        jadwal_terbaik, selisih_terkecil = None, timedelta.max
+        ref_time_attr = 'waktu_datang' if tipe_kegiatan_scan == self.TIPE_DATANG else 'waktu_pulang'
 
-                KehadiranKegiatan.objects.get_or_create(pegawai=daftar, tanggal=make_aware(waktu_scan), defaults={'hadir': True, 'status_ketepatan': status, 'ket':f"Sesuai jadwal {jadwal_dinas.kategori_jadwal.kategori_jadwal}"})
+        for jadwal in jadwal_list:
+            ref_time = getattr(jadwal.kategori_jadwal, ref_time_attr, None)
+            if not ref_time: continue
 
-    def _tandai_semua_tidak_hadir(self):
-        """Memeriksa setiap jadwal. Jika tidak ada scan yang cocok, tandai sebagai tidak hadir."""
+            ref_dt = datetime.combine(jadwal.tanggal, ref_time)
+            if tipe_kegiatan_scan == self.TIPE_PULANG:
+                datang_time = self._get_schedule_ref_time(jadwal, self.TIPE_DATANG)
+                if datang_time and ref_time < datang_time: ref_dt += timedelta(days=1)
+
+            selisih = abs(waktu_scan - ref_dt)
+            if selisih < selisih_terkecil:
+                selisih_terkecil, jadwal_terbaik = selisih, jadwal
+        
+        return jadwal_terbaik, selisih_terkecil
+
+    # --- TAHAP 3: FINALISASI & HELPER ---
+
+    def _mark_absent_employees(self):
+        """Menandai tidak hadir HANYA jika slot DATANG sebuah jadwal kosong setelah semua scan diproses."""
         alasan_tk, _ = AlasanTidakHadir.objects.get_or_create(alasan='Tanpa Keterangan')
         kegiatan_datang, _ = JenisKegiatan.objects.get_or_create(jenis_kegiatan=self.TIPE_DATANG)
 
         for (user_id, tanggal), daftar_jadwal in self.jadwal_cache.items():
-            profil = next((p for p in self.profil_cache.values() if p.user_id == user_id), None)
-            if not profil: continue
-            
-            pengguna = profil.user
-            nip_bersih = profil.nip.replace(' ', '')
-            
-            scans_for_day = self.scan_record.get((nip_bersih, tanggal), [])
-            unmatched_scans = list(scans_for_day)
-
             for jadwal in daftar_jadwal:
-                if not jadwal.kategori_jadwal or not jadwal.kategori_jadwal.waktu_datang:
-                    continue
-                
-                kategori_dinas = jadwal.kategori_jadwal.kategori_dinas.kategori_dinas if hasattr(jadwal.kategori_jadwal, 'kategori_dinas') else '-'
-                datang_scan = self._find_and_remove_matching_scan(unmatched_scans, jadwal, self.TIPE_DATANG)
-                self._find_and_remove_matching_scan(unmatched_scans, jadwal, self.TIPE_PULANG)
-
-                if not datang_scan:
-                    waktu_datang = jadwal.kategori_jadwal.waktu_datang if hasattr(jadwal.kategori_jadwal, 'waktu_datang') else None
-                    daftar = self._get_or_create_daftar_kegiatan(pengguna, kegiatan_datang, tanggal)
-                    KehadiranKegiatan.objects.get_or_create(
-                        pegawai=daftar,
-                        tanggal=make_aware(datetime.combine(tanggal, waktu_datang or time.min)),
-                        defaults={'hadir': False, 'alasan': alasan_tk, 'ket': f'Tidak hadir untuk jadwal {kategori_dinas}'}
+                if not self.matched_schedule_slots[(user_id, tanggal)][jadwal.id].get('datang'):
+                    profil = next((p for p in self.profil_cache.values() if p.user_id == user_id), None)
+                    if not profil: continue
+                    
+                    daftar_kegiatan = self._get_or_create_daftar_kegiatan(profil.user, kegiatan_datang, tanggal)
+                    waktu_datang_jadwal = self._get_schedule_ref_time(jadwal, self.TIPE_DATANG) or time.min
+                    tanggal_absen = datetime.combine(tanggal, waktu_datang_jadwal)
+                    
+                    # ✅ PERBAIKAN: Cek keberadaan kategori_jadwal sebelum diakses
+                    if jadwal.kategori_jadwal and hasattr(jadwal.kategori_jadwal, 'kategori_dinas'):
+                        nama_jadwal = jadwal.kategori_jadwal.kategori_dinas.kategori_dinas
+                    else:
+                        nama_jadwal = "Tanpa Kategori" # Beri nilai default jika tidak ada
+                    
+                    self._save_kehadiran(
+                        daftar_kegiatan, tanggal_absen,
+                        hadir=False, alasan=alasan_tk,
+                        ket=f"Tidak ada scan masuk untuk jadwal {nama_jadwal}"
                     )
 
-    def _find_and_remove_matching_scan(self, available_scans, schedule, scan_type):
-        """Mencari scan terbaik yang cocok untuk jadwal & tipe tertentu, lalu menghapusnya dari daftar."""
-        best_match = None
-        smallest_diff = timedelta.max 
+    def _cek_status_ketepatan(self, jam_scan, jam_referensi, tipe):
+        """Memeriksa status secara dinamis berdasarkan aturan di database."""
+        if not jam_referensi: return None
 
-        ref_time_attr = 'waktu_datang' if scan_type == self.TIPE_DATANG else 'waktu_pulang'
-        ref_time = getattr(schedule.kategori_jadwal, ref_time_attr, None)
-        if not ref_time: return None
-
-        for scan_tuple in available_scans:
-            scan_waktu, scan_io_type = scan_tuple
-            if scan_io_type == scan_type:
-                dt_scan = scan_waktu
-                dt_ref = datetime.combine(schedule.tanggal, ref_time)
-                
-                if scan_type == self.TIPE_PULANG and dt_ref.time() < getattr(schedule.kategori_jadwal, 'waktu_datang', dt_ref.time()):
-                    dt_ref += timedelta(days=1)
-
-                diff = abs(dt_scan - dt_ref)
-                if diff < smallest_diff:
-                    smallest_diff = diff
-                    best_match = scan_tuple
-        
-        if best_match and smallest_diff < timedelta(hours=4):
-            available_scans.remove(best_match)
-            return best_match
-        
-        return None
-
-    def _cari_jadwal_terdekat(self, jadwal_list, waktu_scan, tipe_kegiatan):
-        """Mencari jadwal terbaik dari daftar dan mengembalikan jadwal beserta selisih waktunya."""
-        jadwal_terbaik = None
-        selisih_terkecil = timedelta.max
-        jam_scan = waktu_scan.time()
-
-        for jadwal in jadwal_list:
-            jam_referensi_attr = 'waktu_datang' if tipe_kegiatan == self.TIPE_DATANG else 'waktu_pulang'
-            jam_referensi = getattr(jadwal.kategori_jadwal, jam_referensi_attr, None)
-            if not jam_referensi: continue
-
-            dt_scan = datetime.combine(waktu_scan.date(), jam_scan)
-            dt_referensi = datetime.combine(waktu_scan.date(), jam_referensi)
+        if tipe == self.TIPE_DATANG:
+            selisih = datetime.combine(datetime.min, jam_scan) - datetime.combine(datetime.min, jam_referensi)
+            menit_terlambat = selisih.total_seconds() / 60
+            if menit_terlambat <= 0: return 'Tepat Waktu'
             
-            if tipe_kegiatan == self.TIPE_PULANG and dt_referensi.time() < jam_referensi:
-                 if jadwal.kategori_jadwal.kategori_jadwal == 'Malam':
-                     dt_referensi += timedelta(days=1)
+            for aturan in self.aturan_toleransi:
+                if menit_terlambat <= aturan.batas_atas_menit:
+                    return aturan.status_yang_dihasilkan
+            
+            return self.aturan_toleransi[-1].status_yang_dihasilkan if self.aturan_toleransi else 'Terlambat Berat'
+            
+        elif tipe == self.TIPE_PULANG:
+            return 'Cepat Pulang' if jam_scan < jam_referensi else 'Tepat Waktu'
+        return 'Tepat Waktu'
 
-            selisih = abs(dt_scan - dt_referensi)
-            if selisih < selisih_terkecil:
-                selisih_terkecil = selisih
-                jadwal_terbaik = jadwal
-        
-        # --- PERUBAHAN: Kembalikan jadwal dan selisihnya ---
-        return jadwal_terbaik, selisih_terkecil
+    def _get_schedule_ref_time(self, jadwal, tipe_kegiatan):
+        """Helper untuk mendapatkan waktu datang atau pulang dari jadwal."""
+        if not jadwal.kategori_jadwal: return None
+        return getattr(jadwal.kategori_jadwal, 'waktu_datang' if tipe_kegiatan == self.TIPE_DATANG else 'waktu_pulang', None)
 
     def _get_or_create_daftar_kegiatan(self, pengguna, kegiatan, tanggal):
-        """Metode helper untuk membuat atau mendapatkan DaftarKegiatanPegawai."""
-        relasi_sdm = self.relasi_sdm_cache.get((pengguna.id, tanggal.month, tanggal.year))
-        defaults = {
-            'jenis_sdm': relasi_sdm.jenis_sdm if relasi_sdm else None,
-            'unor': relasi_sdm.unor if relasi_sdm else None,
-            'bidang': relasi_sdm.bidang if relasi_sdm else None,
-            'sub_bidang': relasi_sdm.sub_bidang if relasi_sdm else None,
-            'instalasi': relasi_sdm.instalasi if relasi_sdm else None,
-        }
+        """Helper untuk mengelola objek DaftarKegiatanPegawai."""
+        relasi = self.relasi_sdm_cache.get((pengguna.id, tanggal.month, tanggal.year))
+        defaults = {'jenis_sdm': getattr(relasi, 'jenis_sdm', None), 'unor': getattr(relasi, 'unor', None), 'bidang': getattr(relasi, 'bidang', None), 'sub_bidang': getattr(relasi, 'sub_bidang', None), 'instalasi': getattr(relasi, 'instalasi', None)}
         daftar, _ = DaftarKegiatanPegawai.objects.get_or_create(pegawai=pengguna, kegiatan=kegiatan, bulan=tanggal.month, tahun=tanggal.year, defaults=defaults)
         return daftar
 
-    def _cek_status_ketepatan(self, tipe, jam_scan, jam_referensi):
-        """Memeriksa status ketepatan waktu."""
-        if not jam_referensi: return None
-        if tipe == self.TIPE_DATANG and jam_scan > jam_referensi: return 'Terlambat'
-        elif tipe == self.TIPE_PULANG and jam_scan < jam_referensi: return 'Cepat Pulang'
-        return 'Tepat Waktu'
+    def _save_kehadiran(self, daftar_kegiatan, tanggal_naive, hadir, status=None, alasan=None, ket=''):
+        """Menyimpan data kehadiran menggunakan datetime naif."""
+        defaults = {'hadir': hadir, 'status_ketepatan': status, 'alasan': alasan, 'ket': ket}
+        KehadiranKegiatan.objects.update_or_create(pegawai=daftar_kegiatan, tanggal=tanggal_naive, defaults=defaults)
                     
 
 class FingerprintAutoUploadView(LoginRequiredMixin, UserPassesTestMixin, FormView):
@@ -3401,188 +3435,3 @@ class FingerprintAutoUploadView(LoginRequiredMixin, UserPassesTestMixin, FormVie
         return super().form_valid(form)
     
     
-# finger tanpa dokter spesialis
-# class FingerprintAutoUploadView(LoginRequiredMixin, UserPassesTestMixin, FormView):
-#     template_name = 'kehadirankegiatan/form.html'
-#     form_class = UploadFingerprintForm
-#     success_url = reverse_lazy('disiplinsdm_urls:kehadiran_list')
-    
-#     def test_func(self):
-#         if self.request.user.is_superuser:
-#             return True
-#         return False
-
-#     def handle_no_permission(self):
-#         # Bisa redirect atau tampilkan pesan khusus
-#         messages.error(self.request, 'Anda tidak memiliki izin untuk upload data presensi.')
-#         return redirect(reverse('disiplinsdm_urls:kehadiran_list'))
-    
-#     def get_context_data(self, **kwargs):
-#         context = super().get_context_data(**kwargs)
-#         context['title'] = 'Upload Fingerprint'
-#         context['url'] = reverse_lazy('disiplinsdm_urls:kehadiran_list')
-#         context['selected'] = 'disiplin'
-#         context['riwayat'] = 'active'
-#         return context
-
-#     def form_valid(self, form):
-#         file = form.cleaned_data['file']
-#         wb = load_workbook(file)
-#         ws = wb.active
-#         scan_record = set()
-#         tanggal_diproses = set()
-#         def cek_status_ketepatan(tipe, jam_scan, jam_referensi):
-#             if not jam_referensi:
-#                 return None
-#             if tipe == 'Absen Datang' and jam_scan > jam_referensi:
-#                 return 'Terlambat'
-#             elif tipe == 'Absen Pulang' and jam_scan < jam_referensi:
-#                 return 'Cepat Pulang'
-#             return 'Tepat Waktu'
-
-#         # === 1. Proses semua data fingerprint ===
-#         for row in ws.iter_rows(min_row=3):
-#             waktu_scan = row[0].value
-#             try:
-#                 if isinstance(waktu_scan, str):
-#                     waktu_scan = waktu_scan.replace('.', ':')
-#                     waktu_scan = parse(waktu_scan, dayfirst=True)
-#                 elif isinstance(waktu_scan, float):
-#                     waktu_scan = from_excel(waktu_scan)
-#                 elif not isinstance(waktu_scan, datetime):
-#                     continue
-#             except Exception:
-#                 continue
-
-#             nip = str(row[4].value).strip() if row[4].value else None
-#             io_flag = row[10].value  # 1 = Masuk, 2 = Pulang
-
-#             if not waktu_scan or not nip or io_flag not in [1, 2]:
-#                 continue
-
-#             tanggal_asli = waktu_scan.date()
-#             tipe_kegiatan = 'Absen Datang' if io_flag == 1 else 'Absen Pulang'
-#             nip_bersih = nip.replace(' ', '')
-#             scan_record.add((nip_bersih, tipe_kegiatan, tanggal_asli))
-#             tanggal_diproses.add(tanggal_asli)
-
-#             try:
-#                 profil = ProfilSDM.objects.get(nip=nip_bersih)
-#                 pengguna = profil.user
-#                 kegiatan, _ = JenisKegiatan.objects.get_or_create(jenis_kegiatan=tipe_kegiatan)
-
-#                 # print(f'detected_record: {pengguna.full_name} ({profil.nip})' )
-#                 # Ambil relasi SDM
-#                 relasi_sdm = pengguna.jenissdmperinstalasi_set.filter(
-#                     bulan=tanggal_asli.month, tahun=tanggal_asli.year
-#                 ).last()
-
-#                 # Buat daftar kegiatan (bulanan)
-#                 daftar, _ = DaftarKegiatanPegawai.objects.get_or_create(
-#                     pegawai=pengguna,
-#                     kegiatan=kegiatan,
-#                     bulan=tanggal_asli.month,
-#                     tahun=tanggal_asli.year,
-#                     defaults={
-#                         'jenis_sdm': relasi_sdm.jenis_sdm if relasi_sdm else None,
-#                         'unor': relasi_sdm.unor if relasi_sdm else None,
-#                         'bidang': relasi_sdm.bidang if relasi_sdm else None,
-#                         'sub_bidang': relasi_sdm.sub_bidang if relasi_sdm else None,
-#                         'instalasi': relasi_sdm.instalasi if relasi_sdm else None,
-#                     }
-#                 )
-                
-#                 # Tangani shift malam (Absen Pulang di hari berikutnya)
-#                 tanggal_scan = tanggal_asli
-#                 jadwal_dinas = ApprovedJadwalDinasSDM.objects.filter(
-#                     pegawai__pegawai=pengguna, tanggal=tanggal_scan
-#                 ).first()
-
-#                 if not jadwal_dinas and tipe_kegiatan == 'Absen Pulang':
-#                     malam_sebelumnya = tanggal_scan - timedelta(days=1)
-#                     jadwal_dinas = ApprovedJadwalDinasSDM.objects.filter(
-#                         pegawai__pegawai=pengguna,
-#                         tanggal=malam_sebelumnya,
-#                         kategori_jadwal__kategori_jadwal='Malam'
-#                     ).first()
-#                     if jadwal_dinas:
-#                         tanggal_scan = malam_sebelumnya
-
-#                 if not jadwal_dinas:
-#                     continue
-
-#                 if tipe_kegiatan == 'Absen Datang':
-#                     jam_referensi = getattr(jadwal_dinas.kategori_jadwal, 'waktu_datang', None)
-#                 else:
-#                     jam_referensi = getattr(jadwal_dinas.kategori_jadwal, 'waktu_pulang', None)
-
-#                 status = cek_status_ketepatan(tipe_kegiatan, waktu_scan.time(), jam_referensi)
-
-#                 kehadiran = KehadiranKegiatan.objects.get_or_create(
-#                     pegawai=daftar,
-#                     tanggal=make_aware(waktu_scan),
-#                     defaults={
-#                         'hadir': True,
-#                         'status_ketepatan': status
-#                     }
-#                 )
-                
-#             except ProfilSDM.DoesNotExist:
-#                 continue
-
-#         # === 2. Tandai pegawai yang tidak fingerprint ===
-#         alasan_tk, _ = AlasanTidakHadir.objects.get_or_create(alasan='Tanpa Keterangan')
-
-#         for tanggal in tanggal_diproses:
-#             jadwal_masuk = ApprovedJadwalDinasSDM.objects.filter(
-#                 tanggal=tanggal,
-#                 kategori_jadwal__kategori_dinas__kategori_dinas__in=['Reguler', 'Piket']
-#             )
-#             for jadwal in jadwal_masuk:
-#                 pengguna = jadwal.pegawai.pegawai
-#                 nip = pengguna.profil_user.nip if hasattr(pengguna, 'profil_user') else None
-#                 if not nip:
-#                     continue
-
-#                 nip_bersih = nip.replace(' ', '')
-#                 key_datang = (nip_bersih, 'Absen Datang', tanggal)
-#                 key_pulang = (nip_bersih, 'Absen Pulang', tanggal)
-
-#                 if key_datang not in scan_record and key_pulang not in scan_record:
-#                     try:
-#                         kegiatan, _ = JenisKegiatan.objects.get_or_create(jenis_kegiatan='Absen Datang')
-#                         relasi_sdm = pengguna.jenissdmperinstalasi_set.filter(
-#                             bulan=tanggal.month, tahun=tanggal.year
-#                         ).first()
-
-#                         daftar, _ = DaftarKegiatanPegawai.objects.get_or_create(
-#                             pegawai=pengguna,
-#                             kegiatan=kegiatan,
-#                             bulan=tanggal.month,
-#                             tahun=tanggal.year,
-#                             defaults={
-#                                 'jenis_sdm': relasi_sdm.jenis_sdm if relasi_sdm else None,
-#                                 'unor': relasi_sdm.unor if relasi_sdm else None,
-#                                 'bidang': relasi_sdm.bidang if relasi_sdm else None,
-#                                 'sub_bidang': relasi_sdm.sub_bidang if relasi_sdm else None,
-#                                 'instalasi': relasi_sdm.instalasi if relasi_sdm else None,
-#                             }
-#                         )
-                        
-#                         print(f'not_detected: {daftar.pegawai.full_name}')
-
-#                         KehadiranKegiatan.objects.get_or_create(
-#                             pegawai=daftar,
-#                             tanggal=make_aware(datetime.combine(tanggal, time.min)),
-#                             defaults={
-#                                 'hadir': False,
-#                                 'alasan': alasan_tk
-#                             }
-#                         )
-
-#                     except ProfilSDM.DoesNotExist:
-#                         continue
-
-#         messages.success(self.request, "Fingerprint berhasil diproses. Data ketepatan hadir sudah ditentukan.")
-#         return super().form_valid(form)
-

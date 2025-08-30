@@ -2,10 +2,10 @@ from django.shortcuts import render, redirect
 from django.urls import reverse
 from django.views import View
 from django.views.generic import ListView, TemplateView
-from django.db.models import Sum, F, Q, Case, When, Value, Count, Prefetch, CharField, ExpressionWrapper, FloatField, Func
+from django.db.models import Sum, F, Q, Case, When, Value, Count, Prefetch, CharField, ExpressionWrapper, FloatField, OuterRef, Subquery
+from django.db.models.functions import Concat, Coalesce
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from django.db.models import OuterRef, Subquery
 from datetime import datetime, date, time, timedelta
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -432,7 +432,7 @@ class KehadiranGrafikView(APIView):
         if inst is not None:
             disiplin = data.filter(instalasi__id=inst)
         data = {
-            'label': [item.pegawai.full_name for item in disiplin],
+            'label': [f'{item.pegawai.first_name} {item.pegawai.last_name}' for item in disiplin],
             'data': [item.jumlah_tk for item in disiplin]
         }
         return Response(data)
@@ -468,139 +468,129 @@ class DashboardAbsensiView(TemplateView):
     def safe_int(self, val, default):
         try:
             return int(val) if str(val).isdigit() else default
-        except ValueError:
+        except (ValueError, TypeError):
             return default
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         kemarin = date.today() - timedelta(days=1)
+        
+        # --- Pengaturan Filter ---
         periode = self.request.GET.get('periode', 'harian')
         bulan = self.safe_int(self.request.GET.get('bulan'), date.today().month)
         tahun = self.safe_int(self.request.GET.get('tahun'), date.today().year)
         tanggal_str = self.request.GET.get('tgl', kemarin.strftime('%Y-%m-%d'))
         current_year = date.today().year
+        
+        status_terlambat = ['Terlambat Ringan', 'Terlambat Sedang', 'Terlambat Berat']
 
-        # Set waktu
+        # --- Filter Data Utama (Naive Time) ---
         if periode == 'bulanan':
-            start_date = make_aware(datetime(tahun, bulan, 1))
-            end_date = make_aware(datetime(tahun, bulan, calendar.monthrange(tahun, bulan)[1]))
-            data = KehadiranKegiatan.objects.filter(tanggal__range=(start_date, end_date)).exclude(pegawai__pegawai__is_active=False)
+            tgl_awal = datetime(tahun, bulan, 1)
+            hari_terakhir = calendar.monthrange(tahun, bulan)[1]
+            tgl_akhir = datetime(tahun, bulan, hari_terakhir)
+            start_date = datetime.combine(tgl_awal, time.min)
+            end_date = datetime.combine(tgl_akhir, time.max)
+            data = KehadiranKegiatan.objects.filter(tanggal__range=(start_date, end_date))
         else:
-            tgl = get_date_from_string(tanggal_str)
-            tgl_awal = make_aware(datetime.combine(tgl, time.min))  # 00:00:00
-            tgl_akhir = make_aware(datetime.combine(tgl, time.max))  # 23:59:59.999999
-
-            data = KehadiranKegiatan.objects.filter(tanggal__range=(tgl_awal, tgl_akhir)).exclude(pegawai__pegawai__is_active=False)
+            tgl = datetime.strptime(tanggal_str, '%Y-%m-%d').date()
+            tgl_awal = datetime.combine(tgl, time.min)
+            tgl_akhir = datetime.combine(tgl, time.max)
+            data = KehadiranKegiatan.objects.filter(tanggal__range=(tgl_awal, tgl_akhir))
+        
+        data = data.exclude(pegawai__pegawai__is_active=False)
             
-        # Statistik Ringkas
+        # --- Statistik Ringkas (Efisien & Akurat) ---
+        ringkasan = data.aggregate(
+            hadir_tepat_waktu=Count('id', filter=Q(hadir=True, status_ketepatan='Tepat Waktu', pegawai__kegiatan__slug='absen-datang')),
+            total_terlambat=Count('id', filter=Q(status_ketepatan__in=status_terlambat)),
+            total_tidak_hadir=Count('id', filter=Q(hadir=False)),
+            total_cepat_pulang=Count('id', filter=Q(status_ketepatan='Cepat Pulang'))
+        )
         context['statistik_kehadiran'] = [
-            {'label': 'Hadir', 'jumlah': data.filter(hadir=True, pegawai__kegiatan__slug='absen-datang').count(), 'color': 'info'},
-            {'label': 'Terlambat', 'jumlah': data.filter(hadir=False).count(), 'color': 'warning'},
-            {'label': 'Tidak Hadir', 'jumlah': data.filter(status_ketepatan='Terlambat').count(), 'color': 'danger'},
-            {'label': 'Cepat Pulang', 'jumlah': data.filter(status_ketepatan='Cepat Pulang').count(), 'color': 'primary'},
+            {'label': 'Hadir Tepat Waktu', 'jumlah': ringkasan['hadir_tepat_waktu'], 'color': 'info'},
+            {'label': 'Terlambat', 'jumlah': ringkasan['total_terlambat'], 'color': 'warning'},
+            {'label': 'Tidak Hadir', 'jumlah': ringkasan['total_tidak_hadir'], 'color': 'danger'},
+            {'label': 'Cepat Pulang', 'jumlah': ringkasan['total_cepat_pulang'], 'color': 'primary'},
         ]
         
-        kemarin_string = kemarin.strftime('%Y-%m-%d')
+        # --- Context Umum untuk Template ---
         context.update({
             'bulan_list': [(i, calendar.month_name[i]) for i in range(1, 13)],
             'tahun_list': list(range(current_year - 5, current_year + 6)),
-            'nama_bulan': calendar.month_name[bulan],
-            'dash2': 'active',
-            'kemarin_string': kemarin_string,
-            'request': self.request,
-            'periode': periode,
-            'tanggal': tanggal_str,
-            'bulan': bulan,
-            'tahun': tahun,
+            'nama_bulan': calendar.month_name[bulan], 'dash2': 'active',
+            'kemarin_string': kemarin.strftime('%Y-%m-%d'), 'request': self.request,
+            'periode': periode, 'tanggal': tanggal_str, 'bulan': bulan, 'tahun': tahun,
         })
 
-        # ======== Persentase Kehadiran per Instalasi ========
+        # --- Chart 1: Persentase Kehadiran per Instalasi (Aman dari Error) ---
         instalasi_data = (
-            data.values('pegawai__instalasi__instalasi')
+            data.filter(pegawai__instalasi__isnull=False)
+            .values('pegawai__instalasi__instalasi')
             .annotate(
                 total=Count('id', filter=Q(pegawai__kegiatan__slug='absen-datang')),
-                hadir=Count('id', filter=(Q(hadir=True) & Q(pegawai__kegiatan__slug='absen-datang')))
+                hadir=Count('id', filter=Q(hadir=True, pegawai__kegiatan__slug='absen-datang'))
             )
             .annotate(
-                persen_hadir=ExpressionWrapper(
-                    100.0 * F('hadir') / F('total'), output_field=FloatField()
+                persen_hadir=Case(
+                    When(total=0, then=Value(0.0)),
+                    default=ExpressionWrapper(100.0 * F('hadir') / F('total'), output_field=FloatField())
                 )
-            )
-            .order_by('-persen_hadir')
+            ).order_by('-persen_hadir')
         )
-        
-        labels_hadir = [item['pegawai__instalasi__instalasi'] or 'Lainnya' for item in instalasi_data]
-        persen_hadir = [round(item['persen_hadir'], 2) if item['persen_hadir'] else 0 for item in instalasi_data]
-        
         context.update({
-            'chart_instalasi_hadir_labels': labels_hadir,
-            'chart_instalasi_hadir_data': persen_hadir,
+            'chart_instalasi_hadir_labels': [item['pegawai__instalasi__instalasi'] or 'Lainnya' for item in instalasi_data],
+            'chart_instalasi_hadir_data': [round(item['persen_hadir'], 2) for item in instalasi_data],
         })
-       
-        # ======== TK dan Terlambat per Instalasi ========
-        stats = (
-            data.values('pegawai__instalasi__instalasi')
+        
+        # --- Chart 2: TK dan Terlambat per Instalasi (Aman dari Error) ---
+        stats_pelanggaran = (
+            data.filter(pegawai__instalasi__isnull=False)
+            .values('pegawai__instalasi__instalasi')
             .annotate(
                 total=Count('id', filter=Q(pegawai__kegiatan__slug='absen-datang')),
                 tk=Count('id', filter=Q(hadir=False)),
-                terlambat=Count('id', filter=(Q(status_ketepatan='Terlambat') & Q(hadir=True) & Q(pegawai__kegiatan__slug='absen-datang'))),
+                terlambat=Count('id', filter=Q(status_ketepatan__in=status_terlambat))
             )
             .annotate(
-                persen_tk=ExpressionWrapper(100.0 * F('tk') / F('total'), output_field=FloatField()),
-                persen_terlambat=ExpressionWrapper(100.0 * F('terlambat') / F('total'), output_field=FloatField()),
+                persen_tk=Case(When(total=0, then=Value(0.0)), default=ExpressionWrapper(100.0 * F('tk') / F('total'), output_field=FloatField())),
+                persen_terlambat=Case(When(total=0, then=Value(0.0)), default=ExpressionWrapper(100.0 * F('terlambat') / F('total'), output_field=FloatField())),
             )
         ).order_by('-persen_tk', '-persen_terlambat')
-
         context.update({
-            'chart_instalasi_labels': [i['pegawai__instalasi__instalasi'] or 'Lainnya' for i in stats],
-            'chart_instalasi_tk_data': [round(i['persen_tk'], 2) if i['persen_tk'] else 0 for i in stats],
-            'chart_instalasi_terlambat_data': [round(i['persen_terlambat'], 2) if i['persen_terlambat'] else 0 for i in stats],
+            'chart_instalasi_labels': [i['pegawai__instalasi__instalasi'] or 'Lainnya' for i in stats_pelanggaran],
+            'chart_instalasi_tk_data': [round(i['persen_tk'], 2) for i in stats_pelanggaran],
+            'chart_instalasi_terlambat_data': [round(i['persen_terlambat'], 2) for i in stats_pelanggaran],
         })
 
-        # ======== Top Disiplin (dengan pagination) ========
-        top_disiplin_qs = data.filter(Q(status_ketepatan='Tepat Waktu') & Q(hadir=True) & Q(pegawai__kegiatan__slug='absen-datang')).values('pegawai__pegawai__email', 'pegawai__pegawai__id').annotate(
-            nama=Case(
-                When(Q(pegawai__pegawai__last_name__isnull=True) |
-                    Q(pegawai__pegawai__last_name='') |
-                    Q(pegawai__pegawai__last_name='-'),
-                    then=F('pegawai__pegawai__first_name')),
-                default=F('pegawai__pegawai__last_name'),
-                output_field=CharField()
-            ),
-            jumlah=Count('pegawai__pegawai__email'),
-        ).order_by('-jumlah', '-pegawai__pegawai__id')
+        # --- Tabel Top Disiplin (Aman dari Error Data) ---
+        top_disiplin_qs = data.filter(
+            status_ketepatan='Tepat Waktu', hadir=True, pegawai__kegiatan__slug='absen-datang',
+            pegawai__pegawai__isnull=False
+        ).values('pegawai__pegawai__id').annotate(
+            nama=Concat('pegawai__pegawai__first_name', Value(' '), 'pegawai__pegawai__last_name', output_field=CharField()),
+            jumlah=Count('id'),
+        ).order_by('-jumlah', 'nama')
+        
+        paginator_disiplin = Paginator(top_disiplin_qs, 10)
+        context['top_disiplin'] = paginator_disiplin.get_page(self.request.GET.get('page_disiplin'))
 
-        paginator_disiplin = Paginator(top_disiplin_qs, 10)  # tampilkan 10 per halaman
-        page_disiplin = self.request.GET.get('page_disiplin')
-        top_disiplin_page = paginator_disiplin.get_page(page_disiplin)
-
-        context['top_disiplin_labels'] = [i['nama'] or '-' for i in top_disiplin_qs[:10]]
-        context['top_disiplin_data'] = [i['jumlah'] for i in top_disiplin_qs[:10]]
-        context['count_top_disiplin'] = top_disiplin_qs.count()
-        context['top_disiplin'] = top_disiplin_page
-
-
-        # ======== Top Malas (dengan pagination) ========
-        top_malas_qs = data.filter(Q(status_ketepatan='Terlambat') | Q(hadir=False)).values('pegawai__pegawai__email', 'pegawai__pegawai__id').annotate(
-            nama=Case(
-                When(Q(pegawai__pegawai__last_name__isnull=True) |
-                    Q(pegawai__pegawai__last_name='') |
-                    Q(pegawai__pegawai__last_name='-'),
-                    then=F('pegawai__pegawai__first_name')),
-                default=F('pegawai__pegawai__last_name'),
+        # --- Tabel Top Malas (Aman dari Error Data) ---
+        top_malas_qs = data.filter(
+            Q(status_ketepatan__in=status_terlambat) | Q(hadir=False),
+            pegawai__pegawai__isnull=False
+        ).values('pegawai__pegawai__id').annotate(
+            nama=Coalesce(
+                Concat('pegawai__pegawai__first_name', Value(' '), 'pegawai__pegawai__last_name'),
+                'pegawai__pegawai__email',
+                Value('Pegawai Tanpa Nama'),
                 output_field=CharField()
             ),
             tk=Count('id', filter=Q(hadir=False)),
-            terlambat=Count('pegawai__pegawai__email', filter=(Q(status_ketepatan='Terlambat') & Q(hadir=True))),
-        ).order_by('-tk', '-terlambat', '-pegawai__pegawai__id')
+            terlambat=Count('id', filter=Q(status_ketepatan__in=status_terlambat)),
+        ).order_by('-tk', '-terlambat', 'nama')
 
         paginator_malas = Paginator(top_malas_qs, 10)
-        page_malas = self.request.GET.get('page_malas')
-        top_malas_page = paginator_malas.get_page(page_malas)
-
-        context['top_malas_labels'] = [i['nama'] or '-' for i in top_malas_qs[:10]]
-        context['top_malas_data'] = [{'tk': i['tk'], 'terlambat': i['terlambat']} for i in top_malas_qs[:10]]
-        context['count_top_malas'] = top_malas_qs.count()
-        context['top_malas'] = top_malas_page
+        context['top_malas'] = paginator_malas.get_page(self.request.GET.get('page_malas'))
 
         return context

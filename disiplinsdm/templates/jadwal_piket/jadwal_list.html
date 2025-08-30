@@ -3,6 +3,7 @@
 {% load template_tags %}
 {% load crispy_forms_tags %}
 {% load form_helper %}
+{% load dict_utils %}
 
 {% block title_page %}
 {{title_page}}
@@ -19,24 +20,25 @@
 {% block content %}
 <div class="card">
     <div class="card-header">
+        {% querystring_smart_filter 'q' 'inst' 'bulan' 'tahun' as filtered_query %}
         <div class="d-flex flex-row justify-content-between">
             <div class="d-flex flex-row">
                 <p class="h4">{{title}}</p>
             </div>
             <div>
             {% if request.user.is_superuser %}
-                <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:harilibur_list' %}">Libur</a>
-                <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:kehadiran_list' %}">Kehadiran</a>
-                <a href="{% url 'disiplinsdm_urls:salin_jadwal' %}" class="btn btn-outline-secondary">Copy jadwal</a>
-                <a href="{% url 'disiplinsdm_urls:salin_jadwal_instalasi' %}" class="btn btn-outline-warning">Copy instalasi</a>
-                <a href="{% url 'disiplinsdm_urls:evaluasi_jadwal' %}" class="btn btn-outline-success">Cek Status Jadwal</a>
+                <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:harilibur_list' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Libur</a>
+                <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:kehadiran_list' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Kehadiran</a>
+                <a href="{% url 'disiplinsdm_urls:salin_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-secondary">Copy jadwal</a>
+                <a href="{% url 'disiplinsdm_urls:salin_jadwal_instalasi' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-warning">Copy instalasi</a>
+                <a href="{% url 'disiplinsdm_urls:evaluasi_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-success">Cek Status Jadwal</a>
             {% elif request.user.is_staff %}
-                <a href="{% url 'disiplinsdm_urls:salin_jadwal' %}" class="btn btn-outline-secondary">Copy jadwal</a>
-                <a href="{% url 'disiplinsdm_urls:salin_jadwal_instalasi' %}" class="btn btn-outline-warning">Copy jadwal instalasi</a>
-                <a href="{% url 'disiplinsdm_urls:evaluasi_jadwal' %}" class="btn btn-outline-success">Cek Status Jadwal</a>
-                <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:kehadiran_list' %}">Kehadiran</a>
+                <a href="{% url 'disiplinsdm_urls:salin_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-secondary">Copy jadwal</a>
+                <a href="{% url 'disiplinsdm_urls:salin_jadwal_instalasi' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-warning">Copy jadwal instalasi</a>
+                <a href="{% url 'disiplinsdm_urls:evaluasi_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-success">Cek Status Jadwal</a>
+                <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:kehadiran_list' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Kehadiran</a>
             {% else %}
-            <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:kehadiran_list' %}">Kehadiran</a>
+            <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:kehadiran_list' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Kehadiran</a>
             {% endif %}
             </div>
         </div>
@@ -47,7 +49,7 @@
             <div class="col-md-12 border rounded mb-4 p-3">
                 <div class="row">
                     <div class="col-md-8">
-                        <form method="get">
+                        <form method="get" action="{% url 'disiplinsdm_urls:jadwal_list' %}">
                             <div class="row">
                                 <div class="col-md-6">
                                     {% load tz %}
@@ -141,7 +143,7 @@
             <div class="col-md-12">
                 <div class="row d-flex justify-content-end mr-3">
                     <div class="mb-2">
-                        <form method="get">
+                        <form method="get" action="{% url 'disiplinsdm_urls:jadwal_list' %}">
                             <div class="d-flex flex-row">
                                 <input type="text" name="q" class="form-control mr-2 flex-grow-1"
                                     placeholder="Cari text..." value="{{ request.GET.q }}">
@@ -230,7 +232,6 @@
                                 </td>
                                 <td>
                                     {% if request.user.is_staff %}
-                                    {% querystring_filter 'q' 'inst' 'bulan' 'tahun' as filtered_query %}
                                         <a href="{% url 'disiplinsdm_urls:jadwal_auto_create' pk=item.id %}{% if filtered_query %}?{{filtered_query}}{% endif %}" class="btn btn-primary btn-sm mr-1 mb-1"><i class="fas fa-info"></i></a>
                                         <a href="{% url 'disiplinsdm_urls:jadwal_detail' pk=item.id %}{% if filtered_query %}?{{filtered_query}}{% endif %}" class="btn btn-info btn-sm mr-1 mb-1"><i class="fas fa-binoculars"></i></a>
                                         {% if item.status == 'diajukan' %}
