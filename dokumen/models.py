@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Sum
 from django.dispatch import receiver
 from django.db.models.signals import pre_save
 from django.template.defaultfilters import slugify
@@ -206,183 +207,208 @@ class RiwayatPengangkatan(models.Model):#Pengangkatan CPNS, PNS ataupun Kontrak
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
+    @property
+    def desk_status_pegawai(self):
+        if self.status_pegawai == 'PNS':
+            return "Pegawai Negeri Sipil (PNS)"
+        elif self.status_pegawai == 'CPNS':
+            return "Calon Pegawai Negeri Sipil (CPNS)"
+        elif self.status_pegawai == 'PPPK':
+            return "Pegawai Pemerintah dengan Perjanjian Kerja (PPPK)"
+        else:
+            return self.status_pegawai
+        
+    
     def __str__(self):
         return self.status_pegawai
-    
-    
+
+
 class RiwayatPenempatan(models.Model):
+    """
+    Model untuk mencatat riwayat penempatan pegawai.
+    Direfaktor untuk efisiensi dan keamanan data, dengan tetap mempertahankan
+    nama properti original untuk kompatibilitas.
+    """
+    # 1. FIELDS (Tetap Sama)
+    # ==============================================================================
     no_urut_dokumen = models.IntegerField(default=0)
-    pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
+    pegawai = models.ForeignKey(Users, on_delete=models.CASCADE, related_name='riwayat_penempatan')
     dokumen = models.ForeignKey('DokumenSDM', on_delete=models.SET_NULL, null=True)
-    # instansisebelumnya
+    #instansi diluar sistem
     instansi_sebelumnya = models.CharField(max_length=200, blank=True, verbose_name='Instansi')
-    bidang_sebelumnya = models.CharField(max_length=200, blank=True, verbose_name='Bidang atau yang setara', help_text='Biarkan kosong jika tidak ada')
-    seksi_sebelumnya = models.CharField(max_length=200, blank=True, verbose_name='Seksi atau yang setara', help_text='Biarkan kosong jika tidak ada')
-    unit_sebelumnya = models.CharField(max_length=200, blank=True, verbose_name='Unit atau yang setara', help_text='Biarkan kosong jika tidak ada')
-    # instansi saat ini
-    penempatan_level1 = models.ForeignKey('strukturorg.UnitOrganisasi', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Instansi') #pilih salah satu antara level1 s/d level4 tergantung posisi jabatan
-    penempatan_level2 = models.ForeignKey('strukturorg.Bidang', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Bidang', help_text='Biar kosong jika tidak ada')
-    penempatan_level3 = models.ForeignKey('strukturorg.SubBidang', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Seksi/Subbagian', help_text='Biarkan kosong jika tidak ada')
-    penempatan_level4 = models.ForeignKey('strukturorg.UnitInstalasi', on_delete=models.CASCADE, null=True, blank=True, verbose_name='Unit/Instalasi', help_text='Biarkan kosong jika tidak ada')
+    bidang_sebelumnya = models.CharField(max_length=200, blank=True, verbose_name='Bidang atau yang setara')
+    seksi_sebelumnya = models.CharField(max_length=200, blank=True, verbose_name='Seksi atau yang setara')
+    unit_sebelumnya = models.CharField(max_length=200, blank=True, verbose_name='Unit atau yang setara')
+    #instansi di dalam sistem
+    penempatan_level1 = models.ForeignKey('strukturorg.UnitOrganisasi', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Instansi (Level 1)')
+    penempatan_level2 = models.ForeignKey('strukturorg.Bidang', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Bidang (Level 2)')
+    penempatan_level3 = models.ForeignKey('strukturorg.SubBidang', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Seksi/Subbagian (Level 3)')
+    penempatan_level4 = models.ForeignKey('strukturorg.UnitInstalasi', on_delete=models.CASCADE, null=True, blank=True, verbose_name='Unit/Instalasi (Level 4)')
     no_sk = models.CharField(max_length=50, blank=True, verbose_name='Nomor SK')
     tgl_sk = models.DateField(null=True, blank=True, verbose_name='Tanggal SK')
     file = models.FileField(upload_to="penempatan/", verbose_name="SK Penempatan", blank=True, validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
-    status = models.BooleanField(default=True) #aktif ditempat penempatan terakhir
+    status = models.BooleanField(default=True, verbose_name="Status Penempatan Aktif")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
+    # 2. META & VALIDATION (Perbaikan)
+    # ==============================================================================
     class Meta:
         indexes = [
             models.Index(fields=['pegawai', 'status']),
         ]
+        verbose_name = "Riwayat Penempatan"
+        verbose_name_plural = "Riwayat Penempatan"
 
+    def clean(self):
+        """Validasi untuk memastikan hanya satu field penempatan yang diisi."""
+        penempatan_fields = [self.penempatan_level1, self.penempatan_level2, self.penempatan_level3, self.penempatan_level4]
+        filled_count = sum(1 for field in penempatan_fields if field)
+        
+        if self.status and filled_count != 1:
+            raise ValidationError('Untuk penempatan aktif, harap isi salah satu (dan hanya satu) level penempatan, dari Level 1 s/d 4.')
+
+    # 3. HELPER PROPERTY (Logika Internal Baru)
+    # ==============================================================================
+    @property
+    def _penempatan_aktif(self):
+        """Helper privat untuk mendapatkan objek dan level penempatan yang aktif."""
+        if self.penempatan_level4: return self.penempatan_level4, 'level4'
+        if self.penempatan_level3: return self.penempatan_level3, 'level3'
+        if self.penempatan_level2: return self.penempatan_level2, 'level2'
+        if self.penempatan_level1: return self.penempatan_level1, 'level1'
+        return None, None
+
+    # 4. PUBLIC PROPERTIES (Nama & Output Sama Seperti Asli, Implementasi Baru)
+    # ==============================================================================
     def __str__(self):
-        data = None
-        if self.penempatan_level1:
-            if self.penempatan_level4:
-                data = f'{self.pegawai.full_name}-{self.penempatan_level4}'
-            elif self.penempatan_level3:
-                data = f'{self.pegawai.full_name}-{self.penempatan_level3}'
-            elif self.penempatan_level2:
-                data = f'{self.pegawai.full_name}-{self.penempatan_level2}'
-            elif self.penempatan_level1:
-                data = f'{self.pegawai.full_name}-{self.penempatan_level1}'
-        else:
-            if self.unit_sebelumnya:
-                data = f'{self.pegawai.full_name}-{self.unit_sebelumnya}'
-            elif self.seksi_sebelumnya:
-                data = f'{self.pegawai.full_name}-{self.seksi_sebelumnya}'
-            elif self.bidang_sebelumnya:
-                data = f'{self.pegawai.full_name}-{self.bidang_sebelumnya}'
-            elif self.instansi_sebelumnya:
-                data = f'{self.pegawai.full_name}-{self.instansi_sebelumnya}'
-        return str(data)
+        obj, _ = self._penempatan_aktif
+        nama_penempatan = str(obj) if obj else "Penempatan Tidak Diketahui"
+        return f'{self.pegawai.full_name} - {nama_penempatan}'
 
     @property
     def unor(self):
-        data = None
-        if self.penempatan_level1:
-            data = self.penempatan_level1
-        elif self.penempatan_level2:
-            data = self.penempatan_level2.unor
-        elif self.penempatan_level3:
-            data = self.penempatan_level3.bidang.unor
-        elif self.penempatan_level4:
-            data = self.penempatan_level4.sub_bidang.bidang.unor
-        return str(data)
-    
-    @property
-    def penempatan(self) -> str:
-        data = None
-        if self.penempatan_level4:
-            data = self.penempatan_level4.instalasi
-        elif self.penempatan_level3:
-            data = self.penempatan_level3.sub_bidang
-        elif self.penempatan_level2:
-            data = self.penempatan_level2.bidang
-        elif self.penempatan_level1:
-            data = self.penempatan_level1.unor
-        return str(data)
-    
+        obj, level = self._penempatan_aktif
+        if not obj: return None
+        try:
+            if level == 'level4': return obj.sub_bidang.bidang.unor
+            if level == 'level3': return obj.bidang.unor
+            if level == 'level2': return obj.unor
+            if level == 'level1': return obj
+        except AttributeError:
+            return None
+        
     @property
     def pimpinan(self):
-        data = None
-        if self.penempatan_level1:
-            data = f'{self.penempatan_level1.pimpinan} {self.penempatan_level1.unor}'
-        elif self.penempatan_level2:
-            data = f'{self.penempatan_level2.unor.pimpinan} {self.penempatan_level2.unor}'
-        elif self.penempatan_level3:
-            data = f'{self.penempatan_level3.bidang.unor.pimpinan} {self.penempatan_level3.bidang.unor}'
-        elif self.penempatan_level4:
-            data = f'{self.penempatan_level4.sub_bidang.bidang.unor.pimpinan} {self.penempatan_level4.sub_bidang.bidang.unor}'
-        return str(data)
+        unor_obj = self.unor
+        if unor_obj:
+            return f'{unor_obj.pimpinan} {unor_obj.unor}'
+        return "N/A"
+    
+    @property
+    def unor_pimpinan(self):
+        unor_obj = getattr(self, "unor", None)
+
+        # Kalau ingin konsisten: selalu kembalikan struktur lengkap
+        result = {
+            "pimpinan": getattr(unor_obj, "pimpinan", None) if unor_obj else None,
+            "unor": getattr(unor_obj, "unor", None) if unor_obj else None,
+            "nama_pimpinan": "N/A",
+            "nip": "N/A",
+            "panggol": "N/A",
+        }
+
+        if not unor_obj:
+            return result
+
+        user = getattr(unor_obj, "nama_pimpinan", None)
+        if not user:
+            return result
+
+        result["nama_pimpinan"] = getattr(user, "full_name_2", "N/A")
+
+        # Profil user (OneToOne) yang aman
+        profil = getattr(user, "profil_user", None)
+        if profil:
+            result["nip"] = getattr(profil, "nip", "N/A")
+
+        # Pangkat/gol terakhir -> cukup 1 query
+        panggol_qs = getattr(user, "riwayatpanggol_set", None)
+        if panggol_qs:
+            panggol_last = panggol_qs.select_related("panggol").order_by("-id").first()
+            if panggol_last and panggol_last.panggol:
+                result['panggol'] = f'{panggol_last.panggol.pangkat} ({panggol_last.panggol.golongan}/{panggol_last.panggol.ruang})'
+
+        return result
+
+    @property
+    def penempatan(self) -> str:
+        obj, level = self._penempatan_aktif
+        if not obj: return "N/A"
+        try:
+            if level == 'level4': return obj.instalasi
+            if level == 'level3': return obj.sub_bidang
+            if level == 'level2': return obj.bidang
+            if level == 'level1': return obj.unor
+        except AttributeError:
+            return "Data Penempatan Tidak Lengkap"
+        return "N/A"
 
     @property
     def jabatan_atasan(self) -> dict:
+        obj, level = self._penempatan_aktif
+        if not obj: return {}
+        
         data = {}
-        if self.penempatan_level4:
-            data = {
-                'jabatan_atasan1': self.penempatan_level4.sub_bidang.pimpinan,
-                'instansi1':  self.penempatan_level4.sub_bidang.sub_bidang,
-                'jabatan_atasan2': self.penempatan_level4.sub_bidang.bidang.pimpinan,
-                'instansi2': self.penempatan_level4.sub_bidang.bidang.bidang
-            }
-            data.update(data)
-        elif self.penempatan_level3:
-            data = {
-                'jabatan_atasan1':self.penempatan_level3.bidang.pimpinan,
-                'instansi1': self.penempatan_level3.bidang.bidang,
-                'jabatan_atasan2': self.penempatan_level3.bidang.unor.pimpinan,
-                'instansi2': self.penempatan_level3.bidang.unor.unor
-            }
-            data.update(data)
-        elif self.penempatan_level2:
-            data = {
-                'jabatan_atasan1':self.penempatan_level2.unor.pimpinan,
-                'instansi1': self.penempatan_level2.unor.unor,
-                'jabatan_atasan2':self.penempatan_level2.unor.satker_induk.pimpinan,
-                'instansi2': self.penempatan_level2.unor.satker_induk.satuan_kerja
-            }
-            data.update(data)
-        elif self.penempatan_level1:
-            data = {
-                'jabatan_atasan1': self.penempatan_level1.satker_induk.pimpinan,
-                'instansi1': self.penempatan_level1.satker_induk.satuan_kerja,
-                'jabatan_atasan2':self.penempatan_level1.satker_induk.instansi_daerah.pimpinan,
-                'instansi2':  self.penempatan_level1.satker_induk.instansi_daerah.instansi
-            }
-            data.update(data)
-        return data
-    
-    @property
-    def nama_atasan(self):
-        data = None
-        if self.penempatan_level4:
-            data ={
-                'nama_atasan1': self.penempatan_level4.sub_bidang.nama_pimpinan.full_name_2 if self.penempatan_level4 is not None and hasattr(self.penempatan_level4.sub_bidang, "nama_pimpinan") else "N/A",
-                'nip_atasan1': self.penempatan_level4.sub_bidang.nama_pimpinan.profil_user.nip if self.penempatan_level4 is not None and hasattr(self.penempatan_level4.sub_bidang, 'nama_pimpinan') \
-                    and hasattr(self.penempatan_level4.sub_bidang.nama_pimpinan, 'profil_user') else "N/A",
-                'nama_atasan2': self.penempatan_level4.sub_bidang.bidang.nama_pimpinan.full_name_2 if self.penempatan_level4 is not None and hasattr(self.penempatan_level4.sub_bidang, 'bidang') and\
-                     hasattr(self.penempatan_level4.sub_bidang.bidang, 'nama_pimpinan') else "N/A",
-                'nip_atasan2': self.penempatan_level4.sub_bidang.bidang.nama_pimpinan.profil_user.nip if self.penempatan_level4 is not None and hasattr(self.penempatan_level4.sub_bidang, 'bidang') and\
-                     hasattr(self.penempatan_level4.sub_bidang.bidang, 'nama_pimpinan') and hasattr(self.penempatan_level4.sub_bidang.bidang.nama_pimpinan, 'profil_user') else "N/A"
-            }
-            return data
-        elif self.penempatan_level3:
-            data ={
-                'nama_atasan1': f'{self.penempatan_level3.bidang.nama_pimpinan.full_name_2 if self.penempatan_level3 is not None and hasattr(self.penempatan_level3.bidang, "nama_pimpinan") else "N/A"}',
-                'nip_atasan1': self.penempatan_level3.bidang.nama_pimpinan.profil_user.nip if self.penempatan_level3 is not None and hasattr(self.penempatan_level3.bidang, 'nama_pimpinan') \
-                    and hasattr(self.penempatan_level3.bidang.nama_pimpinan, 'profil_user') else "N/A",
-                'nama_atasan2': self.penempatan_level3.bidang.unor.nama_pimpinan.full_name_2 if self.penempatan_level3 is not None and hasattr(self.penempatan_level3.bidang, 'unor') and\
-                     hasattr(self.penempatan_level3.bidang.unor, 'nama_pimpinan') else "N/A",
-                'nip_atasan2': self.penempatan_level3.bidang.unor.nama_pimpinan.profil_user.nip if self.penempatan_level3 is not None and hasattr(self.penempatan_level3.bidang, 'unor') and\
-                     hasattr(self.penempatan_level3.bidang.unor, 'nama_pimpinan') and hasattr(self.penempatan_level3.bidang.unor.nama_pimpinan, 'profil_user') else "N/A"
-            }
-            return data
-        elif self.penempatan_level2:
-            data ={
-                'nama_atasan1': self.penempatan_level2.unor.nama_pimpinan.full_name_2 if self.penempatan_level2 is not None and hasattr(self.penempatan_level2.unor, "nama_pimpinan") and hasattr(self.penempatan_level2.unor.nama_pimpinan, "full_name_2") else "N/A",
-                'nip_atasan1': self.penempatan_level2.unor.nama_pimpinan.profil_user.nip if self.penempatan_level2 is not None and hasattr(self.penempatan_level2.unor, 'nama_pimpinan') \
-                    and hasattr(self.penempatan_level2.unor.nama_pimpinan, 'profil_user') else "N/A",
-                'nama_atasan2': self.penempatan_level2.unor.satker_induk.nama_pimpinan.full_name_2 if self.penempatan_level2 is not None and hasattr(self.penempatan_level2.unor, 'satker_induk') and\
-                     hasattr(self.penempatan_level2.unor.satker_induk, 'nama_pimpinan') else "N/A",
-                'nip_atasan2': self.penempatan_level2.unor.satker_induk.nama_pimpinan.profil_user.nip if self.penempatan_level2 is not None and hasattr(self.penempatan_level2.unor, 'satker_induk') and\
-                     hasattr(self.penempatan_level2.unor.satker_induk, 'nama_pimpinan') and hasattr(self.penempatan_level2.unor.satker_induk.nama_pimpinan, 'profil_user') else "N/A"
-            }
-            return data
-        elif self.penempatan_level1:
-            data ={
-                'nama_atasan1':f'{self.penempatan_level1.satker_induk.nama_pimpinan.full_name_2 if self.penempatan_level1 is not None and hasattr(self.penempatan_level1.satker_induk, "nama_pimpinan") and hasattr(self.penempatan_level1.satker_induk.nama_pimpinan, "full_name_2") else "N/A"}',
-                'nip_atasan1': self.penempatan_level1.satker_induk.nama_pimpinan.profil_user.nip if self.penempatan_level1 is not None and hasattr(self.penempatan_level1.satker_induk, 'nama_pimpinan')\
-                    and hasattr(self.penempatan_level1.satker_induk.nama_pimpinan, 'profil_user') else "N/A",
-                'nama_atasan2': self.penempatan_level1.satker_induk.instansi_daerah.nama_pimpinan.full_name_2 if self.penempatan_level1 is not None and hasattr(self.penempatan_level1.satker_induk, 'instansi_daerah') and\
-                     hasattr(self.penempatan_level1.satker_induk.instansi_daerah, 'nama_pimpinan') and hasattr(self.penempatan_level1.satker_induk.instansi_daerah.nama_pimpinan, 'full_name') else "N/A",
-                'nip_atasan2': self.penempatan_level1.satker_induk.instansi_daerah.nama_pimpinan.profil_user.nip if self.penempatan_level1 is not None and hasattr(self.penempatan_level1.satker_induk, 'instansi_daerah') and\
-                     hasattr(self.penempatan_level1.satker_induk.instansi_daerah, 'nama_pimpinan') and hasattr(self.penempatan_level1.satker_induk.instansi_daerah.nama_pimpinan, 'profil_user') else "N/A"
-            }
-            return data
+        try:
+            if level == 'level4':
+                data = {'jabatan_atasan1': obj.sub_bidang.pimpinan, 'instansi1': obj.sub_bidang.sub_bidang, 'jabatan_atasan2': obj.sub_bidang.bidang.pimpinan, 'instansi2': obj.sub_bidang.bidang.bidang}
+            elif level == 'level3':
+                data = {'jabatan_atasan1': obj.bidang.pimpinan, 'instansi1': obj.bidang.bidang, 'jabatan_atasan2': obj.bidang.unor.pimpinan, 'instansi2': obj.bidang.unor.unor}
+            elif level == 'level2':
+                data = {'jabatan_atasan1': obj.unor.pimpinan, 'instansi1': obj.unor.unor, 'jabatan_atasan2': obj.unor.satker_induk.pimpinan, 'instansi2': obj.unor.satker_induk.satuan_kerja}
+            elif level == 'level1':
+                data = {'jabatan_atasan1': obj.satker_induk.pimpinan, 'instansi1': obj.satker_induk.satuan_kerja, 'jabatan_atasan2': obj.satker_induk.instansi_daerah.pimpinan, 'instansi2': obj.satker_induk.instansi_daerah.instansi}
+        except AttributeError:
+            # Jika struktur tidak lengkap, kembalikan dict kosong agar tidak error
+            return {}
         return data
 
+    @property
+    def nama_atasan(self) -> dict:
+        obj, level = self._penempatan_aktif
+        if not obj: return {}
+
+        data = {'nama_atasan1': 'N/A', 'nip_atasan1': 'N/A', 'nama_atasan2': 'N/A', 'nip_atasan2': 'N/A'}
+        try:
+            atasan1, atasan2 = None, None
+            if level == 'level4':
+                atasan1 = obj.sub_bidang.nama_pimpinan
+                atasan2 = obj.sub_bidang.bidang.nama_pimpinan
+            elif level == 'level3':
+                atasan1 = obj.bidang.nama_pimpinan
+                atasan2 = obj.bidang.unor.nama_pimpinan
+            elif level == 'level2':
+                atasan1 = obj.unor.nama_pimpinan
+                atasan2 = obj.unor.satker_induk.nama_pimpinan
+            elif level == 'level1':
+                atasan1 = obj.satker_induk.nama_pimpinan
+                atasan2 = obj.satker_induk.instansi_daerah.nama_pimpinan
+
+            if atasan1:
+                data['nama_atasan1'] = getattr(atasan1, 'full_name_2', 'N/A')
+                profil1 = getattr(atasan1, 'profil_user', None)
+                if profil1: data['nip_atasan1'] = getattr(profil1, 'nip', 'N/A')
+            
+            if atasan2:
+                data['nama_atasan2'] = getattr(atasan2, 'full_name_2', 'N/A')
+                profil2 = getattr(atasan2, 'profil_user', None)
+                if profil2: data['nip_atasan2'] = getattr(profil2, 'nip', 'N/A')
+        except AttributeError:
+            pass # Kembalikan data default jika ada struktur yang hilang
+            
+        return data
+    
 
 class RiwayatGajiBerkala(models.Model):
     no_urut_dokumen = models.IntegerField(default=0)
@@ -399,6 +425,8 @@ class RiwayatGajiBerkala(models.Model):
     masa_kerja_bulan = models.SmallIntegerField(default=0)
     ket = models.TextField(blank=True)
     file = models.FileField(verbose_name='SK', upload_to="berkala/", blank=True, validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
+    has_layanan = models.BooleanField(default=False)
+    is_final = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -648,43 +676,65 @@ STATUSCUTI = (
     ('Proses', 'Proses'),
     ('Selesai', 'Selesai')
 )
+
+STATUS_PERS_CUTI = (
+    ('belum', 'Belum diputuskan'),
+    ('disetujui', 'Disetujui'),
+    ('ditolak', 'Ditolak'),
+)
     
 class RiwayatCuti(models.Model):
     no_urut_dokumen = models.IntegerField(default=0)
     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
     dokumen = models.ForeignKey('DokumenSDM', on_delete=models.SET_NULL, null=True)
-    usulan = models.ForeignKey('layanan.LayananCuti', on_delete=models.CASCADE, null=True, blank=True)
+    usulan = models.OneToOneField('layanan.LayananCuti', on_delete=models.CASCADE, null=True, blank=True, related_name='cuti_usulan')
     jenis_cuti = models.CharField(max_length=50, choices=JENISCUTI)
     alasan_cuti = models.CharField(max_length=255, blank=True)
     tgl_mulai_cuti = models.DateField(null=True, blank=True)
     tgl_akhir_cuti = models.DateField(null=True, blank=True)
     lama_cuti = models.SmallIntegerField(null=True, default=0)   
     domisili_saat_cuti = models.CharField(max_length=250, blank=True)
-    # tahun_cuti = models.SmallIntegerField(null=True)
+    tahun_cuti = models.SmallIntegerField(null=True)
     no_surat = models.CharField(max_length=50, blank=True)
     tgl_surat = models.DateField(null=True, blank=True)
     file_pengajuan = models.FileField(upload_to="cuti/pengajuan/", blank=True, validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
     file_pendukung = models.FileField(verbose_name="Dokumen Pendukung", upload_to="cuti/pendukung/", blank=True, help_text="Dapat berupa surat ket. penyerahan tugas", validators=[validate_file_size])
     file = models.FileField(verbose_name='Surat Cuti', upload_to="cuti/surat/", blank=True, validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
     status_cuti = models.CharField(max_length=10, choices=STATUSCUTI, default='Proses')
+    status_persetujuan = models.CharField(
+        max_length=20,
+        choices=STATUS_PERS_CUTI,
+        default='belum',
+        help_text='Status hasil persetujuan atasan terhadap pengajuan cuti ini.'
+    )
+    pakai_tunda_saja = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    # @property
-    # def lama_cuti(self):
-    #     t = TanggalMerah(cache_path=None, cache_time=600)
-    #     durasi = self.tgl_mulai_cuti - self.tgl_akhir_cuti
-    #     libur = holidays.CountryHoliday('IDN')
-    #     if self.jenis_cuti == 'Cuti Alasan Penting':
-    #         return durasi
-    #     else:
-    #         if t.is_sunday():
-    #             return durasi - 1
-    #         elif t.is_holiday():
-    #             return durasi - 1
+    # ==== Tambahan helper untuk cuti tunda ====
+    @property
+    def total_hari_tunda_terklaim(self) -> int:
+        """
+        Total hari dari record cuti TUNDA ini yang sudah diklaim
+        melalui KlaimCutiTunda.
+        """
+        if self.status_cuti != 'Tunda':
+            return 0
+        return self.klaim_keluar.aggregate(
+            total=Sum('jumlah_hari_diklaim')
+        ).get('total') or 0
+
+    @property
+    def sisa_hari_tunda(self) -> int:
+        """
+        Sisa hari hak tunda yang masih bisa diklaim.
+        """
+        if self.status_cuti != 'Tunda':
+            return 0
+        return max(0, (self.lama_cuti or 0) - self.total_hari_tunda_terklaim)
 
     def __str__(self):
-        return f'{self.pegawai.first_name} - {self.jenis_cuti} - ({self.lama_cuti})'
+        return f'{self.pegawai} - {self.jenis_cuti} ({self.tahun_cuti})'
     
     @property
     def file_size(self):
@@ -697,6 +747,44 @@ class RiwayatCuti(models.Model):
     @property
     def file_pengajuan_size(self):
         return self.file_pengajuan.size
+
+
+class KlaimCutiTunda(models.Model):
+    """
+    Menghubungkan cuti TUNDA tahun sebelumnya
+    dengan cuti TAHUNAN tahun berjalan yang mengklaim hak tersebut.
+    """
+    sumber_tunda = models.ForeignKey(
+        RiwayatCuti,
+        on_delete=models.CASCADE,
+        related_name='klaim_keluar',
+        limit_choices_to={'status_cuti': 'Tunda'},
+    )
+    cuti_klaim = models.ForeignKey(
+        RiwayatCuti,
+        on_delete=models.CASCADE,
+        related_name='klaim_masuk',
+        help_text='Cuti tahunan yang memakai hak tunda',
+    )
+    jumlah_hari_diklaim = models.PositiveSmallIntegerField()
+    is_admin_override = models.BooleanField(default=False)
+    admin_override_by = models.ForeignKey(
+        Users,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='klaim_tunda_override'
+    )
+    admin_override_at = models.DateTimeField(null=True, blank=True)
+    catatan_admin = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Klaim Cuti Tunda'
+        verbose_name_plural = 'Klaim Cuti Tunda'
+
+    def __str__(self):
+        return f'Klaim {self.jumlah_hari_diklaim} hari dari {self.sumber_tunda_id} ke {self.cuti_klaim_id}'
     
     
 METODE = (

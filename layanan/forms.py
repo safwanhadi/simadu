@@ -1,6 +1,12 @@
 from django import forms
 from tinymce.widgets import TinyMCE
+from datetime import date
+from django.utils import timezone
 
+from django.db.models import Sum, F, Q
+from django.db.models.functions import Coalesce
+
+from dokumen.models import RiwayatPanggol, RiwayatPenempatan
 from .models import (
     LayananCuti, 
     JenisLayanan, 
@@ -8,7 +14,8 @@ from .models import (
     LayananUsulanDiklat,
     LayananUsulanInovasi,
     VerifikasiCuti,
-    VerifikasiDiklat
+    VerifikasiDiklat,
+    PelimpahanTugas,
     )
 from dokumen.forms import (
     RiwayatDiklatForm, 
@@ -24,7 +31,15 @@ from dokumen.forms import (
 )
 from strukturorg.models import UnitInstalasi
 from myaccount.models import Users
-from dokumen.models import JENISCUTI, RiwayatCuti, RiwayatGajiBerkala, DokumenSDM, RiwayatDiklat, RiwayatInovasi
+from dokumen.models import (
+    JENISCUTI, 
+    RiwayatCuti, 
+    RiwayatGajiBerkala, 
+    DokumenSDM, 
+    RiwayatDiklat, 
+    RiwayatInovasi,
+    KlaimCutiTunda,
+)
 from django.forms import inlineformset_factory, BaseInlineFormSet
 
 class TinyMCEWidget(TinyMCE): 
@@ -49,6 +64,34 @@ class FormLayananBerkala(forms.ModelForm):
             self.fields['riwayat'].label = 'Riwayat Kenaikan Gaji Berkala Sebelumnya'
 
 
+class RiwayatGajiBerkalaForm(forms.ModelForm):
+    class Meta:
+        model = RiwayatGajiBerkala
+        fields = ('pegawai', 'dokumen', 'no_srt_gaji', 'tgl_srt_gaji', 'gaji_pkk', 'tmt_gaji', 'pangkat', 'tempat_kerja', 'masa_kerja_tahun', 'masa_kerja_bulan', 
+                  'has_layanan', 'pertek', 'ket', 'file')
+        
+    def __init__(self, *args, **kwargs):
+        self.request=kwargs.pop("request", None)
+        self.action = kwargs.pop("action", None)
+        super(RiwayatGajiBerkalaForm, self).__init__(*args, **kwargs)
+        self.fields['has_layanan'].widget = forms.HiddenInput()
+        self.fields['tmt_gaji'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
+        if self.action == 'upload':
+            self.fields['tgl_srt_gaji'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
+            self.fields['gaji_pkk'].widget = forms.HiddenInput()
+            self.fields['tmt_gaji'].widget = forms.HiddenInput()
+            self.fields['masa_kerja_tahun'].widget = forms.HiddenInput()
+            self.fields['masa_kerja_bulan'].widget = forms.HiddenInput()
+            self.fields['pertek'].widget = forms.HiddenInput()
+            self.fields['ket'].widget = forms.HiddenInput()
+            self.fields['pangkat'].widget = forms.HiddenInput()
+            self.fields['tempat_kerja'].widget = forms.HiddenInput()
+        else:
+            self.fields['tgl_srt_gaji'].empty_value = None
+            self.fields['tgl_srt_gaji'].widget = forms.HiddenInput()
+            self.fields['no_srt_gaji'].widget = forms.HiddenInput()
+            
+            
 # FORM LAYANAN CUTI
 class FormLayananCutiExisting(forms.ModelForm):
     tgl_mulai_cuti = forms.DateField(required=False, widget=forms.TextInput(attrs={'type':'date', 'class':bootstrap_col}))
@@ -127,13 +170,17 @@ class LayananCutiForm(forms.ModelForm):
         self.case = kwargs.pop("case", None)#dakung/proses/dll
         self.request = kwargs.pop("request", None)
         super(LayananCutiForm, self).__init__(*args, **kwargs)
+        for name, field in self.fields.items():
+            if not isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs.setdefault('class', 'form-control')
         if self.case == "tindaklanjut":
             self.fields['status'] = forms.ChoiceField(choices=STATUS_CUTI)
             self.fields['status'].label = "Pilih tindaklanjut usulan cuti"
         else:
             self.fields['status'].widget = forms.HiddenInput()
-        # self.fields['layanan'].widget = forms.HiddenInput()
-        # self.fields['pegawai'].widget = forms.HiddenInput()
+        self.fields["tahun"].disabled = True
+        self.fields['layanan'].widget = forms.HiddenInput()
+        self.fields['pegawai'].widget = forms.HiddenInput()
         self.fields['cuti_tunda'].widget = forms.HiddenInput()
 
 pengajuan_cuti_formset = inlineformset_factory(
@@ -142,6 +189,63 @@ pengajuan_cuti_formset = inlineformset_factory(
 update_pengajuan_cuti_formset = inlineformset_factory(
     LayananCuti, RiwayatCuti, form=RiwayatPengajuanCutiForm, extra=0, can_delete=False
 )
+
+class PelimpahanTugasCreateForm(forms.ModelForm):
+    class Meta:
+        model = PelimpahanTugas
+        fields = ['penerima_tugas', 'deskripsi_tugas', 'tgl_mulai', 'tgl_selesai']
+
+    def __init__(self, *args, **kwargs):
+        self.request = kwargs.pop('request', None)
+        self.riwayat_cuti = kwargs.pop('riwayat_cuti', None)
+        super().__init__(*args, **kwargs)
+
+        # Optionally: batasi pilihan penerima_tugas hanya 1 instalasi / unit tertentu.
+        # Contoh: semua pegawai 1 SubBidang / Instalasi yg sama.
+        # self.fields['penerima_tugas'].queryset = Users.objects.filter(...)
+        # Default tanggal mengikuti riwayat cuti
+        if self.riwayat_cuti and not self.instance.pk:
+            if self.riwayat_cuti.tgl_mulai_cuti and not self.initial.get("tgl_mulai"):
+                self.initial["tgl_mulai"] = self.riwayat_cuti.tgl_mulai_cuti
+            if self.riwayat_cuti.tgl_akhir_cuti and not self.initial.get("tgl_selesai"):
+                self.initial["tgl_selesai"] = self.riwayat_cuti.tgl_akhir_cuti
+    
+    def clean(self):
+        cleaned = super().clean()
+        a = cleaned.get("tgl_mulai")
+        b = cleaned.get("tgl_selesai")
+        if a and b and a > b:
+            raise forms.ValidationError("Tanggal mulai tidak boleh melebihi tanggal selesai.")
+        return cleaned
+
+
+
+class PelimpahanTugasPenerimaForm(forms.ModelForm):
+    aksi = forms.ChoiceField(
+        choices=(
+            ('setuju', 'Setuju menerima tugas'),
+            ('tolak', 'Tolak tugas'),
+        ),
+        widget=forms.RadioSelect
+    )
+
+    class Meta:
+        model = PelimpahanTugas
+        fields = ['aksi', 'catatan_penerima']
+
+
+class PelimpahanTugasAtasanForm(forms.ModelForm):
+    aksi = forms.ChoiceField(
+        choices=(
+            ('setuju', 'Setuju'),
+            ('tolak', 'Tolak'),
+        ),
+        widget=forms.RadioSelect
+    )
+
+    class Meta:
+        model = PelimpahanTugas
+        fields = ['aksi', 'catatan_atasan']
 
 
 class LayananCutiFullForm(forms.ModelForm):
@@ -156,6 +260,118 @@ update_pengajuan_cuti_fullform_formset = inlineformset_factory(
     LayananCuti, RiwayatCuti, form=RiwayatPengajuanCutiForm, extra=0, can_delete=False
 )
 
+
+class OverrideKlaimTundaForCutiForm(forms.Form):
+    sumber_tunda = forms.ModelChoiceField(
+        queryset=RiwayatCuti.objects.none(),
+        required=True,
+        label="Sumber Cuti Tunda",
+        help_text="Pilih cuti tunda yang masih memiliki sisa hari.",
+    )
+    jumlah_hari_diklaim = forms.IntegerField(
+        min_value=1,
+        required=True,
+        label="Jumlah hari diklaim",
+    )
+    catatan_admin = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        label="Catatan admin (opsional)",
+    )
+
+    def __init__(self, *args, **kwargs):
+        self.cuti_klaim: RiwayatCuti = kwargs.pop("cuti_klaim")
+        self.allow_same_year: bool = kwargs.pop("allow_same_year", True)  # override tahun berjalan
+        super().__init__(*args, **kwargs)
+
+        pegawai_id = self.cuti_klaim.pegawai_id
+        tahun = self.cuti_klaim.tahun_cuti
+
+        # sumber tunda: defaultnya tahun berjalan (karena kasus override)
+        qs = (
+            RiwayatCuti.objects.filter(
+                pegawai_id=pegawai_id,
+                jenis_cuti="Cuti Tahunan",
+                status_cuti="Tunda",
+                status_persetujuan="disetujui",
+            )
+            .annotate(total_terklaim=Coalesce(Sum("klaim_keluar__jumlah_hari_diklaim"), 0))
+            .filter(total_terklaim__lt=F("lama_cuti"))
+            .order_by("-created_at", "-id")
+        )
+
+        if not self.allow_same_year and tahun:
+            # kalau suatu saat Anda ingin memblok tahun berjalan
+            qs = qs.exclude(tahun_cuti=tahun)
+
+        self.fields["sumber_tunda"].queryset = qs
+
+    def clean(self):
+        cleaned = super().clean()
+
+        sumber_tunda: RiwayatCuti = cleaned.get("sumber_tunda")
+        jumlah: int = cleaned.get("jumlah_hari_diklaim")
+
+        if not sumber_tunda or not jumlah:
+            return cleaned
+
+        # Pastikan pegawai sama
+        if sumber_tunda.pegawai_id != self.cuti_klaim.pegawai_id:
+            self.add_error("sumber_tunda", "Sumber tunda tidak sesuai dengan pegawai cuti klaim.")
+            return cleaned
+
+        # Sisa tunda aktual
+        total_terklaim = sumber_tunda.klaim_keluar.aggregate(
+            total=Coalesce(Sum("jumlah_hari_diklaim"), 0)
+        )["total"]
+        sisa_tunda = max(0, (sumber_tunda.lama_cuti or 0) - (total_terklaim or 0))
+
+        if jumlah > sisa_tunda:
+            self.add_error("jumlah_hari_diklaim", f"Jumlah klaim melebihi sisa tunda ({sisa_tunda}).")
+
+        # Sisa kebutuhan cuti klaim (agar tidak klaim melebihi lama cuti)
+        total_klaim_masuk = self.cuti_klaim.klaim_masuk.aggregate(
+        total=Coalesce(Sum("jumlah_hari_diklaim"), 0)
+        )["total"] or 0
+
+        # Jika lama_cuti sudah terisi, pakai itu.
+        if (self.cuti_klaim.lama_cuti or 0) > 0:
+            kebutuhan_total = int(self.cuti_klaim.lama_cuti or 0)
+        else:
+            # Kalau lama_cuti=0, pakai periode tanggal sebagai kebutuhan
+            if self.cuti_klaim.tgl_mulai_cuti and self.cuti_klaim.tgl_akhir_cuti:
+                kebutuhan_total = (self.cuti_klaim.tgl_akhir_cuti - self.cuti_klaim.tgl_mulai_cuti).days + 1
+            else:
+                # kalau tanggal belum ada, tidak bisa validasi kebutuhan -> paksa isi dulu
+                self.add_error("jumlah_hari_diklaim", "Tidak bisa menentukan kebutuhan cuti karena lama cuti 0 dan tanggal cuti belum lengkap.")
+                return cleaned
+
+        sisa_kebutuhan = max(0, kebutuhan_total - int(total_klaim_masuk))
+
+        if jumlah > sisa_kebutuhan:
+            self.add_error(
+                "jumlah_hari_diklaim",
+                f"Jumlah klaim melebihi kebutuhan cuti ini ({sisa_kebutuhan})."
+            )
+
+        return cleaned
+
+    def save(self, commit: bool = True) -> KlaimCutiTunda:
+        sumber_tunda = self.cleaned_data["sumber_tunda"]
+        jumlah = self.cleaned_data["jumlah_hari_diklaim"]
+
+        klaim = KlaimCutiTunda(
+            sumber_tunda=sumber_tunda,
+            cuti_klaim=self.cuti_klaim,
+            jumlah_hari_diklaim=jumlah,
+        )
+
+        if commit:
+            klaim.save()
+
+        return klaim
+
+
 class VerifikatorCutiForm(forms.ModelForm):
     class Meta:
         model = VerifikasiCuti
@@ -166,43 +382,58 @@ class VerifikatorCutiForm(forms.ModelForm):
         self.fields['layanan_cuti'].widget = forms.HiddenInput()
 
 
+STATUS_PERS = (
+    ("", "— Pilih keputusan —"),
+    ("setuju", "Setuju"),
+    ("tolak", "Tolak"),
+)
+
+KEPUTUSAN_INPUT = (
+    ("setuju", "Disetujui"),
+    ("tunda", "Ditunda"),
+    ("tolak", "Ditolak"),
+)
+
 class Verifikator1CutiForm(forms.ModelForm):
+    keputusan1 = forms.ChoiceField(choices=KEPUTUSAN_INPUT, widget=forms.RadioSelect, required=True, label="Keputusan")
+    catatan1 = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}), required=False, label="Catatan")
+    
     class Meta:
         model = VerifikasiCuti
-        fields = ('layanan_cuti', 'verifikator1', 'persetujuan1', 'catatan1')
-
-    def __init__(self, *args, **kwargs):
-        super(Verifikator1CutiForm, self).__init__(*args, **kwargs)
-        self.fields['layanan_cuti'].widget = forms.HiddenInput()
-        self.fields['verifikator1'].widget = forms.HiddenInput()
-        self.fields['persetujuan1'].label = 'Apakah anda menyetujui pengajuan cuti pegawai ini?'
-        self.fields['catatan1'].label = 'Catatan persetujuan cuti'
+        fields = ("keputusan1", "catatan1")
 
 
 class Verifikator2CutiForm(forms.ModelForm):
+    keputusan2 = forms.ChoiceField(choices=KEPUTUSAN_INPUT, widget=forms.RadioSelect, required=True, label="Keputusan")
+    catatan2 = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}), required=False, label="Catatan")
+    
     class Meta:
         model = VerifikasiCuti
-        fields = ('layanan_cuti', 'verifikator2', 'persetujuan2', 'catatan2')
+        fields = ('layanan_cuti', 'verifikator2', 'keputusan2', 'catatan2')
 
     def __init__(self, *args, **kwargs):
         super(Verifikator2CutiForm, self).__init__(*args, **kwargs)
         self.fields['layanan_cuti'].widget = forms.HiddenInput()
         self.fields['verifikator2'].widget = forms.HiddenInput()
-        self.fields['persetujuan2'].label = 'Apakah anda menyetujui pengajuan cuti pegawai ini?'
+        self.fields['keputusan2'].label = 'Apakah anda menyetujui pengajuan cuti pegawai ini?'
         self.fields['catatan2'].label = 'Catatan persetujuan cuti'
 
 
 class Verifikator3CutiForm(forms.ModelForm):
+    keputusan3 = forms.ChoiceField(choices=KEPUTUSAN_INPUT, widget=forms.RadioSelect, required=True, label="Keputusan")
+    catatan3 = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}), required=False, label="Catatan")
+    
     class Meta:
         model = VerifikasiCuti
-        fields = ('layanan_cuti', 'verifikator3', 'persetujuan3', 'catatan3', 'tanggal')
+        fields = ('layanan_cuti', 'verifikator3', 'keputusan3', 'catatan3', 'tanggal')
     
     def __init__(self, *args, **kwargs):
         super(Verifikator3CutiForm, self).__init__(*args, **kwargs)
+        self.fields['tanggal'].initial = timezone.now().date()
         self.fields['layanan_cuti'].widget = forms.HiddenInput()
         self.fields['verifikator3'].widget = forms.HiddenInput()
         self.fields['tanggal'].widget = forms.HiddenInput()
-        self.fields['persetujuan3'].label = 'Apakah anda menyetujui pengajuan cuti pegawai ini?'
+        self.fields['keputusan3'].label = 'Apakah anda menyetujui pengajuan cuti pegawai ini?'
         self.fields['catatan3'].label = 'Catatan persetujuan cuti'
 
 

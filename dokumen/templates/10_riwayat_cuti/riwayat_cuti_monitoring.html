@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title_page %}
+{{ title_page }}
+{% endblock title_page %}
+
+{% block styles %}
+<link rel="stylesheet" href="{% static 'dist/css/riwayat.css' %}">
+{% endblock styles %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block cardtitle %}
+
+{% endblock cardtitle %}
+
+{% block content %}
+<div class="container">
+    <div class="card">
+        <div class="card-header">
+            <div class="d-flex flex-row justify-content-between">
+                <div class="d-flex flex-column">
+                    <h5 class="mb-1">Monitoring Cuti Pegawai</h5>
+                    <small class="text-muted">Penempatan aktif: {{ penempatan_aktif|default:'-' }}</small>
+                </div>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="table table-responsive">
+                <table class="table" id="cuti_monitor_table">
+                    <thead>
+                        <tr>
+                            <th>No</th>
+                            <th>Pegawai</th>
+                            <th>NIP</th>
+                            <th>Penempatan</th>
+                            <th>Status Pengajuan</th>
+                            <th>Lama Cuti (hari)</th>
+                            <th>Cuti Mulai</th>
+                            <th>Cuti s/d</th>
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in data %}
+                        <tr>
+                            <td>{{ forloop.counter }}</td>
+                            <td>{{ item.pegawai.full_name }}</td>
+                            <td>{{ item.pegawai.profil_user.nip }}</td>
+                            <td>
+                                {% with placements=item.pegawai.active_penempatan %}
+                                    {% if placements and placements.0 %}
+                                        {{ placements.0.penempatan }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                {% endwith %}
+                            </td>
+                            <td>
+                                {% with status=item.usulan.status|default_if_none:'' %}
+                                    {% if status == 'pengajuan' %}
+                                        <span class="badge bg-warning text-dark">Pengajuan</span>
+                                    {% elif status == 'tindaklanjut' %}
+                                        <span class="badge bg-info text-dark">Ditindaklanjuti</span>
+                                    {% elif status == 'selesai' %}
+                                        <span class="badge bg-success">Selesai</span>
+                                    {% elif status == 'tidak ditindaklanjut' %}
+                                        <span class="badge bg-secondary">Tidak ditindaklanjut</span>
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                {% endwith %}
+                            </td>
+                            <td>{{ item.lama_cuti|default:0 }}</td>
+                            <td>{{ item.tgl_mulai_cuti|default:'-' }}</td>
+                            <td>{{ item.tgl_akhir_cuti|default:'-' }}</td>
+                            <td>
+                                {% with status=item.usulan.status|default_if_none:'' %}
+                                    {% if status == 'pengajuan' %}
+                                        <button class="btn btn-sm btn-primary">Proses</button>
+                                    {% elif status == 'tindaklanjut' %}
+                                        <button class="btn btn-sm btn-info text-dark">Tindaklanjut</button>
+                                    {% elif status == 'selesai' %}
+                                        <span class="text-muted">Tidak ada aksi</span>
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                {% endwith %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#cuti_monitor_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+</script>
+{% endblock script %}

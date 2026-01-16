@@ -28,9 +28,6 @@
                                 <h5 id="card_title">Riwayat Pengajuan Gaji Berkala</h5>
                                 {% endif %}
                             </div>
-                            {% if not update_form %}
-                            <div><input type="button" class="btn btn-outline-success" id="add_data" value="Ajukan Berkala"></div>
-                            {% endif %}
                         </div>
                     </div>
                     <div class="card-body">
@@ -40,9 +37,6 @@
                                     {% csrf_token %}
                                     {{form | crispy}}
                                     <input type="submit" value="Simpan" class="btn btn-success">
-                                    <button type="button" id="validasi_btn_id" class="btn btn-info" data-toggle="modal" data-target="#modal_pengajuan">
-                                        Simpan dan Ajukan
-                                      </button>
                                 </form>
                             </div>
                         </div>
@@ -55,13 +49,7 @@
                             {% endif %}
                             
                             <div class="col-md-12">
-                                {% if nip %}
-                                    {% include '3_layanan_berkala/layanan_berkala_perorang.html' %}
-                                {% elif request.user.is_superuser  %}
-                                    {% include '3_layanan_berkala/layanan_berkala.html' %}
-                                {% else %}
-                                    {% include 'riwayat_404.html' %}
-                                {% endif %}
+                                {% include '3_layanan_berkala/layanan_berkala.html' %}
                             </div>
                         </div>
                     </div>

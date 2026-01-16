@@ -46,19 +46,9 @@ Layanan cuti
                                     {% if not request.user.is_superuser %}
                                     <div class="col-md-12 border border-success border-block rounded p-2" style="background-color: rgb(164, 233, 176);">
                                         {% if cek_sisa_cuti > 0 %}
-                                            <span>
-                                                Sisa cuti tahunan anda {{cek_sisa_cuti}} hari
-                                                {% if cek_sisa_tunda_cuti > 0 %}
-                                                    dan sisa cuti tertunda {{cek_sisa_tunda_cuti}} hari
-                                                {% endif %}
-                                            </span> 
+                                            <span>Sisa cuti tahunan anda {{cek_sisa_cuti}} hari</span>
                                         {% else %}
-                                            <span>
-                                                Jatah cuti tahunan anda sudah habis 
-                                                {% if cek_sisa_tunda_cuti > 0 %}
-                                                    dan sisa cuti tertunda {{cek_sisa_tunda_cuti}} hari
-                                                {% endif %}
-                                            </span>
+                                            <span>Jatah cuti tahunan anda sudah habis</span>
                                         {% endif %}
                                     </div>
                                     {% endif %}

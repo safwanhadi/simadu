@@ -1,0 +1,16 @@
+{% extends "auth_base.html" %}
+{% block content %}
+<div class="container py-4">
+  <h3>SSO Portal</h3>
+  <p>Pilih aplikasi yang ingin Anda akses.</p>
+
+  <div class="list-group">
+    {% for key, c in clients.items %}
+      <a class="list-group-item list-group-item-action"
+         href="{% url 'myaccount_urls:sso_go' key %}">
+        {{ c.label }}
+      </a>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

@@ -30,7 +30,8 @@ urlpatterns = [
     path('', include(('dashboard.urls', 'dashboard_urls'), namespace='dashboard_urls')),
     path('informasi/', include(('informasi.urls', 'informasi_urls'), namespace='informasi_urls')),
     path('disiplin/', include(('disiplinsdm.urls', 'disiplinsdm_urls'), namespace='disiplinsdm_urls')),
-    path('laporan/', include(('lapor.urls', 'laporan_urls'), namespace='laporan_urls'))
+    path('laporan/', include(('lapor.urls', 'laporan_urls'), namespace='laporan_urls')),
+    path("o/", include("oauth2_provider.urls", namespace="oauth2_provider")),
 ]
 
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

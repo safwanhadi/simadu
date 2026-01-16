@@ -2,217 +2,236 @@
 {% load static %}
 {% load template_tags %}
 {% load crispy_forms_tags %}
+{% load dict_utils %}
 
 {% block title_page %}
-  {{ title_page }}
+  Dashboard Absensi
 {% endblock %}
 
 {% block styles %}
   <link rel="stylesheet" href="{% static 'dist/css/dash.css' %}">
 {% endblock %}
 
-{% block cardtitle %}
-{% endblock %}
-
 {% block content %}
+<!-- Filter Form -->
 <div class="row">
   <div class="col-md-12 rounded mb-3">
-      <div class="row d-flex justify-content-end mr-3">
+      <div class="row d-flex justify-content-end align-items-center mr-3">
           <div class="mb-2">
-              <form method="get">
+              <form method="get" id="filterForm" action="{% url 'dashboard_urls:dashboard_absensi_view' %}">
                   <div class="d-flex flex-row">
-                      <select name="periode" class="form-control ml-2 mr-2">
+                      <select name="periode" class="form-control ml-2 mr-2" onchange="document.getElementById('filterForm').submit();">
                           <option value="bulanan" {% if periode == 'bulanan' %}selected{% endif %}>Bulanan</option>
                           <option value="harian" {% if periode == 'harian' %}selected{% endif %}>Harian</option>
                       </select>
                       {% if periode == 'bulanan' %}
                         <select name="bulan" class="form-control ml-2 mr-2">
-                          <option value="">--- Bulan ---</option>
-                          {% for value, label in bulan_list %}
-                              <option value="{{ value }}" {% if request.GET.bulan == value|stringformat:"s" %}selected{% endif %}>
-                                  {{ label }}
-                              </option>
-                          {% endfor %}
-                      </select>
-
-                      <select name="tahun" class="form-control mr-2">
-                          <option value="">--- Tahun ---</option>
-                          {% for t in tahun_list %}
-                              <option value="{{ t }}" {% if request.GET.tahun == t|stringformat:"s" %}selected{% endif %}>{{ t }}</option>
-                          {% endfor %}
-                      </select>
+                            <option value="">--- Bulan ---</option>
+                            {% for value, label in bulan_list %}
+                                <option value="{{ value }}" {% if request.GET.bulan|add:"0" == value %}selected{% endif %}>
+                                    {{ label }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <select name="tahun" class="form-control mr-2">
+                            <option value="">--- Tahun ---</option>
+                            {% for t in tahun_list %}
+                                <option value="{{ t }}" {% if request.GET.tahun|add:"0" == t %}selected{% endif %}>{{ t }}</option>
+                            {% endfor %}
+                        </select>
                       {% else %}
                         <input type="date" name="tgl" class="form-control ml-2 mr-2" value="{{ request.GET.tgl|default:kemarin_string }}"/>
                       {% endif %}
-                      <div class="ml-2"><button class="btn btn-outline-info btn-sm">Tampilkan</button></div>
+                      <div class="ml-2"><button type="submit" class="btn btn-outline-info btn-sm">Tampilkan</button></div>
                   </div>
               </form>
           </div>
       </div>
   </div>
 </div>
+
+<!-- Statistik Ringkas -->
 <div class="row text-center mb-4">
   {% for stat in statistik_kehadiran %}
   <div class="col">
-    <div class="card bg-{{ stat.color }} bg-opacity-50">
+    {# REFACTOR: Menghapus class bg-opacity-25 (Bootstrap 5) dan menyesuaikan untuk Bootstrap 4 #}
+    <div class="card text-white bg-{{ stat.color }} mb-3">
       <div class="card-body">
-        <h5>{{ stat.label }}</h5>
-        <h3>{{ stat.jumlah }}</h3>
+        <h5 class="card-title">{{ stat.label }}</h5>
+        <h3 class="card-text">{{ stat.jumlah }}</h3>
       </div>
     </div>
   </div>
   {% endfor %}
 </div>
 
+<!-- Include Tabel Harian atau Bulanan -->
 {% if periode == 'harian' %}
   {% include 'absensi/absensi_harian.html' %}
 {% else %}
   {% include 'absensi/absensi_bulanan.html' %}
 {% endif %}
 
-<h5 class="mt-5">Instalasi dengan Persentase Kehadiran Pegawai Tertinggi</h5>
-<canvas id="instalasiChart" height="80"></canvas>
 
-<h5 class="mt-5">Instalasi dengan TK dan Keterlambatan Pegawai Terbanyak</h5>
-<canvas id="instalasiTKChart" height="80"></canvas>
+<!-- Analisis Per Instalasi -->
+<div class="row mt-5">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title">Persentase Kehadiran per Instalasi</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="instalasiChart" height="300"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="row mt-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title">Pelanggaran (TK & Terlambat) per Instalasi</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="instalasiTKChart" height="300"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block script %}
-<!-- Chart: Persentase Kehadiran per Instalasi -->
+{# Pastikan Chart.js sudah di-load di base.html Anda #}
+{# Contoh: <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> #}
 <script>
-  new Chart(document.getElementById("instalasiChart"), {
-    type: 'bar',
-    data: {
-      labels: {{ chart_instalasi_hadir_labels|safe }},
-      datasets: [{
-        label: 'Persentase Kehadiran',
-        data: {{ chart_instalasi_hadir_data|safe }},
-        backgroundColor: 'rgba(54, 162, 235, 0.7)'
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: function(context) {
-              return context.parsed.y + '%';
+document.addEventListener("DOMContentLoaded", function() {
+    
+    // Fungsi helper untuk memeriksa apakah data chart ada
+    const isDataAvailable = (labels, datasets) => {
+        if (!labels || labels.length === 0) return false;
+        if (!datasets || datasets.some(ds => !ds.data || ds.data.length === 0)) return false;
+        return true;
+    };
+    
+    // --- Chart Per Instalasi ---
+    const instalasiChartCanvas = document.getElementById("instalasiChart");
+    const instalasiHadirLabels = {{ chart_instalasi_hadir_labels|default:'[]'|safe }};
+    const instalasiHadirData = {{ chart_instalasi_hadir_data|default:'[]'|safe }};
+
+    if (instalasiChartCanvas && isDataAvailable(instalasiHadirLabels, [{data: instalasiHadirData}])) {
+        new Chart(instalasiChartCanvas, {
+          type: 'bar',
+          data: {
+            labels: instalasiHadirLabels,
+            datasets: [{
+              label: 'Persentase Kehadiran',
+              data: instalasiHadirData,
+              backgroundColor: 'rgba(54, 162, 235, 0.7)'
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            aspectRatio: 2,
+            scales: {
+              y: {
+                beginAtZero: true,
+                max: 100,
+                ticks: {
+                  callback: function(value) { return value + '%'; }
+                },
+                title: {
+                  display: true,
+                  text: 'Persentase Kehadiran (%)'
+                }
+              }
             }
           }
-        }
-      },
-      scales: {
-        y: {
-          ticks: {
-            callback: function(value) {
-              return value + '%';
-            }
-          },
-          title: {
-            display: true,
-            text: 'Persentase (%)'
-          },
-          beginAtZero: true,
-          max: 100
-        }
-      }
+        });
     }
-  });
-</script>
 
-<!-- Chart: Jumlah TK & Terlambat per Instalasi -->
-<script>
-  const dataLabels = {{ chart_instalasi_labels|safe }};
-  const dataTK = {{ chart_instalasi_tk_data|safe }};
-  const dataTerlambat = {{ chart_instalasi_terlambat_data|safe }};
-
-  new Chart(document.getElementById("instalasiTKChart"), {
-    type: 'bar',
-    data: {
-      labels: dataLabels,
-      datasets: [
-        {
-          label: 'Tidak Hadir',
-          data: dataTK,
-          backgroundColor: 'rgba(255, 99, 132, 0.7)'
-        },
-        {
-          label: 'Terlambat',
-          data: dataTerlambat,
-          backgroundColor: 'rgba(255, 159, 64, 0.7)'
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        tooltip: { mode: 'index', intersect: false },
-        legend: { position: 'top' }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          title: {
-            display: true,
-            text: 'Jumlah Pegawai'
+    const instalasiTKChartCanvas = document.getElementById("instalasiTKChart");
+    const instalasiLabels = {{ chart_instalasi_labels|default:'[]'|safe }};
+    const instalasiTkData = {{ chart_instalasi_tk_data|default:'[]'|safe }};
+    const instalasiTerlambatData = {{ chart_instalasi_terlambat_data|default:'[]'|safe }};
+    
+    if (instalasiTKChartCanvas && isDataAvailable(instalasiLabels, [{data: instalasiTkData}, {data: instalasiTerlambatData}])) {
+        new Chart(instalasiTKChartCanvas, {
+          type: 'bar',
+          data: {
+            labels: instalasiLabels,
+            datasets: [
+              { label: 'Tidak Hadir', data: instalasiTkData, backgroundColor: 'rgba(255, 99, 132, 0.7)' },
+              { label: 'Terlambat', data: instalasiTerlambatData, backgroundColor: 'rgba(255, 159, 64, 0.7)' }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            aspectRatio: 2
           }
-        }
-      }
+        });
     }
-  });
-</script>
 
-<!-- Chart: Top 10 Disiplin -->
-<script>
-  new Chart(document.getElementById("topDisiplinChart"), {
-    type: 'horizontalBar',
-    data: {
-      labels: {{ top_disiplin_labels|safe }},
-      datasets: [{
-        label: 'Tepat Waktu',
-        data: {{ top_disiplin_data|safe }},
-        backgroundColor: 'rgba(75, 192, 192, 0.7)'
-      }]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      plugins: {
-        legend: { display: false }
-      }
-    }
-  });
-</script>
 
-<!-- Chart: Top 10 Malas -->
-<script>
-  const pemalasData = {{ top_malas_data|safe }};
-  const pemalasLabels = {{ top_malas_labels|safe }};
-  new Chart(document.getElementById("topMalasChart"), {
-    type: 'horizontalBar',
-    data: {
-      labels: pemalasLabels,
-      datasets: [
-        {
-          label: 'Tidak Hadir',
-          data: pemalasData.map(item => item.tk),
-          backgroundColor: 'rgba(255, 99, 132, 0.7)'
-        },
-        {
-          label: 'Terlambat',
-          data: pemalasData.map(item => item.terlambat),
-          backgroundColor: 'rgba(255, 159, 64, 0.7)'
-        }
-      ]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      plugins: {
-        legend: { display: false }
-      }
+    // --- Chart Baru Per Pegawai ---
+    const pegawaiPelanggarCanvas = document.getElementById('chartPegawaiPelanggar');
+    const pelanggarLabels = {{ chart_pegawai_pelanggar_labels|default:'[]'|safe }};
+    const pelanggarTkData = {{ chart_pegawai_pelanggar_tk_data|default:'[]'|safe }};
+    const pelanggarTerlambatData = {{ chart_pegawai_pelanggar_terlambat_data|default:'[]'|safe }};
+
+    if (pegawaiPelanggarCanvas && isDataAvailable(pelanggarLabels, [{data: pelanggarTkData}, {data: pelanggarTerlambatData}])) {
+        new Chart(pegawaiPelanggarCanvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: pelanggarLabels,
+                datasets: [{
+                    label: 'Tanpa Keterangan (TK)',
+                    data: pelanggarTkData,
+                    backgroundColor: 'rgba(220, 53, 69, 0.7)', // Merah
+                }, {
+                    label: 'Terlambat',
+                    data: pelanggarTerlambatData,
+                    backgroundColor: 'rgba(255, 193, 7, 0.7)', // Kuning
+                }]
+            },
+            options: {
+                indexAxis: 'y', responsive: true,
+                plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+                scales: {
+                    x: { stacked: true, title: { display: true, text: 'Jumlah Pelanggaran' } },
+                    y: { stacked: true }
+                }
+            }
+        });
     }
-  });
+
+    const pegawaiDisiplinCanvas = document.getElementById('chartPegawaiDisiplin');
+    const disiplinLabels = {{ chart_pegawai_terdisiplin_labels|default:'[]'|safe }};
+    const disiplinData = {{ chart_pegawai_terdisiplin_data|default:'[]'|safe }};
+
+    if (pegawaiDisiplinCanvas && isDataAvailable(disiplinLabels, [{data: disiplinData}])) {
+        new Chart(pegawaiDisiplinCanvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: disiplinLabels,
+                datasets: [{
+                    label: 'Hadir Tepat Waktu',
+                    data: disiplinData,
+                    backgroundColor: 'rgba(13, 202, 240, 0.7)', // Biru Info
+                }]
+            },
+            options: {
+                indexAxis: 'y', responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { title: { display: true, text: 'Jumlah Kehadiran Tepat Waktu' } }
+                }
+            }
+        });
+    }
+});
 </script>
 {% endblock %}
+

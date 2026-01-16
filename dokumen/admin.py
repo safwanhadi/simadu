@@ -22,6 +22,7 @@ from .models import (
     RiwayatOrganisasi,
     RiwayatDiklat,
     RiwayatCuti,
+    KlaimCutiTunda,
     RiwayatHukuman,
     RiwayatPenghargaan,
     RiwayatKeluarga,
@@ -76,6 +77,7 @@ admin.site.register(RiwayatSKP)
 admin.site.register(RiwayatOrganisasi)
 admin.site.register(RiwayatDiklat)
 admin.site.register(RiwayatCuti)
+admin.site.register(KlaimCutiTunda)
 admin.site.register(RiwayatHukuman)
 admin.site.register(RiwayatPenghargaan)
 admin.site.register(RiwayatKeluarga)

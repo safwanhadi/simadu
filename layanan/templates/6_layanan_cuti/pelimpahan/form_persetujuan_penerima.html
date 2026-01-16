@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block content %}
+<div class="container mt-4">
+  <h3>Persetujuan Pelimpahan Tugas</h3>
+
+  <p>
+    Pemberi tugas: <strong>{{ object.pemberi_tugas.full_name }}</strong><br>
+    Periode: {{ object.tgl_mulai }} s.d {{ object.tgl_selesai }}<br>
+    Cuti terkait: {{ object.riwayat_cuti.jenis_cuti }} ({{ object.riwayat_cuti.lama_cuti }} hari)
+  </p>
+
+  {# === STATUS SAAT INI === #}
+  <div class="alert alert-light border d-flex justify-content-between align-items-center">
+    <div>
+      <strong>Status persetujuan saat ini:</strong>
+      {% if object.status == "diterima" %}
+        <span class="badge bg-success">DITERIMA</span>
+      {% elif object.status == "ditolak" %}
+        <span class="badge bg-danger">DITOLAK</span>
+      {% else %}
+        <span class="badge bg-secondary">BELUM DIPUTUSKAN</span>
+      {% endif %}
+    </div>
+
+    {# opsional: tampilkan kapan terakhir diupdate #}
+    {% if object.updated_at %}
+      <small class="text-muted">Update: {{ object.updated_at|date:"d M Y H:i" }}</small>
+    {% endif %}
+  </div>
+
+  <p><strong>Deskripsi tugas:</strong></p>
+  <p>{{ object.deskripsi_tugas|linebreaks }}</p>
+
+  <form method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+
+    <div class="mb-3">
+      <label class="form-label">Keputusan Anda</label>
+      {{ form.aksi|as_crispy_field }}
+      {{ form.aksi.errors }}
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Catatan (opsional)</label>
+      {{ form.catatan_penerima|as_crispy_field }}
+      {{ form.catatan_penerima.errors }}
+    </div>
+
+    <button type="submit" class="btn btn-primary">Simpan</button>
+    <a class="btn btn-light border" href="{% url 'layanan_urls:pelimpahan_detail' object.pk %}">Batal</a>
+  </form>
+</div>
+{% endblock %}

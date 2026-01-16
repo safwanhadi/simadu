@@ -1,0 +1,273 @@
+{% extends 'cuti/base.html' %}
+
+{% block title %}Ajukan Cuti Baru - Aplikasi Cuti{% endblock %}
+
+{% block page_title %}Ajukan Cuti Baru{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-plus"></i> Form Pengajuan Cuti
+                </h6>
+            </div>
+            <div class="card-body">
+                <!-- Info Sisa Cuti -->
+                <div class="alert alert-info" id="sisaCutiInfo">
+                    <i class="fas fa-info-circle"></i> 
+                    <strong>Sisa Cuti Tahunan:</strong> <span id="sisaCutiValue">{{ sisa_cuti }} hari</span>
+                </div>
+
+                <form method="post" id="cutiForm" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="{{ form.jenis_cuti.id_for_label }}" class="form-label">
+                                    {{ form.jenis_cuti.label }} <span class="text-danger">*</span>
+                                </label>
+                                {{ form.jenis_cuti }}
+                                {% if form.jenis_cuti.errors %}
+                                    <div class="text-danger small mt-1">
+                                        {{ form.jenis_cuti.errors.0 }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="{{ form.no_telp.id_for_label }}" class="form-label">
+                                    {{ form.no_telp.label }}
+                                </label>
+                                {{ form.no_telp }}
+                                {% if form.no_telp.errors %}
+                                    <div class="text-danger small mt-1">
+                                        {{ form.no_telp.errors.0 }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="{{ form.tgl_mulai.id_for_label }}" class="form-label">
+                                    {{ form.tgl_mulai.label }} <span class="text-danger">*</span>
+                                </label>
+                                {{ form.tgl_mulai }}
+                                {% if form.tgl_mulai.errors %}
+                                    <div class="text-danger small mt-1">
+                                        {{ form.tgl_mulai.errors.0 }}
+                                    </div>
+                                {% endif %}
+                                <small class="form-text text-muted">
+                                    Minimal 7 hari dari tanggal pengajuan
+                                </small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="{{ form.tgl_akhir.id_for_label }}" class="form-label">
+                                    {{ form.tgl_akhir.id_for_label }} <span class="text-danger">*</span>
+                                </label>
+                                {{ form.tgl_akhir }}
+                                {% if form.tgl_akhir.errors %}
+                                    <div class="text-danger small mt-1">
+                                        {{ form.tgl_akhir.errors.0 }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-12">
+                            <div class="mb-3">
+                                <label for="{{ form.alasan_cuti.id_for_label }}" class="form-label">
+                                    {{ form.alasan_cuti.label }} <span class="text-danger">*</span>
+                                </label>
+                                {{ form.alasan_cuti }}
+                                {% if form.alasan_cuti.errors %}
+                                    <div class="text-danger small mt-1">
+                                        {{ form.alasan_cuti.errors.0 }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-12">
+                            <div class="mb-3">
+                                <label for="{{ form.alamat_cuti.id_for_label }}" class="form-label">
+                                    {{ form.alamat_cuti.label }}
+                                </label>
+                                {{ form.alamat_cuti }}
+                                {% if form.alamat_cuti.errors %}
+                                    <div class="text-danger small mt-1">
+                                        {{ form.alamat_cuti.errors.0 }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="{{ form.file_pengajuan.id_for_label }}" class="form-label">
+                                    {{ form.file_pengajuan.label }}
+                                </label>
+                                {{ form.file_pengajuan }}
+                                {% if form.file_pengajuan.errors %}
+                                    <div class="text-danger small mt-1">
+                                        {{ form.file_pengajuan.errors.0 }}
+                                    </div>
+                                {% endif %}
+                                <small class="form-text text-muted">
+                                    Maksimal 2.5MB
+                                </small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="{{ form.file_pendukung.id_for_label }}" class="form-label">
+                                    {{ form.file_pendukung.label }}
+                                </label>
+                                {{ form.file_pendukung }}
+                                {% if form.file_pendukung.errors %}
+                                    <div class="text-danger small mt-1">
+                                        {{ form.file_pendukung.errors.0 }}
+                                    </div>
+                                {% endif %}
+                                <small class="form-text text-muted">
+                                    Maksimal 2.5MB. Contoh: Surat penyerahan tugas
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Validation Alert -->
+                    <div id="validationAlert" class="alert alert-warning" style="display: none;">
+                        <i class="fas fa-exclamation-triangle"></i> <span id="validationMessage"></span>
+                    </div>
+
+                    <div class="d-flex justify-content-between">
+                        <a href="{% url 'cuti:layanan_cuti_list' %}" class="btn btn-secondary">
+                            <i class="fas fa-arrow-left"></i> Kembali
+                        </a>
+                        <button type="submit" class="btn btn-primary" id="submitBtn">
+                            <i class="fas fa-save"></i> Ajukan Cuti
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    // Update sisa cuti when jenis cuti changes
+    $('#id_jenis_cuti').on('change', function() {
+        updateSisaCutiInfo();
+    });
+
+    // Validate dates when they change
+    $('#id_tgl_mulai, #id_tgl_akhir').on('change', function() {
+        validateDates();
+    });
+
+    // Form submission validation
+    $('#cutiForm').on('submit', function(e) {
+        if (!validateForm()) {
+            e.preventDefault();
+            return false;
+        }
+    });
+
+    function updateSisaCutiInfo() {
+        var jenisCuti = $('#id_jenis_cuti').val();
+        var $alert = $('#sisaCutiInfo');
+        
+        if (jenisCuti === 'Cuti Tahunan') {
+            $alert.show();
+            // Optionally fetch updated sisa cuti via AJAX
+            $.get('{% url "cuti:api_sisa_cuti" %}', function(data) {
+                $('#sisaCutiValue').text(data.sisa_cuti + ' hari');
+            });
+        } else {
+            $alert.hide();
+        }
+    }
+
+    function validateDates() {
+        var tglMulai = $('#id_tgl_mulai').val();
+        var tglAkhir = $('#id_tgl_akhir').val();
+        var jenisCuti = $('#id_jenis_cuti').val();
+
+        if (!tglMulai || !tglAkhir) {
+            return true; // Don't validate if dates are not complete
+        }
+
+        // Basic date validation
+        if (tglMulai > tglAkhir) {
+            showValidationAlert('Tanggal mulai tidak boleh lebih besar dari tanggal akhir');
+            return false;
+        }
+
+        // Additional validation for cuti tahunan
+        if (jenisCuti === 'Cuti Tahunan') {
+            var lamaCuti = Math.ceil((new Date(tglAkhir) - new Date(tglMulai)) / (1000 * 60 * 60 * 24)) + 1;
+            var sisaCuti = parseInt($('#sisaCutiValue').text());
+
+            if (lamaCuti > sisaCuti) {
+                showValidationAlert('Sisa cuti tidak mencukupi. Sisa: ' + sisaCuti + ' hari, diajukan: ' + lamaCuti + ' hari');
+                return false;
+            }
+        }
+
+        hideValidationAlert();
+        return true;
+    }
+
+    function validateForm() {
+        // Check required fields
+        var requiredFields = ['id_jenis_cuti', 'id_tgl_mulai', 'id_tgl_akhir', 'id_alasan_cuti'];
+        for (var i = 0; i < requiredFields.length; i++) {
+            var field = $('#' + requiredFields[i]);
+            if (!field.val()) {
+                showValidationAlert('Harap lengkapi semua field yang wajib diisi');
+                field.focus();
+                return false;
+            }
+        }
+
+        // Validate dates
+        if (!validateDates()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    function showValidationAlert(message) {
+        $('#validationMessage').text(message);
+        $('#validationAlert').show();
+    }
+
+    function hideValidationAlert() {
+        $('#validationAlert').hide();
+    }
+
+    // Initialize
+    updateSisaCutiInfo();
+});
+</script>
+{% endblock %}

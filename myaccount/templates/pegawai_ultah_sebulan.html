@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+<div class="container-fluid">
+    {% if request.user.is_superuser %}
+        <ul class="nav nav-tabs mb-4">
+            <li class="nav-item">
+                <a class="nav-link {% if active_tab == 'profil' %}active{% endif %}"
+                href="{% url 'myaccount_urls:profil_view' %}">
+                    <i class="fas fa-id-badge"></i> List Profil Pegawai
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if active_tab == 'ultah' %}active{% endif %}"
+                href="{% url 'myaccount_urls:pegawai_ultah_sebulan' %}">
+                    <i class="fas fa-birthday-cake me-1"></i>
+                    Ulang Tahun (1 Bulan)
+                </a>
+            </li>
+        </ul>
+        {% endif %}
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+    <div>
+      <h4 class="mb-1">Pegawai Ulang Tahun (1 Bulan Terakhir)</h4>
+      <div class="text-muted small">
+        Rentang: {{ start_date|date:"d M Y" }} s/d {{ today|date:"d M Y" }}
+      </div>
+    </div>
+
+    <form class="d-flex gap-2" method="get">
+      <input
+        type="text"
+        name="q"
+        value="{{ q }}"
+        class="form-control"
+        placeholder="Cari nama / NIP / No HP..."
+        style="min-width: 280px;"
+      />
+      <button class="btn btn-primary" type="submit">
+        <i class="fas fa-search me-1"></i> Cari
+      </button>
+      {% if q %}
+      <a class="btn btn-light border" href="?">
+        Reset
+      </a>
+      {% endif %}
+    </form>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-striped table-hover align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th style="width:60px;">Foto</th>
+              <th>Nama</th>
+              <th style="width:170px;">Tanggal Lahir</th>
+              <th style="width:130px;">Ultah (Hari-Bulan)</th>
+              <th style="width:160px;">No HP</th>
+              <th>Email</th>
+              <th style="width:170px;">NIP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td>
+                {% if item.foto %}
+                  <img src="{{ item.foto.url }}" alt="foto" class="rounded-circle" style="width:42px;height:42px;object-fit:cover;">
+                {% else %}
+                  <div class="rounded-circle bg-secondary d-flex align-items-center justify-content-center text-white"
+                       style="width:42px;height:42px;">
+                    <i class="fas fa-user"></i>
+                  </div>
+                {% endif %}
+              </td>
+              <td class="fw-semibold">
+                {{ item.user.full_name }}
+                {% if item.is_dokter_spesialis %}
+                  <span class="badge bg-info text-dark ms-2">Dokter Spesialis</span>
+                {% endif %}
+              </td>
+              <td>{{ item.tgl_lahir|date:"d M Y" }}</td>
+              <td>{{ item.tgl_lahir|date:"d-m" }}</td>
+              <td>{{ item.no_hp }}</td>
+              <td>{{ item.email_pribadi }}</td>
+              <td>{{ item.nip|default:"-" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="7" class="text-center p-4">
+                <div class="text-muted">Tidak ada pegawai yang ulang tahun dalam 1 bulan terakhir.</div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {% if is_paginated %}
+    <div class="card-footer d-flex justify-content-between align-items-center">
+      <div class="small text-muted">
+        Halaman {{ page_obj.number }} dari {{ page_obj.paginator.num_pages }}
+      </div>
+
+      <nav>
+        <ul class="pagination mb-0">
+          {% if page_obj.has_previous %}
+            <li class="page-item">
+              <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if q %}&q={{ q }}{% endif %}">«</a>
+            </li>
+          {% else %}
+            <li class="page-item disabled"><span class="page-link">«</span></li>
+          {% endif %}
+
+          <li class="page-item active"><span class="page-link">{{ page_obj.number }}</span></li>
+
+          {% if page_obj.has_next %}
+            <li class="page-item">
+              <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if q %}&q={{ q }}{% endif %}">»</a>
+            </li>
+          {% else %}
+            <li class="page-item disabled"><span class="page-link">»</span></li>
+          {% endif %}
+        </ul>
+      </nav>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block content %}
+<div class="container mt-4 mb-5">
+  <h3>Form Pelimpahan Tugas</h3>
+  <p>
+    Pengajuan cuti: <strong>{{ view.riwayat_cuti.pegawai.full_name }}</strong> –
+    {{ view.riwayat_cuti.jenis_cuti }} ({{ view.riwayat_cuti.tgl_mulai_cuti }} s.d {{ view.riwayat_cuti.tgl_akhir_cuti }})
+  </p>
+
+  <form method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+
+    <div class="mb-3">
+      {{ form.penerima_tugas|as_crispy_field }}
+      {{ form.penerima_tugas.errors }}
+    </div>
+
+    <div class="mb-3">
+      {{ form.deskripsi_tugas|as_crispy_field }}
+      {{ form.deskripsi_tugas.errors }}
+    </div>
+
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        {{ form.tgl_mulai|as_crispy_field }}
+        {{ form.tgl_mulai.errors }}
+      </div>
+      <div class="col-md-6 mb-3">
+        {{ form.tgl_selesai|as_crispy_field }}
+        {{ form.tgl_selesai.errors }}
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">
+      Simpan & Kirim ke Penerima Tugas
+    </button>
+    <a class="btn btn-light border" href="{% url 'layanan_urls:layanan_cuti_listview' %}">Batal</a>
+  </form>
+</div>
+{% endblock %}

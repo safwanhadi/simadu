@@ -1,0 +1,250 @@
+{% extends 'cuti/base.html' %}
+
+{% block title %}Persetujuan Cuti - Aplikasi Cuti{% endblock %}
+
+{% block page_title %}Persetujuan Cuti{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+        <!-- Cuti Information -->
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-info-circle"></i> Informasi Pengajuan Cuti
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <table class="table table-borderless">
+                            <tr>
+                                <td><strong>Pegawai:</strong></td>
+                                <td>{{ cuti.pegawai.full_name }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Jenis Cuti:</strong></td>
+                                <td>{{ cuti.jenis_cuti }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Tanggal Mulai:</strong></td>
+                                <td>{{ cuti.tgl_mulai|date:"d F Y" }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Tanggal Akhir:</strong></td>
+                                <td>{{ cuti.tgl_akhir|date:"d F Y" }}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <table class="table table-borderless">
+                            <tr>
+                                <td><strong>Lama Cuti:</strong></td>
+                                <td>{{ cuti.lama_cuti }} hari</td>
+                            </tr>
+                            <tr>
+                                <td><strong>No. Telepon:</strong></td>
+                                <td>{{ cuti.no_telp|default:"-" }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Alamat Cuti:</strong></td>
+                                <td>{{ cuti.alamat_cuti|default:"-" }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Status Saat Ini:</strong></td>
+                                <td>
+                                    <span class="badge status-badge 
+                                        {% if cuti.status == 'Diajukan' %}bg-warning
+                                        {% elif 'Disetujui' in cuti.status %}bg-info
+                                        {% elif cuti.status == 'Disetujui Unor' %}bg-success
+                                        {% elif cuti.status == 'Ditolak' %}bg-danger
+                                        {% else %}bg-primary{% endif %}">
+                                        {{ cuti.status }}
+                                    </span>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-12">
+                        <strong>Alasan Cuti:</strong>
+                        <p class="mt-2">{{ cuti.alasan_cuti|linebreaks }}</p>
+                    </div>
+                </div>
+
+                {% if cuti.file_pengajuan or cuti.file_pendukung %}
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <strong>Dokumen:</strong>
+                        <div class="mt-2">
+                            {% if cuti.file_pengajuan %}
+                            <a href="{{ cuti.file_pengajuan.url }}" target="_blank" class="btn btn-sm btn-outline-primary me-2">
+                                <i class="fas fa-file"></i> File Pengajuan
+                            </a>
+                            {% endif %}
+                            {% if cuti.file_pendukung %}
+                            <a href="{{ cuti.file_pendukung.url }}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                                <i class="fas fa-paperclip"></i> Dokumen Pendukung
+                            </a>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Approval History -->
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-info">
+                    <i class="fas fa-history"></i> Riwayat Persetujuan
+                </h6>
+            </div>
+            <div class="card-body">
+                {% for approval in persetujuan_list %}
+                <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-3">
+                    <div>
+                        <h6 class="mb-1">{{ approval.level_approval|title }}</h6>
+                        <small class="text-muted">
+                            {% if approval.approver %}
+                                {{ approval.approver.full_name }}
+                            {% else %}
+                                Belum ada approver
+                            {% endif %}
+                        </small>
+                    </div>
+                    <div class="text-right">
+                        <span class="badge 
+                            {% if approval.status == 'Approved' %}bg-success
+                            {% elif approval.status == 'Pending' %}bg-warning
+                            {% else %}bg-danger{% endif %}">
+                            {{ approval.status }}
+                        </span>
+                        {% if approval.tanggal_approval %}
+                        <br>
+                        <small class="text-muted">
+                            {{ approval.tanggal_approval|date:"d/m/Y H:i" }}
+                        </small>
+                        {% endif %}
+                    </div>
+                </div>
+                {% if approval.catatan %}
+                <div class="alert alert-light">
+                    <strong>Catatan:</strong> {{ approval.catatan }}
+                </div>
+                {% endif %}
+                {% empty %}
+                <div class="text-center text-muted">
+                    <i class="fas fa-info-circle"></i> Belum ada proses persetujuan
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Approval Form -->
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-success">
+                    <i class="fas fa-user-check"></i> Form Persetujuan
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i> 
+                    Anda diminta untuk menyetujui pengajuan cuti ini pada level: 
+                    <strong>{{ next_approval_level|title }}</strong>
+                </div>
+
+                <form method="post">
+                    {% csrf_token %}
+                    
+                    <div class="mb-3">
+                        <label for="{{ form.status.id_for_label }}" class="form-label">
+                            {{ form.status.label }} <span class="text-danger">*</span>
+                        </label>
+                        {{ form.status }}
+                        {% if form.status.errors %}
+                            <div class="text-danger small mt-1">
+                                {{ form.status.errors.0 }}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="{{ form.catatan.id_for_label }}" class="form-label">
+                            {{ form.catatan.label }}
+                        </label>
+                        {{ form.catatan }}
+                        {% if form.catatan.errors %}
+                            <div class="text-danger small mt-1">
+                                {{ form.catatan.errors.0 }}
+                            </div>
+                        {% endif %}
+                        <small class="form-text text-muted">
+                            Catatan wajib diisi jika menolak pengajuan cuti
+                        </small>
+                    </div>
+
+                    <div class="d-flex justify-content-between">
+                        <a href="{% url 'cuti:persetujuan_list' %}" class="btn btn-secondary">
+                            <i class="fas fa-arrow-left"></i> Kembali
+                        </a>
+                        <div>
+                            <button type="submit" class="btn btn-success" id="approveBtn">
+                                <i class="fas fa-check"></i> Simpan Persetujuan
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    // Show/hide catatan field based on status
+    $('#id_status').on('change', function() {
+        var status = $(this).val();
+        var $catatanField = $('#id_catatan');
+        var $catatanLabel = $('label[for="id_catatan"]');
+        
+        if (status === 'Rejected') {
+            $catatanLabel.find('span.text-danger').remove();
+            $catatanLabel.append(' <span class="text-danger">*</span>');
+            $catatanField.prop('required', true);
+        } else {
+            $catatanLabel.find('span.text-danger').remove();
+            $catatanField.prop('required', false);
+        }
+    });
+
+    // Confirmation before submit
+    $('form').on('submit', function(e) {
+        var status = $('#id_status').val();
+        var catatan = $('#id_catatan').val();
+        
+        if (status === 'Rejected' && !catatan.trim()) {
+            e.preventDefault();
+            alert('Catatan harus diisi jika menolak pengajuan cuti.');
+            $('#id_catatan').focus();
+            return false;
+        }
+        
+        var confirmMessage = status === 'Approved' ? 
+            'Apakah Anda yakin ingin menyetujui pengajuan cuti ini?' : 
+            'Apakah Anda yakin ingin menolak pengajuan cuti ini?';
+        
+        if (!confirm(confirmMessage)) {
+            e.preventDefault();
+            return false;
+        }
+    });
+});
+</script>
+{% endblock %}

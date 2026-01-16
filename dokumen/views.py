@@ -1,4 +1,4 @@
-from django.db.models import Q, Count, F, Case, When, Sum
+from django.db.models import Q, Count, F, Case, When, Sum, Prefetch, IntegerField
 from django.shortcuts import render, redirect
 from django.urls import reverse, reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -97,6 +97,19 @@ from .forms import (
 )
 
 # Create your views here.
+
+def update_old_file(data):
+    if data_submitted.file: # Ini akan True jika file baru di-upload
+        # 3. Cek apakah file fisik lama benar-benar ada di disk
+        if os.path.exists(berkala_existing.file.path):
+            try:
+                # 4. Hapus file lama
+                os.remove(berkala_existing.file.path)
+                print(f"File lama {berkala_existing.file.path} berhasil dihapus.")
+            except OSError as e:
+                print(f"Gagal menghapus file lama {berkala_existing.file.path}: {e}")
+        return None
+    return None
 
 class NotFoundPage(LoginRequiredMixin, View):
     def get(self, request, *args, **kwargs):
@@ -1479,7 +1492,7 @@ class UrutkanRiwayatPenempatanView(LoginRequiredMixin, SuccessMessageMixin, Upda
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_penempatan(self.request.POST, instance=self.object)
         else:
-            urutkan_dokumen_form = urutkan_dokumen_penempatan(instance=self.object, queryset=self.object.riwayatpenempatan_set.filter(pegawai=self.request.user))
+            urutkan_dokumen_form = urutkan_dokumen_penempatan(instance=self.object, queryset=self.object.riwayat_penempatan.filter(pegawai=self.request.user))
         context = super(UrutkanRiwayatPenempatanView, self).get_context_data(**kwargs)
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
@@ -2388,6 +2401,120 @@ class UrutkanRiwayatCutiView(LoginRequiredMixin, SuccessMessageMixin, UpdateView
         return super().form_valid(form)
     
 
+class RiwayatCutiMonitoringListView(LoginRequiredMixin, ListView):
+    login_url = '/accounts/login/'
+    redirect_field_name = 'next'
+    model = RiwayatCuti
+    template_name = '10_riwayat_cuti/riwayat_cuti_monitoring.html'
+    context_object_name = 'data'
+
+    def get_active_penempatan(self):
+        return (
+            self.request.user.riwayat_penempatan.filter(status=True)
+            .select_related(
+                'penempatan_level1',
+                'penempatan_level2',
+                'penempatan_level3',
+                'penempatan_level4',
+                'penempatan_level4__sub_bidang',
+                'penempatan_level3__bidang',
+                'penempatan_level2__unor',
+            )
+            .last()
+        )
+
+    def _build_penempatan_filter(self, penempatan):
+        filters = Q(pegawai__riwayatpenempatan__status=True)
+        if penempatan.penempatan_level4:
+            unit = penempatan.penempatan_level4
+            filters &= Q(pegawai__riwayatpenempatan__penempatan_level4=unit)
+        elif penempatan.penempatan_level3:
+            sub_bidang = penempatan.penempatan_level3
+            filters &= (
+                Q(pegawai__riwayatpenempatan__penempatan_level3=sub_bidang)
+                | Q(pegawai__riwayatpenempatan__penempatan_level4__sub_bidang=sub_bidang)
+            )
+        elif penempatan.penempatan_level2:
+            bidang = penempatan.penempatan_level2
+            filters &= (
+                Q(pegawai__riwayatpenempatan__penempatan_level2=bidang)
+                | Q(pegawai__riwayatpenempatan__penempatan_level3__bidang=bidang)
+                | Q(pegawai__riwayatpenempatan__penempatan_level4__sub_bidang__bidang=bidang)
+            )
+        elif penempatan.penempatan_level1:
+            unor = penempatan.penempatan_level1
+            filters &= (
+                Q(pegawai__riwayatpenempatan__penempatan_level1=unor)
+                | Q(pegawai__riwayatpenempatan__penempatan_level2__unor=unor)
+                | Q(pegawai__riwayatpenempatan__penempatan_level3__bidang__unor=unor)
+                | Q(pegawai__riwayatpenempatan__penempatan_level4__sub_bidang__bidang__unor=unor)
+            )
+        return filters
+
+    def get_queryset(self):
+        base_queryset = (
+            super()
+            .get_queryset()
+            .select_related('pegawai', 'pegawai__profil_user', 'usulan')
+            .annotate(
+                status_priority=Case(
+                    When(usulan__status='pengajuan', then=0),
+                    When(usulan__status='tindaklanjut', then=1),
+                    When(usulan__status='selesai', then=2),
+                    default=3,
+                    output_field=IntegerField(),
+                )
+            )
+            .prefetch_related(
+                Prefetch(
+                    'pegawai__riwayat_penempatan',
+                    queryset=RiwayatPenempatan.objects.filter(status=True)
+                    .select_related(
+                        'penempatan_level1',
+                        'penempatan_level2',
+                        'penempatan_level3',
+                        'penempatan_level4',
+                        'penempatan_level4__sub_bidang',
+                        'penempatan_level3__bidang',
+                        'penempatan_level2__unor',
+                    )
+                    .order_by('-updated_at'),
+                    to_attr='active_penempatan',
+                )
+            )
+            .order_by('status_priority', '-created_at')
+        )
+
+        if self.request.user.is_superuser:
+            return base_queryset
+
+        if not self.request.user.is_staff:
+            return base_queryset.filter(pegawai=self.request.user)
+
+        penempatan = self.get_active_penempatan()
+        if not penempatan:
+            return base_queryset.none()
+
+        return base_queryset.filter(self._build_penempatan_filter(penempatan)).distinct()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        active_penempatan = self.get_active_penempatan()
+        context.update(
+            {
+                'page': 'Home',
+                'sub_page': 'Riwayat',
+                'title_page': 'Monitoring Cuti',
+                'form_view': 'none',
+                'data_view': 'block',
+                'riwayat': 'active',
+                'selected': 'cuti',
+                'penempatan_aktif': active_penempatan.penempatan if active_penempatan else None,
+            }
+        )
+        return context
+    
+        
 class RiwayatDiklatListView(LoginRequiredMixin, ListView):
     login_url = '/accounts/login/'
     redirect_field_name = 'next'
@@ -2405,15 +2532,15 @@ class RiwayatDiklatListView(LoginRequiredMixin, ListView):
             ).distinct()
             return queryset
         if self.request.user.is_staff:
-            queryset = data.filter(riwayatpenempatan__penempatan_level3__sub_bidang=self.request.user.riwayatpenempatan_set.filter(status=True).last().penempatan
+            queryset = data.filter(riwayatpenempatan__penempatan_level3__sub_bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan
             ).values('id', 'riwayatdiklat__tgl_mulai__year', 'first_name', 'last_name', 'profil_user__nip').annotate(
                 frekuensi_diklat=Count('riwayatdiklat', distinct=True),
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True) 
-            ).distinct()|data.filter(riwayatpenempatan__penempatan_level2__bidang=self.request.user.riwayatpenempatan_set.filter(status=True).last().penempatan
+            ).distinct()|data.filter(riwayatpenempatan__penempatan_level2__bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan
             ).values('id', 'riwayatdiklat__tgl_mulai__year', 'first_name', 'last_name', 'profil_user__nip').annotate(
                 frekuensi_diklat=Count('riwayatdiklat', distinct=True),
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True)
-            ).distinct()|data.filter(riwayatpenempatan__penempatan_level1__unor=self.request.user.riwayatpenempatan_set.filter(status=True).last().penempatan
+            ).distinct()|data.filter(riwayatpenempatan__penempatan_level1__unor=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan
             ).values('id', 'riwayatdiklat__tgl_mulai__year', 'first_name', 'last_name', 'profil_user__nip').annotate(
                 frekuensi_diklat=Count('riwayatdiklat', distinct=True),
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True)
@@ -2551,13 +2678,13 @@ class RiwayatDiklatPegawaiView(LoginRequiredMixin, ListView):
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran')
             )
         elif self.request.user.is_staff:
-            data = Users.objects.filter(riwayatpenempatan__penempatan_level3__sub_bidang=self.request.user.riwayatpenempatan_set.filter(status=True).last().penempatan).annotate(
+            data = Users.objects.filter(riwayatpenempatan__penempatan_level3__sub_bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan).annotate(
                 frekuensi_diklat=Count('riwayatdiklat', distinct=True),
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True) 
-            ).distinct()|Users.objects.filter(riwayatpenempatan__penempatan_level2__bidang=self.request.user.riwayatpenempatan_set.filter(status=True).last().penempatan).annotate(
+            ).distinct()|Users.objects.filter(riwayatpenempatan__penempatan_level2__bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan).annotate(
                 frekuensi_diklat=Count('riwayatdiklat', distinct=True),
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True)
-            ).distinct()|Users.objects.filter(riwayatpenempatan__penempatan_level1__unor=self.request.user.riwayatpenempatan_set.filter(status=True).last().penempatan).annotate(
+            ).distinct()|Users.objects.filter(riwayatpenempatan__penempatan_level1__unor=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan).annotate(
                 frekuensi_diklat=Count('riwayatdiklat', distinct=True),
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True)
             ).distinct()

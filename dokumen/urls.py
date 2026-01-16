@@ -43,6 +43,7 @@ from .views import (
     RiwayatCutiView,
     RiwayatCutiUpdateView,
     UrutkanRiwayatCutiView,
+    RiwayatCutiMonitoringListView,
     RiwayatDiklatListView,
     RiwayatDiklatDetailView,
     RiwayatDiklatCreateView,
@@ -86,8 +87,10 @@ from .views import (
     UrutkanRiwayatPenugasanView,
     GetListRiwayatSDM,
     RiwayatKelengkapan,
-    NotFoundPage
+    NotFoundPage,
 )
+
+from .api_views import PendidikanAPIView, JabatanAPIView
 
 
 urlpatterns=[
@@ -133,6 +136,7 @@ urlpatterns=[
     path('cuti/', RiwayatCutiView.as_view(), name='riwayat_cuti'),
     path('cuti/<int:id>/', RiwayatCutiUpdateView.as_view(), name='riwayat_update_cuti'),
     path('cuti/urutkan/<int:pk>/', UrutkanRiwayatCutiView.as_view(), name='riwayat_cuti_urutkan'),
+    path('cuti/monitoring/', RiwayatCutiMonitoringListView.as_view(), name='riwayat_cuti_monitoring'),
     path('diklat/', RiwayatDiklatListView.as_view(), name='riwayat_diklat'),
     path('diklat/create/', RiwayatDiklatCreateView.as_view(), name='riwayat_diklat_create'),
     path('diklat/<int:pk>/', RiwayatDiklatDetailView.as_view(), name='riwayat_diklat_detail'),
@@ -176,4 +180,7 @@ urlpatterns=[
     path('listdok/', GetListRiwayatSDM.as_view(), name='get_riwayat_sdm'),
     path('blankpage/<str:bagian>/<str:selected>/', NotFoundPage.as_view(), name='notfound_view'),
     path('cekdata/', RiwayatKelengkapan.as_view(), name='riwayat_kelengkapan_view'),
+    
+    path('api/pendidikan/', PendidikanAPIView.as_view(), name='api_pendidikan'),
+    path('api/jabatan/', JabatanAPIView.as_view(), name='api_jabatan'),
 ]

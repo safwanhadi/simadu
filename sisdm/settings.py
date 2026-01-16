@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'chartjs',
     'tinymce',
     'hitcount',
+    'oauth2_provider',
 
     'myaccount',
     'dokumen',
@@ -72,6 +73,15 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+OAUTH2_PROVIDER = {
+    "ACCESS_TOKEN_EXPIRE_SECONDS": 3600,
+    "REFRESH_TOKEN_EXPIRE_SECONDS": 7 * 24 * 3600,
+    "SCOPES": {
+        "read": "Read basic data",
+        "profile": "Read user profile",
+    }
+}
 
 ROOT_URLCONF = 'sisdm.urls'
 
@@ -132,6 +142,15 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework.authentication.SessionAuthentication",
+        "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
+    ),
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.IsAuthenticated",
+    ),
+}
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.0/topics/i18n/
@@ -175,6 +194,8 @@ MESSAGE_TAGS = {
 }
 
 X_FRAME_OPTIONS = 'SAMEORIGIN'
+
+ALLOW_CUTI_TUNDA = True
 
 TINYMCE_DEFAULT_CONFIG = {
     "height": "320px",
@@ -239,3 +260,49 @@ LOGGING = {
 }
 """
 
+SSO_CLIENTS = {
+    "simadu": {
+        "label": "SIMADU (Kepegawaian)",
+        "type": "local",  # login internal SIMADU
+        "login_url": "/accounts/login/",
+    },
+    "remun": {
+        "label": "REMUN (Remunerasi)",
+        "type": "oauth_client",
+        # ini DIDAPAT dari DOT Application untuk REMUN (client_id + redirect_uri)
+        "client_id": config("CLIENT_ID_REMUN"),
+        "redirect_uri": "http://127.0.0.1:8001/oauth/callback/",
+        "scopes": "read",
+    },
+    # tambah aplikasi lain tinggal copy ini
+}
+SSO_AUTH_BASE = "http://127.0.0.1:8000"  # base SIMADU sendiri
+
+OAUTH2_PROVIDER = {
+    # Access token lifetime (contoh 10 menit)
+    "ACCESS_TOKEN_EXPIRE_SECONDS": 600,
+
+    # Refresh token lifetime (opsional, kalau versi DOT kamu support)
+    # "REFRESH_TOKEN_EXPIRE_SECONDS": 60 * 60 * 24 * 30,  # 30 hari
+
+    # Supaya refresh token bisa dipakai berulang atau di-rotate (pilih salah satu gaya)
+    # Kalau kamu mau aman: rotasi refresh token
+    "ROTATE_REFRESH_TOKEN": True,
+    # default False, tapi di beberapa versi bisa True
+    # "PKCE_REQUIRED": False,
+}
+
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://127.0.0.1:6379/1",  # pakai DB 1 untuk cache/session
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        }
+    }
+}
+
+SESSION_COOKIE_NAME="simadu_sessionid"
+SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+SESSION_CACHE_ALIAS = "default"
+SESSION_COOKIE_SECURE=False

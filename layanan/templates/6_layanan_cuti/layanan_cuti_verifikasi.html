@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% load static %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="container-fluid py-4">
+
+    <!-- NAV TAB -->
+    <ul class="nav nav-tabs mb-4">
+        <li class="nav-item">
+            <a class="nav-link" href="{% url 'layanan_urls:layanan_cuti_listview' %}">
+                <i class="fas fa-edit me-1"></i> Riwayat Cuti Saya
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link active" href="#">
+                <i class="fas fa-users me-1"></i> Verifikasi Cuti Bawahan
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if active_tab == 'pelimpahan' or not active_tab %}active{% endif %}"
+               href="{% url 'layanan_urls:pelimpahan_penerima_list' %}">
+                <i class="fas fa-handshake me-1"></i> Pelimpahan Tugas Cuti
+            </a>
+        </li>
+    </ul>
+
+    <!-- HEADER -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="mb-1">
+                <i class="fas fa-check-double me-2 text-primary"></i>{{ title_page }}
+            </h4>
+            <p class="text-muted mb-0">
+                Proses verifikasi berjenjang untuk pengajuan cuti pegawai.
+            </p>
+        </div>
+        <div class="mt-3 mt-md-0 text-end small text-muted">
+            Pegawai:
+            <strong>{{ layanan.pegawai.full_name }}</strong><br>
+            NIP:
+            <strong>{{ layanan.pegawai.profil_user.nip|default:"-" }}</strong>
+        </div>
+    </div>
+
+    <!-- ALERT -->
+    {% if request.user.is_superuser %}
+        <div class="alert alert-info">
+            Mode monitoring: form dikunci (read-only).
+        </div>
+    {% endif %}
+
+    <div class="row g-3">
+
+        <!-- RINGKASAN CUTI -->
+        <div class="col-lg-5">
+            <div class="card border-0 shadow-sm h-100 border">
+                <div class="card-header bg-transparent border-0 pb-0 d-flex flex-column">
+                    <h6 class="card-title mb-1">
+                        <i class="fas fa-file-alt me-2 text-primary"></i>Ringkasan Pengajuan
+                    </h6>
+                    <p class="small text-muted mb-0">
+                        Detail singkat pengajuan cuti bawahan Anda.
+                    </p>
+                </div>
+                <div class="card-body">
+                    <dl class="row mb-0 small">
+                        <dt class="col-5 text-muted">Nama Pegawai</dt>
+                        <dd class="col-7 fw-semibold">{{ layanan.pegawai.full_name }}</dd>
+
+                        <dt class="col-5 text-muted">Jenis Cuti</dt>
+                        <dd class="col-7">
+                            {% if riwayat %}
+                                <span class="badge bg-secondary-subtle text-secondary">
+                                    {{ riwayat.get_jenis_cuti_display }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </dd>
+
+                        <dt class="col-5 text-muted">Periode</dt>
+                        <dd class="col-7">
+                            {% if riwayat and riwayat.tgl_mulai_cuti and riwayat.tgl_akhir_cuti %}
+                                {{ riwayat.tgl_mulai_cuti|date:"d/m/Y" }}
+                                &mdash;
+                                {{ riwayat.tgl_akhir_cuti|date:"d/m/Y" }}
+                            {% else %}
+                                <span class="text-muted">Belum diisi</span>
+                            {% endif %}
+                        </dd>
+
+                        <dt class="col-5 text-muted">Lama Cuti</dt>
+                        <dd class="col-7">
+                            {% if riwayat and riwayat.lama_cuti %}
+                                {{ riwayat.lama_cuti }} hari
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </dd>
+
+                        <dt class="col-5 text-muted">Domisili Saat Cuti</dt>
+                        <dd class="col-7">
+                            {% if riwayat and riwayat.domisili_saat_cuti %}
+                                {{ riwayat.domisili_saat_cuti }}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </dd>
+
+                        <dt class="col-5 text-muted">Sisa Cuti Tahunan</dt>
+                        <dd class="col-7">
+                            <span class="badge bg-success-subtle text-success">
+                                {{ cek_sisa_cuti_pegawai }} hari
+                            </span>
+                        </dd>
+
+                        <dt class="col-5 text-muted">Sisa Cuti Tunda</dt>
+                        <dd class="col-7">
+                            <span class="badge bg-info-subtle text-info">
+                                {{ cek_sisa_tunda_cuti_pegawai }} hari
+                            </span>
+                        </dd>
+
+                        <dt class="col-5 text-muted">Alasan Cuti</dt>
+                        <dd class="col-7">
+                            {% if riwayat and riwayat.alasan_cuti %}
+                                {{ riwayat.alasan_cuti }}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </dd>
+
+                        <dt class="col-5 text-muted">Status Pengajuan</dt>
+                        <dd class="col-7">
+                            <span class="badge bg-warning-subtle text-warning">
+                                {{ layanan.get_status_display|default:layanan.status }}
+                            </span>
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <!-- TIMELINE & FORM VERIFIKASI -->
+        <div class="col-lg-7">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-transparent border-0 pb-0 d-flex flex-column">
+                    <h6 class="card-title mb-1">
+                        <i class="fas fa-sitemap me-2 text-primary"></i>Verifikasi Berjenjang
+                    </h6>
+                    <p class="small text-muted mb-0">
+                        Anda saat ini berada pada
+                        <strong>Level {{ current_level }}</strong> verifikator.
+                    </p>
+                </div>
+                <div class="card-body">
+
+                    <!-- TIMELINE ATASAN -->
+                    <div class="row g-3 mb-4 small">
+                        {% for v in chain_display %}
+                            <div class="col-md-4">
+                                <div class="border rounded-3 p-2 h-100
+                                    {% if v.is_current %} border-primary bg-primary bg-opacity-10{% else %}bg-light{% endif %}">
+                                    <div class="d-flex align-items-center mb-1">
+                                        <div class="rounded-circle d-flex align-items-center justify-content-center me-2"
+                                             style="width: 28px; height: 28px;">
+                                            {% if v.status == "approved" %}
+                                            <i class="fas fa-check-circle text-success"></i>
+                                            {% elif v.status == "rejected" %}
+                                            <i class="fas fa-times-circle text-danger"></i>
+                                            {% elif v.status == "deferred" %}
+                                            <i class="fas fa-pause-circle text-warning"></i>
+                                            {% else %}
+                                            <i class="fas fa-user-clock text-muted"></i>
+                                            {% endif %}
+
+                                        </div>
+                                        <div>
+                                            <div class="fw-semibold">Level {{ v.level }}</div>
+                                            <div>{{ v.label }}</div>
+                                        </div>
+                                    </div>
+                                    <div class="fw-semibold">
+                                        {% if v.user %}
+                                            {{ v.user.full_name_2|default:v.user.full_name|default:v.user.email }}
+                                        {% else %}
+                                            <span class="text-muted">Belum di-set</span>
+                                        {% endif %}
+                                    </div>
+                                    <div class="mt-1">
+                                        {% if v.status == "approved" %}
+                                        <span class="badge bg-success-subtle text-success">Disetujui</span>
+                                        {% elif v.status == "rejected" %}
+                                        <span class="badge bg-danger-subtle text-danger">Ditolak</span>
+                                        {% elif v.status == "deferred" %}
+                                        <span class="badge bg-warning-subtle text-warning">Ditunda</span>
+                                        {% else %}
+                                        <span class="badge bg-secondary-subtle text-secondary">Menunggu</span>
+                                        {% endif %}
+                                    </div>
+                                    {# TAMPILKAN CATATAN VERIFIKATOR JIKA ADA #}
+                                    {% if v.catatan %}
+                                        <div class="mt-2 p-2 rounded bg-white bg-opacity-75 border small">
+                                            <div class="text-muted mb-1">
+                                                <i class="fas fa-comment-dots me-1"></i>
+                                                Catatan Level {{ v.level }}
+                                            </div>
+                                            <div class="fw-normal">
+                                                {{ v.catatan|linebreaksbr }}
+                                            </div>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+
+                    <!-- FORM VERIFIKASI -->
+                    <form method="post" enctype="multipart/form-data">
+                        {% csrf_token %}
+
+                        {% if form.non_field_errors %}
+                            <div class="alert alert-danger py-2">
+                                {{ form.non_field_errors }}
+                            </div>
+                        {% endif %}
+
+                        {{form|crispy}}
+
+                        <div class="d-flex justify-content-between align-items-center mt-3">
+                            <a href="{% url 'layanan_urls:layanan_cuti_bawahan_listview' %}"
+                               class="btn btn-light border">
+                                <i class="fas fa-arrow-left me-1"></i> Kembali
+                            </a>
+                            
+                            <a href="{% url 'file_urls:formulir_cuti_pdf' riwayat.pk %}" target="_blank" class="btn btn-secondary">
+                                <i class="fas fa-file-pdf me-1"></i>Formulir Cuti
+                            </a>
+                            {% if status_pegawai %}
+                                <a href="{% url 'file_urls:cuti_docx' layanan_id=layanan.pk %}" class="btn btn-success">
+                                    <i class="fas fa-file-word me-1"></i>Surat Cuti
+                                </a>
+                            {% else %}
+                                <button onclick="showAlert()" class="btn btn-success">Surat Cuti</button>
+                            {% endif %}
+                            
+                            
+                            {% if not request.user.is_superuser %}
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-save me-1"></i> Simpan Verifikasi
+                                </button>
+                            {% endif %}
+                            
+                        </div>
+                    </form>
+
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+function showAlert() {
+    alert("Minta pegawai untuk lengkapi data riwayat pengangkatan terlebih dahulu.");
+}
+</script>
+{% endblock %}

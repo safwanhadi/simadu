@@ -115,10 +115,17 @@ PENDIDIKAN = (
     ('DI', 'DI'),
     ('DII', 'DII'),
     ('DIII', 'DIII'),
+    ('DIIIK', 'DIII Kesehatan'),
     ('DIV', 'DIV'),
+    ('DIVK', 'DIV Kesehatan'),
     ('S1', 'S1'),
+    ('S1K', 'S1 Kesehatan'),
+    ('S1P/DIVP', 'S1 Profesi/DIV Profesi'),
     ('S2', 'S2'),
-    ('S3', 'S3')
+    ('S2K', 'S2 Kesehatan'),
+    ('S3', 'S3'),
+    ('SPES', 'Spesialis Dokter/Dokter Gigi'),
+    ('SUBSPES', 'Sub Spesialis Dokter/Dokter Gigi'),
 )
 
 STATUSPERNIKAHAN = (
@@ -200,8 +207,8 @@ class ProfilAdmin(models.Model):
     @property
     def penempatan(self):
         data = None
-        if self.instalasi is not None:
-            data = self.instalasi.instalasi
+        if self.instalasi.exists():
+            data = self.instalasi.all()
         elif self.sub_bidang is not None:
             data = self.sub_bidang.sub_bidang
         elif self.bidang is not None:

@@ -372,7 +372,7 @@
               {% for data in data_layanan %}
               {% if data.url == 'yancuti' %}
               <li class="nav-item">
-                <a href="{% url 'layanan_urls:layanan_view' %}{{data.url}}/riwayat" class="nav-link {% if data.url == selected %} active {% endif %}">
+                <a href="{% url 'layanan_urls:layanan_cuti_listview' %}" class="nav-link {% if data.url == selected %} active {% endif %}">
                   <i class="far fa-circle nav-icon"></i>
                   <p>{{data.nama}}</p>
                 </a>
@@ -487,7 +487,7 @@
   $.widget.bridge('uibutton', $.ui.button)
 </script>
 <!-- Bootstrap 4 -->
-<script src="{% static 'plugins/popper/popper.min.js' %}"></script>
+<!-- <script src="{% static 'plugins/popper/popper.min.js' %}"></script> -->
 <script src="{% static 'plugins/bootstrap/js/bootstrap.bundle.min.js' %}"></script>
 <!-- ChartJS -->
 <script src="{% static 'plugins/chart.js/Chart.min.js' %}"></script>

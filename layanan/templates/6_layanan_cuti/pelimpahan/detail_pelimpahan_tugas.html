@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+
+    <h3>Detail Pelimpahan Tugas</h3>
+    <hr>
+
+    <div class="card mb-3">
+        <div class="card-body">
+
+            <h5 class="card-title">Informasi Pelimpahan</h5><br>
+            <p>
+                <strong>Pemberi Tugas:</strong> {{ pelimpahan.pemberi_tugas.full_name }} <br>
+                <strong>Penerima Tugas:</strong> {{ pelimpahan.penerima_tugas.full_name }} <br>
+                <strong>Periode:</strong> {{ pelimpahan.tgl_mulai }} s.d {{ pelimpahan.tgl_selesai }} <br>
+                <strong>Status:</strong> {{ pelimpahan.get_status_display }}
+            </p>
+
+            <h5 class="mt-4">Deskripsi Tugas</h5>
+            <p>
+                {{ pelimpahan.deskripsi_tugas|linebreaks }}
+            </p>
+
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+
+            <h5 class="card-title">Persetujuan Penerima</h5><br>
+            <p>
+                <strong>Status:</strong> {{ pelimpahan.get_persetujuan_penerima_display }} <br>
+                {% if pelimpahan.catatan_penerima %}
+                    <strong>Catatan:</strong><br>
+                    {{ pelimpahan.catatan_penerima|linebreaks }}
+                {% endif %}
+            </p>
+
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+
+            <h5 class="card-title">Persetujuan Atasan</h5><br>
+            {% if needs_atasan %}
+            <p>
+                <strong>Atasan:</strong> {{ pelimpahan.atasan_penyetuju.full_name }} <br>
+                <strong>Status:</strong> {{ pelimpahan.get_persetujuan_atasan_display }} <br>
+                {% if pelimpahan.catatan_atasan %}
+                    <strong>Catatan:</strong><br>
+                    {{ pelimpahan.catatan_atasan|linebreaks }}
+                {% endif %}
+            </p>
+            {% else %}
+            <p><b>Persetujuan atasan:</b> Tidak diperlukan (pemberi minimal level Kepala Seksi/Subbag).</p>
+            {% endif %}
+
+        </div>
+    </div>
+
+    <a href="{% url 'layanan_urls:layanan_cuti_listview' %}" class="btn btn-secondary">
+        Kembali
+    </a>
+    <a href="{% url 'file_urls:pelimpahan_tugas_pdf' pk=pelimpahan.pk %}" class="btn btn-info">Unduh File Pelimpahan</a>
+
+    {% if pelimpahan.status == "menunggu_penerima" and user == pelimpahan.penerima_tugas %}
+        <a href="{% url 'layanan_urls:pelimpahan_penerima_update' pelimpahan.pk %}" class="btn btn-primary">
+            Berikan Persetujuan
+        </a>
+    {% endif %}
+
+    {% if pelimpahan.status == "menunggu_kepala" and user == pelimpahan.kepala_instalasi %}
+        <a href="{% url 'layanan_urls:pelimpahan_kepala_update' pelimpahan.pk %}" class="btn btn-warning">
+            Setujui / Tolak
+        </a>
+    {% endif %}
+
+</div>
+{% endblock %}

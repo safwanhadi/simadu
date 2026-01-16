@@ -16,145 +16,145 @@
 {% endblock navigation %}
 
 {% block content %}
-
-    <div class="container">
-        <div class="card">
-            <div class="card-header">
-                <div class="d-flex flex-row justify-content-between">
-                    <div class="d-flex flex-row">
-                        <div>
-                            <a href="{{url}}"><i class="fas fa-chevron-left mr-3 pt-1" style="font-size:x-large;"></i></a>
-                        </div>
-                        <p class="h4">{{title}}</p>
-                    </div>
+<div class="container">
+    <div class="card">
+        <div class="card-header">
+            <div class="d-flex flex-row justify-content-between align-items-center">
+                <div class="d-flex flex-row align-items-center">
+                    <a href="{% url 'disiplinsdm_urls:jadwal_list' %}"><i class="fas fa-chevron-left mr-3" style="font-size:large;"></i></a>
+                    <p class="h4 mb-0">{{ title }}</p>
+                </div>
+                <div>
                     {% if request.user.is_superuser %}
-                        <div>
-                            <a href="{% url 'disiplinsdm_urls:kehadiran_create' %}" class="btn btn-outline-primary">Tambah Kehadiran</a>
-                            <a href="{% url 'disiplinsdm_urls:kehadiran_upload_fingerprint' %}" class="btn btn-outline-secondary">Upload Fingerprint</a>
-                        </div>
+                        <a href="{% url 'disiplinsdm_urls:kehadiran_create' %}" class="btn btn-outline-primary btn-sm">Tambah Kehadiran</a>
+                        <a href="{% url 'disiplinsdm_urls:kehadiran_upload_fingerprint' %}" class="btn btn-outline-secondary btn-sm">Upload Fingerprint</a>
                     {% endif %}
                 </div>
             </div>
-            <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-12">
-                            <div class="table table-responsive">
-                                <form method="get" id="filterForm">
-                                    <div class="form-group row">
-                                        <label class="col-md-3">Instalasi</label>
-                                        <div class="col-md-9">
-                                            <select name="inst" class="form-control" onchange="document.getElementById('filterForm').submit();">
-                                                <option value="">Semua Instalasi</option>
-                                                {% for instalasi in instalasi_list %}
-                                                <option value="{{instalasi.id}}" {% if instalasi.id|stringformat:"s" == request.GET.inst %}selected{% endif %}>{{instalasi.instalasi}}</option>
-                                                {% endfor %}
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div class="form-group row">
-                                        <label class="col-md-3">Bulan/Tahun</label>
-                                        <div class="col-md-9">
-                                            {% load tz %}
-                                            {% if request.GET.tanggal %}
-                                                {% with request.GET.tanggal as current_date %}
-                                                    <input type="date" name="tanggal" class="form-control"
-                                                        value="{{ current_date }}" onchange="document.getElementById('filterForm').submit();">
-                                                {% endwith %}
-                                            {% else %}
-                                                <input type="date" name="tanggal" class="form-control"
-                                                    value="{% now 'Y-m-d' %}" onchange="document.getElementById('filterForm').submit();">
-                                            {% endif %}
-                                            <small class="text-muted">Abaikan tanggal dalam form ini.</small>
-                                        </div>
-                                    </div>
-                                    
-                                </form>
-                                {% if request.user.is_staff %}
-                                <nav class="mb-3 mt-3">
-                                    <div class="nav nav-tabs" id="nav-tab" role="tablist">
-                                    <a class="nav-item nav-link active" href="{% url 'disiplinsdm_urls:kehadiran_list' %}" role="tab" >Pegawai Lainnya</a>
-                                    <a class="nav-item nav-link" href="{% url 'disiplinsdm_urls:kehadiran_spesialis_list' %}" role="tab" >Spesialis</a>
-                                    </div>
-                                </nav>
-                                {% endif %}
-                                <table class="table" id="data_table">
-                                    <thead>
-                                        <tr>
-                                            <th>No</th>
-                                            <th>Nama Pegawai</th>
-                                            <th>Sub bidang/instalasi</th>
-                                            <th>Bulan/Tahun</th>
-                                            <th>Hadir</th>
-                                            <th>TK</th>
-                                            <th>Izin</th>
-                                            <th>Sakit</th>
-                                            <th>Aksi</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for item in object_list %}
-                                        <tr>
-                                            <td>{{forloop.counter}}</td>
-                                            <td>{{item.pegawai.full_name}}</td>
-                                            <td>
-                                                {% if item.instalasi %}
-                                                    {{item.instalasi.instalasi}}
-                                                {% elif item.sub_bidang %}
-                                                    {{item.sub_bidang}}
-                                                {% elif item.bidang %}
-                                                    {{item.bidang}}
-                                                {% else %}
-                                                    {{item.unor}}
-                                                {% endif %}
-                                            </td>
-                                            <td>{{item.bulan | month_name}} {{item.tahun}}</td>
-                                            <td>{{item.jumlah_hadir}}</td>
-                                            <td>{{item.jumlah_tk}}</td>
-                                            <td>{{item.jumlah_izin}}</td>
-                                            <td>{{item.jumlah_sakit}}</td>
-                                            <td>
-                                                {% if request.user.is_superuser %}
-                                                <a href="{% url 'disiplinsdm_urls:kehadiran_update' pk=item.pk %}" class="btn btn-primary">add/edit</a>
-                                                <a href="{% url 'disiplinsdm_urls:kehadiran_detail_user' pk=item.pk %}" class="btn btn-info">detail</a>
-                                                {% else %}
-                                                <a href="{% url 'disiplinsdm_urls:kehadiran_detail_user' pk=item.pk %}" class="btn btn-info">detail</a>
-                                                {% endif %}
-                                            </td>
-                                        </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>    
+        </div>
+        <div class="card-body">
+            
+            <!-- Filter Form -->
+            <form method="get" id="filterForm" class="mb-4">
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="form-group">
+                            <label for="inst">Instalasi</label>
+                            <select name="inst" id="inst" class="form-control" onchange="document.getElementById('filterForm').submit();">
+                                <option value="">Semua Instalasi</option>
+                                {% for instalasi in instalasi_list %}
+                                    <option value="{{ instalasi.id }}" {% if instalasi.id|stringformat:"s" == request.GET.inst %}selected{% endif %}>
+                                        {{ instalasi.instalasi }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-12">
+                        <div class="form-group">
+                            <label for="tanggal">Bulan & Tahun</label>
+                            <input type="date" name="tanggal" id="tanggal" class="form-control" 
+                                value="{{ request.GET.tanggal|default_if_none:'' }}" 
+                                onchange="document.getElementById('filterForm').submit();">
+                            <small class="text-muted">Pilih tanggal apa saja dalam bulan yang diinginkan.</small>
                         </div>
                     </div>
                 </div>
+            </form>
+
+            <!-- Navigasi Tab (jika diperlukan) -->
+            {% if request.user.is_staff %}
+            <nav class="mb-3">
+                <div class="nav nav-tabs" id="nav-tab" role="tablist">
+                    <a class="nav-item nav-link active" href="{% url 'disiplinsdm_urls:kehadiran_list' %}?{{ preserved_filters }}">Pegawai Lainnya</a>
+                    <a class="nav-item nav-link" href="{% url 'disiplinsdm_urls:kehadiran_spesialis_list' %}?{{ preserved_filters }}">Spesialis</a>
+                </div>
+            </nav>
+            {% endif %}
+
+            <!-- Tabel Data -->
+            <div class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead class="thead-light">
+                        <tr>
+                            <th>No</th>
+                            <th>Nama Pegawai</th>
+                            <th>Sub bidang/Instalasi</th>
+                            <th>Bulan/Tahun</th>
+                            <th class="text-center">Hadir</th>
+                            <th class="text-center">Tidak Hadir</th>
+                            <th class="text-center">Terlambat</th>
+                            <th class="text-center">Izin</th>
+                            <th class="text-center">Sakit</th>
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for object in page_obj %}
+                        <tr>
+                            <td>{{ page_obj.start_index|add:forloop.counter0 }}</td>
+                            <td>{{ object.pegawai.full_name }}</td>
+                            <td>
+                                {% if object.instalasi %}{{ object.instalasi.instalasi }}
+                                {% elif object.sub_bidang %}{{ object.sub_bidang }}
+                                {% elif object.bidang %}{{ object.bidang }}
+                                {% else %}{{ object.unor }}{% endif %}
+                            </td>
+                            <td>{{ object.bulan | month_name }} {{ object.tahun }}</td>
+                            
+                            {# REFACTOR: Menggunakan semua variabel anotasi yang akurat dari view #}
+                            <td class="text-center">{{ object.rekap_hadir }}</td>
+                            <td class="text-center">{{ object.rekap_tidak_hadir }}</td>
+                            <td class="text-center">{{ object.rekap_terlambat }}</td>
+                            <td class="text-center">{{ object.rekap_izin }}</td>
+                            <td class="text-center">{{ object.rekap_sakit }}</td>
+
+                            <td>
+                                <a href="{% url 'disiplinsdm_urls:kehadiran_detail_user' pk=object.pk %}" class="btn btn-info btn-sm" title="Lihat Detail Kehadiran">Detail</a>
+                                <a href="{% url 'disiplinsdm_urls:kehadiran_update' pk=object.pk %}" class="btn btn-success btn-sm" title="Edit Kehadiran">add/edit</a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            {# REFACTOR: Menambah colspan agar sesuai dengan jumlah kolom baru #}
+                            <td colspan="10" class="text-center py-4">Tidak ada data kehadiran yang ditemukan untuk filter ini.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
+
+            <!-- Paginasi -->
+            {% if page_obj.has_other_pages %}
+            <nav aria-label="Page navigation" class="mt-4">
+                <ul class="pagination justify-content-center">
+                    {% if page_obj.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link" href="?{{ preserved_filters }}&page={{ page_obj.previous_page_number }}">‹ Sebelumnya</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">‹ Sebelumnya</span></li>
+                    {% endif %}
+
+                    {% for num in page_obj.paginator.page_range %}
+                        {% if page_obj.number == num %}
+                            <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                        {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                            <li class="page-item"><a class="page-link" href="?{{ preserved_filters }}&page={{ num }}">{{ num }}</a></li>
+                        {% endif %}
+                    {% endfor %}
+
+                    {% if page_obj.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="?{{ preserved_filters }}&page={{ page_obj.next_page_number }}">Selanjutnya ›</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">Selanjutnya ›</span></li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
         </div>
-
-
+    </div>
+</div>
 {% endblock %}
-
-
-
-{% block script %}
-<script>
-    $(document).ready(function () {
-        $('#data_table').DataTable({
-            dom: 'Blfrtip',
-            buttons: [
-                'copy', 'csv', 'excel', 'pdf'
-            ],
-            lengthMenu: [
-                [10, 25, 50, -1],
-                [10, 25, 50, 'All'],
-            ],
-        });
-    });
-
-    $(document).ready(function() {
-        $('.sdm').select2();
-        selectOnClose: true
-    });
-</script>
- 
-{% endblock script %}

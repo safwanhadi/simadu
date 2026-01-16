@@ -24,7 +24,8 @@ from dokumen.models import (
     RiwayatPenghargaan,
     RiwayatKeluarga,
     UjiKompetensi,
-    JENIS_JABATAN
+    JENIS_JABATAN,
+    STATUS_PERS_CUTI
 )
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
@@ -252,18 +253,28 @@ class LayananCuti(models.Model):
 
     def __str__(self):
         return f'{self.pegawai.full_name} ({self.layanan} - {self.status})'
-    
+ 
+
+KEPUTUSAN_VERIF = (
+    ("belum", "Belum diputuskan"),
+    ("setuju", "Disetujui"),
+    ("tunda", "Ditunda"),
+    ("tolak", "Ditolak"),
+)   
 
 class VerifikasiCuti(models.Model):
     layanan_cuti = models.OneToOneField(LayananCuti, on_delete=models.CASCADE)
     verifikator1 = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name='verifikator1_cuti')
-    persetujuan1 = models.BooleanField(default=False)
+    persetujuan1 = models.BooleanField(null=True, blank=True)
+    keputusan1 = models.CharField(max_length=10, choices=KEPUTUSAN_VERIF, default="belum")
     catatan1 = models.TextField(blank=True)
     verifikator2 = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name='verifikator2_cuti')
-    persetujuan2 = models.BooleanField(default=False)
+    persetujuan2 = models.BooleanField(null=True, blank=True)
+    keputusan2 = models.CharField(max_length=10, choices=KEPUTUSAN_VERIF, default="belum")
     catatan2 = models.TextField(blank=True)
     verifikator3 = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name='verifikator3_cuti')
-    persetujuan3 = models.BooleanField(default=False)
+    persetujuan3 = models.BooleanField(null=True, blank=True)
+    keputusan3 = models.CharField(max_length=10, choices=KEPUTUSAN_VERIF, default="belum")
     catatan3 = models.TextField(blank=True)
     tanggal = models.DateField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -283,6 +294,99 @@ class VerifikasiCuti(models.Model):
             return f'{self.layanan_cuti.pegawai.full_name}-{persetujuan}'
         return f'{self.layanan_cuti}-{persetujuan}'
     
+
+STATUS_PELIMPAHAN = (
+    ("draft", "Draft"),
+    ("menunggu_penerima", "Menunggu persetujuan penerima"),
+    ("ditolak_penerima", "Ditolak penerima"),
+    ("menunggu_atasan", "Menunggu persetujuan atasan (khusus level instalasi)"),
+    ("ditolak_atasan", "Ditolak atasan"),
+    ("disetujui", "Disetujui"),
+)
+
+STATUS_PERS = (
+    ("belum", "Belum diputuskan"),
+    ("disetujui", "Disetujui"),
+    ("ditolak", "Ditolak"),
+)
+
+class PelimpahanTugas(models.Model):
+    # 1 dokumen pelimpahan untuk 1 riwayat cuti
+    riwayat_cuti = models.OneToOneField(
+        "dokumen.RiwayatCuti",  # sesuaikan app label
+        on_delete=models.CASCADE,
+        related_name="pelimpahan_tugas"
+    )
+
+    pemberi_tugas = models.ForeignKey(
+        "myaccount.Users", on_delete=models.CASCADE, related_name="pelimpahan_dibuat"
+    )
+    penerima_tugas = models.ForeignKey(
+        "myaccount.Users", on_delete=models.CASCADE, related_name="pelimpahan_diterima"
+    )
+
+    deskripsi_tugas = models.TextField()
+    tgl_mulai = models.DateField()
+    tgl_selesai = models.DateField()
+
+    status = models.CharField(max_length=30, choices=STATUS_PELIMPAHAN, default="draft")
+
+    # persetujuan penerima
+    persetujuan_penerima = models.CharField(max_length=20, choices=STATUS_PERS, default="belum")
+    catatan_penerima = models.TextField(blank=True)
+
+    # persetujuan atasan (khusus bila pemberi level4)
+    atasan_penyetuju = models.ForeignKey(
+        "myaccount.Users",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="pelimpahan_disetujui_atasan"
+    )
+    persetujuan_atasan = models.CharField(max_length=20, choices=STATUS_PERS, default="belum")
+    catatan_atasan = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def clean(self):
+        if self.tgl_mulai and self.tgl_selesai and self.tgl_mulai > self.tgl_selesai:
+            raise ValidationError("Tanggal mulai tidak boleh melebihi tanggal selesai.")
+
+    def __str__(self):
+        return f"Pelimpahan {self.pemberi_tugas} -> {self.penerima_tugas}"
+
+    # ========= aturan utama =========
+    def requires_atasan_approval(self) -> bool:
+        """
+        - pemberi level4 (UnitInstalasi) => True (wajib persetujuan atasan level3)
+        - pemberi level3+ => False
+        """
+        rp = (
+            self.pemberi_tugas.riwayat_penempatan.filter(status=True)
+            .order_by("-updated_at", "-id")
+            .first()
+        )
+        if not rp:
+            return False
+        _, level = rp._penempatan_aktif
+        return level == "level4"
+
+    def is_final_approved(self) -> bool:
+        """
+        Final disetujui jika:
+        - penerima setuju
+        - jika butuh atasan: atasan setuju
+        - jika tidak butuh atasan: selesai setelah penerima setuju
+        """
+        if self.persetujuan_penerima != "disetujui":
+            return False
+        if self.requires_atasan_approval():
+            return self.persetujuan_atasan == "disetujui"
+        return True
+
 
 STATUS_DIKLAT = (
     ('usulan', 'usulan'),

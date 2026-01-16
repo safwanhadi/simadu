@@ -9,8 +9,12 @@ from .views import (
     ProfilDetailView, 
     ProfilUpdateView, 
     ProfilCreateView,
-    PegawaiAutocompleteView
+    UlangTahunSebulanTerakhirListView,
+    PegawaiAutocompleteView,
+    sso_portal,
+    sso_go
 )
+from .views_api import api_me, PegawaiAPIView
 
 
 urlpatterns=[
@@ -22,5 +26,11 @@ urlpatterns=[
     path('profil/add/', ProfilCreateView.as_view(), name='profil_create_view'),
     path('profil/detail/<int:pk>/', ProfilDetailView.as_view(), name='profil_detail_view'),
     path('profil/<int:pk>/update/', ProfilUpdateView.as_view(), name='profil_update_view'),
-    path('ajax-pegawai-autocomplete/', PegawaiAutocompleteView.as_view(), name='ajax_pegawai_autocomplete')
+    path('pegawai-ultah/', UlangTahunSebulanTerakhirListView.as_view(), name='pegawai_ultah_sebulan'),
+    path('ajax-pegawai-autocomplete/', PegawaiAutocompleteView.as_view(), name='ajax_pegawai_autocomplete'),
+    
+    path('api/me/', api_me, name='api_me'),
+    path('api/pegawai/', PegawaiAPIView.as_view(), name='pegawai_api_view'),
+    path('sso/', sso_portal, name='sso_portal'),
+    path('sso/<str:client_key>/', sso_go, name='sso_go'),
 ]

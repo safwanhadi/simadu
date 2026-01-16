@@ -2,10 +2,27 @@
     <li class="nav-item">
       <a class="nav-link {% if status == 'baru' %} active {% endif %}" href="{% url 'layanan_urls:layanan_cuti_view' status='baru' %}">Pegajuan Cuti Baru</a>
     </li>
+  {% if allow_cuti_tunda|default:False %}
     <li class="nav-item">
       <a class="nav-link {% if status == 'tunda' %} active {% endif %}" href="{% url 'layanan_urls:layanan_cuti_view' status='tunda' %}">Pengajuan Cuti Tunda</a>
     </li>
     <li class="nav-item">
       <a class="nav-link {% if status == 'ambil-tunda' %} active {% endif %}" href="{% url 'layanan_urls:layanan_cuti_tunda_view' %}">Pengambilan Cuti Tunda</a>
     </li>
+    {% if not base_allow_cuti_tunda|default:True and override_cuti_tunda|default:False %}
+    <li class="nav-item ml-auto">
+      <span class="nav-link text-warning" style="cursor: default;">
+        Cuti tunda diaktifkan oleh atasan meski kebijakan global dimatikan
+      </span>
+    </li>
+    {% endif %}
+  {% else %}
+      <li class="nav-item">
+        {% if not base_allow_cuti_tunda|default:True %}
+          <span class="nav-link disabled text-muted" style="cursor: not-allowed;">Kebijakan cuti tunda dinonaktifkan; atasan langsung sesuai jenjang (kasi/kasubbag untuk staf, kabid untuk kasi/kasubbag, dst.) dapat menyalakannya saat memproses pengajuan.</span>
+        {% else %}
+          <span class="nav-link disabled text-muted" style="cursor: not-allowed;">Cuti tunda diaktifkan oleh atasan langsung sesuai jenjang: minimal SubBidang untuk staf, meningkat ke Bidang/Unor untuk pejabat di bawahnya.</span>
+        {% endif %}
+      </li>
+  {% endif %}
   </ul>

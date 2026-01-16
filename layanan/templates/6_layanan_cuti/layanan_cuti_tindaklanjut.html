@@ -9,6 +9,16 @@
         {% include '6_layanan_cuti/progress_indikator.html' %}
     </div>
 </div>
+{% if allow_cuti_tunda and case == 'tindaklanjut' and data_detail.cuti.jenis_cuti == 'Cuti Tahunan' %}
+<div class="alert alert-warning mt-3" role="alert">
+    <strong>Opsional Cuti Tunda:</strong> Jika atasan (kasi/kasubbag) menolak cuti tahunan karena alasan operasional,
+    ubah status persetujuan menjadi <em>Tunda</em> agar jatah cuti tahun berjalan dialihkan ke tahun berikutnya.
+    Pegawai kemudian dapat mengambilnya melalui menu <a href="{% url 'layanan_urls:layanan_cuti_tunda_view' %}">Pengambilan Cuti Tunda</a>.
+    {% if not base_allow_cuti_tunda|default:True and override_cuti_tunda|default:False %}
+    <br><span class="text-dark">Kebijakan global cuti tunda nonaktif; opsi ini muncul karena Anda atasan sesuai jenjang.</span>
+    {% endif %}
+</div>
+{% endif %}
 {% if request.user.is_staff and case == 'tindaklanjut' %}
     <div class="row mb-5">
         <div class="col-md-12">

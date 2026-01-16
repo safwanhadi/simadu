@@ -12,6 +12,24 @@
     <div class="card-body pb-0">
         <div class="row">
             <div class="col-12 d-flex align-items-stretch flex-column">
+                <!-- NAV TAB -->
+                         {% if request.user.is_superuser %}
+                            <ul class="nav nav-tabs mb-4">
+                                <li class="nav-item">
+                                    <a class="nav-link {% if active_tab == 'profil' %}active{% endif %}"
+                                    href="{% url 'myaccount_urls:profil_view' %}">
+                                        <i class="fas fa-id-badge"></i> List Profil Pegawai
+                                    </a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link {% if active_tab == 'ultah' %}active{% endif %}"
+                                    href="{% url 'myaccount_urls:pegawai_ultah_sebulan' %}">
+                                        <i class="fas fa-birthday-cake me-1"></i>
+                                        Ulang Tahun (1 Bulan)
+                                    </a>
+                                </li>
+                            </ul>
+                         {% endif %}
                 <div class="card bg-light d-flex flex-fill">
                     <div class="card-header text-muted">
                        <h4>Profil Users</h4>

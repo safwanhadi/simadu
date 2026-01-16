@@ -1,0 +1,230 @@
+{% extends 'cuti/base.html' %}
+
+{% block title %}Dashboard - Aplikasi Cuti{% endblock %}
+
+{% block page_title %}Dashboard Cuti{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- Sisa Cuti Card -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            Sisa Cuti Tahunan
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ sisa_cuti }} hari</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-calendar-check fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Total Cuti Proses Card -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            Cuti Sedang Proses
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_cuti_proses }} hari</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-clock fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pending Approvals Card -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            Menunggu Persetujuan
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ pending_approvals_count }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-hourglass-half fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions Card -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            Aksi Cepat
+                        </div>
+                        <div class="btn-group btn-group-sm">
+                            <a href="{% url 'cuti:layanan_cuti_create' %}" class="btn btn-success">
+                                <i class="fas fa-plus"></i> Ajukan
+                            </a>
+                            <a href="{% url 'cuti:persetujuan_list' %}" class="btn btn-outline-success">
+                                <i class="fas fa-check"></i> Setujui
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-bolt fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Pending Approvals Table -->
+    {% if pending_approvals %}
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-exclamation-triangle"></i> Persetujuan Menunggu
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Pegawai</th>
+                                <th>Jenis</th>
+                                <th>Lama</th>
+                                <th>Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for cuti in pending_approvals %}
+                            <tr>
+                                <td>{{ cuti.pegawai.full_name }}</td>
+                                <td>{{ cuti.jenis_cuti }}</td>
+                                <td>{{ cuti.lama_cuti }} hari</td>
+                                <td>
+                                    <a href="{% url 'cuti:persetujuan_cuti' cuti.pk %}" 
+                                       class="btn btn-sm btn-primary">
+                                        <i class="fas fa-eye"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% if pending_approvals_count > 5 %}
+                <div class="text-center mt-2">
+                    <a href="{% url 'cuti:persetujuan_list' %}" class="btn btn-sm btn-outline-primary">
+                        Lihat Semua ({{ pending_approvals_count }} total)
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Recent Leave Requests -->
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-info">
+                    <i class="fas fa-history"></i> Pengajuan Terbaru
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Jenis Cuti</th>
+                                <th>Tanggal</th>
+                                <th>Lama</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for cuti in recent_cuti %}
+                            <tr>
+                                <td>{{ cuti.jenis_cuti }}</td>
+                                <td>{{ cuti.tgl_mulai|date:"d/m/Y" }}</td>
+                                <td>{{ cuti.lama_cuti }} hari</td>
+                                <td>
+                                    <span class="badge status-badge 
+                                        {% if cuti.status == 'Diajukan' %}bg-warning
+                                        {% elif cuti.status == 'Disetujui Unor' %}bg-success
+                                        {% elif cuti.status == 'Ditolak' %}bg-danger
+                                        {% else %}bg-info{% endif %}">
+                                        {{ cuti.status }}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center text-muted">Belum ada pengajuan cuti</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="text-center mt-2">
+                    <a href="{% url 'cuti:layanan_cuti_list' %}" class="btn btn-sm btn-outline-info">
+                        Lihat Semua
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Stats -->
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-secondary">
+                    <i class="fas fa-chart-pie"></i> Informasi Cuti
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="text-center">
+                            <h4 class="text-primary">{{ sisa_cuti }}</h4>
+                            <p class="text-muted">Hari Cuti Tersisa</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-center">
+                            <h4 class="text-warning">{{ total_cuti_proses }}</h4>
+                            <p class="text-muted">Hari Cuti Sedang Proses</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-center">
+                            <h4 class="text-info">{{ pending_approvals_count }}</h4>
+                            <p class="text-muted">Persetujuan Menunggu</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

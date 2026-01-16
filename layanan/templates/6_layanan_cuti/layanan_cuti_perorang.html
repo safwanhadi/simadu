@@ -47,9 +47,9 @@
                     {% for item in data %}
                     <tr>
                         <td>{{forloop.counter}}</td>
-                        <td>{{item.cuti.jenis_cuti}}</td>
-                        <td>{{item.cuti.tahun_cuti}}</td>
-                        <td>{{item.cuti.lama_cuti}}</td>
+                        <td>{{item.cuti_usulan.first.jenis_cuti}}</td>
+                        <td>{{item.tahun}}</td>
+                        <td>{{item.cuti_usulan.first.lama_cuti}}</td>
                         <td>{% if item.status == 'draft' %}
                                 <i class="fab fa-dochub" style="color: red;"></i>
                             {% elif item.status == 'pengajuan' %}

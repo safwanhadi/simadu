@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block content %}
+<div class="container mt-4">
+  <h4>Persetujuan Atasan (Khusus Pemberi Level Instalasi)</h4>
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <p><b>Pemberi:</b> {{ object.pemberi_tugas.full_name }}</p>
+      <p><b>Penerima:</b> {{ object.penerima_tugas.full_name }}</p>
+      <p><b>Periode:</b> {{ object.tgl_mulai }} s.d {{ object.tgl_selesai }}</p>
+      <p><b>Deskripsi:</b><br>{{ object.deskripsi_tugas|linebreaks }}</p>
+    </div>
+  </div>
+
+  <form method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <div class="mb-3">
+      {{ form.aksi|as_crispy_field }}
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Catatan</label>
+      {{ form.catatan_atasan|as_crispy_field }}
+    </div>
+    <button class="btn btn-warning" type="submit">Simpan</button>
+    <a class="btn btn-light border" href="{% url 'layanan_urls:pelimpahan_detail' object.pk %}">Batal</a>
+  </form>
+</div>
+{% endblock %}

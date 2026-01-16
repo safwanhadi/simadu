@@ -12,6 +12,22 @@ import os
 from django.http import JsonResponse
 from django.db.models import Q
 
+from urllib.parse import urlencode
+from django.conf import settings
+from django.http import Http404
+
+
+from datetime import date, timedelta
+from dateutil.relativedelta import relativedelta
+from django.db.models.functions import ExtractMonth, ExtractDay
+
+# SIMADU views.py
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from .models import ProfilSDM
+
 from .models import ProfilSDM, Users
 from .forms import ProfilForm, UserAdminChangeForm
 
@@ -138,6 +154,11 @@ class ProfilListView(SuccessMessageMixin, LoginRequiredMixin, ListView):
             queryset = Users.objects.filter(id=self.request.user.id) 
         return queryset
     
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['active_tab'] = 'profil'
+        return ctx
+    
 
 class ProfilUpdateView(SuccessMessageMixin, LoginRequiredMixin, UpdateView):
     model = ProfilSDM
@@ -191,7 +212,59 @@ class ProfilUpdateView(SuccessMessageMixin, LoginRequiredMixin, UpdateView):
             kwargs['files'] = self.request.FILES
         return kwargs
     
-    
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def me(request):
+    u = request.user
+    return Response({
+        "email": u.email,
+        "first_name": u.first_name,
+        "last_name": u.last_name,
+        "id": u.pk,
+    })
+
+
+def sso_portal(request):
+    # opsional: kalau ingin portal bisa diakses tanpa login, biarkan saja.
+    # kalau ingin wajib login SIMADU dulu, tinggal cek request.user.is_authenticated.
+    clients = settings.SSO_CLIENTS
+    return render(request, "sso/portal.html", {"clients": clients})
+
+def sso_go(request, client_key):
+    clients = settings.SSO_CLIENTS
+    if client_key not in clients:
+        raise Http404("Client tidak ditemukan")
+
+    c = clients[client_key]
+
+    # Kalau SIMADU sendiri: pakai login internal Django (LoginView)
+    if c["type"] == "local":
+        next_url = request.GET.get("next") or "/"
+        return redirect(f'{c["login_url"]}?{urlencode({"next": next_url})}')
+
+    # OAuth client: arahkan ke /o/authorize/ milik DOT (SIMADU)
+    authorize_url = f"{settings.SSO_AUTH_BASE}/o/authorize/"
+    state = request.GET.get("state") or ""  # boleh dipakai untuk CSRF/tujuan
+    next_url = request.GET.get("next") or ""  # boleh Anda simpan dalam state juga
+
+    params = {
+        "response_type": "code",
+        "client_id": c["client_id"],
+        "redirect_uri": c["redirect_uri"],
+        "scope": c.get("scopes", "read"),
+    }
+
+    # kalau mau bawa "next" tujuan akhir di REMUN, taruh di state:
+    # misalnya state="next=/dashboard"
+    if next_url:
+        params["state"] = f"next={next_url}"
+    elif state:
+        params["state"] = state
+
+    return redirect(f"{authorize_url}?{urlencode(params)}")
+
+
 class PegawaiAutocompleteView(View):
     def get(self, request):
         term = request.GET.get('term', '')
@@ -204,4 +277,85 @@ class PegawaiAutocompleteView(View):
             for obj in queryset
         ]
         return JsonResponse({'results': results})
-    
+
+
+class UlangTahunSebulanTerakhirListView(LoginRequiredMixin, ListView):
+    model = ProfilSDM
+    template_name = "pegawai_ultah_sebulan.html"  # template lama bisa dipakai
+    context_object_name = "items"
+    paginate_by = 25
+
+    def _birthday_window_q(self, start: date, end: date):
+        """
+        Filter Q untuk ulang tahun antara start..end (±14 hari),
+        berdasarkan bulan & hari, aman lintas tahun.
+        """
+
+        # Kasus 1: masih di bulan yang sama
+        if start.month == end.month:
+            return Q(
+                birth_month=start.month,
+                birth_day__gte=start.day,
+                birth_day__lte=end.day,
+            )
+
+        # Kasus 2: lintas bulan / lintas tahun
+        q = Q()
+
+        # bagian awal
+        q |= Q(birth_month=start.month, birth_day__gte=start.day)
+
+        # bulan di tengah
+        def months_between(m1, m2):
+            months = []
+            cur = (m1 % 12) + 1
+            while cur != m2:
+                months.append(cur)
+                cur = (cur % 12) + 1
+            return months
+
+        middle_months = months_between(start.month, end.month)
+        if middle_months:
+            q |= Q(birth_month__in=middle_months)
+
+        # bagian akhir
+        q |= Q(birth_month=end.month, birth_day__lte=end.day)
+
+        return q
+
+    def get_queryset(self):
+        today = date.today()
+        start = today - timedelta(days=14)
+        end = today + timedelta(days=14)
+
+        qs = (
+            ProfilSDM.objects
+            .select_related("user")
+            .filter(tgl_lahir__isnull=False)
+            .annotate(
+                birth_month=ExtractMonth("tgl_lahir"),
+                birth_day=ExtractDay("tgl_lahir"),
+            )
+        )
+
+        qs = qs.filter(self._birthday_window_q(start, end))
+
+        # search (opsional)
+        q = (self.request.GET.get("q") or "").strip()
+        if q:
+            qs = qs.filter(
+                Q(user__first_name__icontains=q)
+                | Q(nip__icontains=q)
+                | Q(no_hp__icontains=q)
+            )
+
+        return qs.order_by("birth_month", "birth_day", "user__first_name")
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["today"] = date.today()
+        ctx["start_date"] = ctx["today"] - timedelta(days=14)
+        ctx["end_date"] = ctx["today"] + timedelta(days=14)
+        ctx["q"] = (self.request.GET.get("q") or "").strip()
+        ctx['active_tab'] = 'ultah'
+        return ctx
