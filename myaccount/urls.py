@@ -14,7 +14,7 @@ from .views import (
     sso_portal,
     sso_go
 )
-from .views_api import api_me, PegawaiAPIView
+from .views_api import api_me, PegawaiAPIView, DokterSpesialisAPIView
 
 
 urlpatterns=[
@@ -31,6 +31,7 @@ urlpatterns=[
     
     path('api/me/', api_me, name='api_me'),
     path('api/pegawai/', PegawaiAPIView.as_view(), name='pegawai_api_view'),
+    path('api/dokter-spesialis/', DokterSpesialisAPIView.as_view(), name='dokter_spesialis_api_view'),
     path('sso/', sso_portal, name='sso_portal'),
     path('sso/<str:client_key>/', sso_go, name='sso_go'),
 ]

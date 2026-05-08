@@ -8,7 +8,6 @@ def dict_get(d, key):
     return d.get(key)
 
 
-
 @register.simple_tag(takes_context=True)
 def querystring_smart_filter(context, *args_to_keep, **kwargs_to_set):
     """
@@ -43,6 +42,9 @@ def querystring_smart_filter(context, *args_to_keep, **kwargs_to_set):
         elif key in final_params:
             del final_params[key]
             
-    # Kembalikan sebagai URL encoded string yang bersih menggunakan pustaka standar Python
-    # doseq=True penting untuk menangani parameter dengan banyak nilai
-    return urlencode(final_params, doseq=True)
+    # Logic Pembersihan Terakhir
+    if not final_params:
+        return ""  # Jika kosong, jangan beri apa pun
+        
+    # Kembalikan dengan tanda tanya di depannya secara otomatis
+    return "?" + urlencode(final_params, doseq=True)

@@ -11,8 +11,10 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 import os
 from pathlib import Path
+from tkinter import FALSE
 from django.contrib import messages
 from decouple import config
+from .scopes import Scopes
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -47,7 +49,12 @@ INSTALLED_APPS = [
     'chartjs',
     'tinymce',
     'hitcount',
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    'allauth.socialaccount.providers.google',
     'oauth2_provider',
+    'django_q',
 
     'myaccount',
     'dokumen',
@@ -62,6 +69,16 @@ INSTALLED_APPS = [
 ]
 
 AUTH_USER_MODEL = 'myaccount.Users'
+# Menggantikan ACCOUNT_AUTHENTICATION_METHOD
+# Gunakan format baru ini:
+ACCOUNT_SIGNUP_FIELDS = ['email*']
+
+# Pastikan juga pengaturan login method sudah menggunakan format set:
+ACCOUNT_LOGIN_METHODS = {'email'}
+
+# Karena Anda tidak menggunakan username:
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+
 CRISPY_TEMPLATE_PACK = 'bootstrap4'
 
 MIDDLEWARE = [
@@ -72,16 +89,9 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'allauth.account.middleware.AccountMiddleware',
 ]
 
-OAUTH2_PROVIDER = {
-    "ACCESS_TOKEN_EXPIRE_SECONDS": 3600,
-    "REFRESH_TOKEN_EXPIRE_SECONDS": 7 * 24 * 3600,
-    "SCOPES": {
-        "read": "Read basic data",
-        "profile": "Read user profile",
-    }
-}
 
 ROOT_URLCONF = 'sisdm.urls'
 
@@ -119,6 +129,7 @@ DATABASES = {
         'PASSWORD': config('DBPASSWORD'),
         'HOST': config('DBHOST'),
         'PORT': config('DBPORT'),
+        'OPTIONS': { 'init_command': "SET sql_mode='STRICT_TRANS_TABLES'", },
     }
 }
 
@@ -142,6 +153,25 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+AUTHENTICATION_BACKENDS = [
+    # 1. Standar Django (Penting agar login manual tetap jalan)
+    'django.contrib.auth.backends.ModelBackend',
+
+    # 2. Django OAuth Toolkit Backend
+    'oauth2_provider.backends.OAuth2Backend',
+
+    # 3. Allauth Backend (Untuk Google Login)
+    'allauth.account.auth_backends.AuthenticationBackend',
+]
+
+SITE_ID = 1
+
+# Agar Allauth tidak membuat user baru secara otomatis di level dasar
+SOCIALACCOUNT_ADAPTER = 'myaccount.adapters.RestrictToExistingUserAdapter'
+
+SOCIALACCOUNT_QUERY_EMAIL = True
+SOCIALACCOUNT_SESSION_STORE = True
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework.authentication.SessionAuthentication",
@@ -150,6 +180,8 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 20,
 }
 
 # Internationalization
@@ -260,37 +292,54 @@ LOGGING = {
 }
 """
 
-SSO_CLIENTS = {
+APP_VISUAL = {
     "simadu": {
-        "label": "SIMADU (Kepegawaian)",
-        "type": "local",  # login internal SIMADU
-        "login_url": "/accounts/login/",
+        "icon": "fas fa-users-cog",
+        "bg_class": "bg-gradient-to-br from-indigo-500 to-indigo-600",
+        "category": "Kepegawaian",
     },
     "remun": {
-        "label": "REMUN (Remunerasi)",
+        "icon": "fas fa-coins",
+        "bg_class": "bg-gradient-to-br from-emerald-500 to-teal-600",
+        "category": "Keuangan",
+    },
+    # tambahkan aplikasi lain di sini
+}
+
+SSO_CLIENTS = {
+    "simadu": {
+        "label": "SIMADU",
+        "type": "local",  # login internal SIMADU
+        "dashboard": "/",
+        "dashboard_absensi": "/dashboard-absensi/",
+    },
+    "remun": {
+        "label": "REMUNERASI",
         "type": "oauth_client",
         # ini DIDAPAT dari DOT Application untuk REMUN (client_id + redirect_uri)
         "client_id": config("CLIENT_ID_REMUN"),
-        "redirect_uri": "http://127.0.0.1:8001/oauth/callback/",
+        "redirect_uri": "http://127.0.0.1:8001/callback/",
         "scopes": "read",
     },
     # tambah aplikasi lain tinggal copy ini
 }
 SSO_AUTH_BASE = "http://127.0.0.1:8000"  # base SIMADU sendiri
+PRESENSI_BASE_URL = "http://127.0.0.1:5000"  # base Flask Bridge untuk presensi
 
 OAUTH2_PROVIDER = {
-    # Access token lifetime (contoh 10 menit)
-    "ACCESS_TOKEN_EXPIRE_SECONDS": 600,
-
-    # Refresh token lifetime (opsional, kalau versi DOT kamu support)
-    # "REFRESH_TOKEN_EXPIRE_SECONDS": 60 * 60 * 24 * 30,  # 30 hari
-
-    # Supaya refresh token bisa dipakai berulang atau di-rotate (pilih salah satu gaya)
-    # Kalau kamu mau aman: rotasi refresh token
-    "ROTATE_REFRESH_TOKEN": True,
-    # default False, tapi di beberapa versi bisa True
-    # "PKCE_REQUIRED": False,
+    "ACCESS_TOKEN_EXPIRE_SECONDS": 3600,
+    "REFRESH_TOKEN_EXPIRE_SECONDS": 7 * 24 * 3600,
+    "SCOPES": Scopes.as_choices(),
 }
+
+# "SCOPES": {
+#     "read_pegawai": "Read basic data",
+#     "profile_pegawai": "Read user profile",
+#     'read_attlog': 'Melihat data absensi',
+#     'sync_attlog': 'Menandai data sudah sinkron',
+#     'manage_attlog': 'Menghapus atau memodifikasi data',
+# }
+
 
 CACHES = {
     "default": {
@@ -305,4 +354,32 @@ CACHES = {
 SESSION_COOKIE_NAME="simadu_sessionid"
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 SESSION_CACHE_ALIAS = "default"
+# pilih TRUE untuk produksi agar cookie hanya dikirim via HTTPS, tapi untuk testing di localhost biarkan False
 SESSION_COOKIE_SECURE=False
+
+Q_CLUSTER = {
+    'name': 'simadu',
+    'workers': 8,
+    'recycle': 500,
+    'timeout': 60,
+    'compress': True,
+    'save_limit': 250,
+    'queue_limit': 500,
+    'cpu_affinity': 1,
+    'label': 'Django Q2',
+    'redis': {
+        'host': '127.0.0.1',
+        'port': 6379,
+        'db': 0, },
+    'ALT_CLUSTERS': {
+        'long': {
+            'timeout': 3000,
+            'retry': 3600,
+            'max_attempts': 2,
+        },
+        'short': {
+            'timeout': 10,
+            'max_attempts': 1,
+        },
+    }
+}

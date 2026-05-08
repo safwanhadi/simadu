@@ -2,6 +2,7 @@ from django import forms
 from django.forms import inlineformset_factory
 from calendar import monthrange, month_name
 from datetime import date
+from django.utils import timezone
 
 from .models import JadwalDinasSDM, JenisSDMPerinstalasi, DaftarKegiatanPegawai, KehadiranKegiatan, DetailKategoriJadwalDinas
 from myaccount.models import Users
@@ -351,3 +352,8 @@ class UploadFingerprintForm(forms.Form):
                 raise forms.ValidationError('Ukuran file terlalu besar. Maksimal 5 MB.')
             
             
+class ProsesKehadiranForm(forms.Form):
+    tanggal = forms.DateField(
+        widget=forms.DateInput(attrs={'type': 'date'}),
+        initial=timezone.now().date()
+    )

@@ -260,14 +260,6 @@ class RiwayatPenempatan(models.Model):
         verbose_name = "Riwayat Penempatan"
         verbose_name_plural = "Riwayat Penempatan"
 
-    def clean(self):
-        """Validasi untuk memastikan hanya satu field penempatan yang diisi."""
-        penempatan_fields = [self.penempatan_level1, self.penempatan_level2, self.penempatan_level3, self.penempatan_level4]
-        filled_count = sum(1 for field in penempatan_fields if field)
-        
-        if self.status and filled_count != 1:
-            raise ValidationError('Untuk penempatan aktif, harap isi salah satu (dan hanya satu) level penempatan, dari Level 1 s/d 4.')
-
     # 3. HELPER PROPERTY (Logika Internal Baru)
     # ==============================================================================
     @property

@@ -1,0 +1,85 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            
+            <!-- Tampilkan Flash Messages -->
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+
+            {% if result.total_fetched > 0 %}
+            <div class="card mt-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">Ringkasan Proses</h6>
+                    <span class="badge bg-secondary">Total Data Difetch: {{ result.total_fetched }}</span>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center g-3 mb-4">
+                        <div class="col-md-4">
+                            <div class="p-3 bg-success bg-opacity-10 rounded border border-success">
+                                <h3 class="text-success mb-0">{{ result.new_data }}</h3>
+                                <small class="text-muted">Data Baru Disimpan</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="p-3 bg-secondary bg-opacity-10 rounded border border-secondary">
+                                <h3 class="text-secondary mb-0">{{ result.skipped_exists }}</h3>
+                                <small class="text-muted">Duplikat Dilewati</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="p-3 bg-warning bg-opacity-10 rounded border border-warning">
+                                <h3 class="text-warning mb-0">{{ result.skipped_no_mapping }}</h3>
+                                <small class="text-muted">No Mapping</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-light small border">
+                        <strong>Logic Duplikasi:</strong> Data dianggap duplikat jika kombinasi 
+                        <code>Pegawai (SIMADU) + Waktu (presisi detik) + Arah (IN/OUT)</code> sudah ada di database. 
+                        Pegawai boleh presensi berkali-kali selama kombinasi tersebut berbeda (misal: ganti shift).
+                    </div>
+
+                    {% if result.errors %}
+                    <details class="mb-3">
+                        <summary class="text-danger fw-bold" style="cursor: pointer;">
+                            <i class="bi bi-bug"></i> Lihat {{ result.errors|length }} Error
+                        </summary>
+                        <ul class="list-unstyled mt-2 small bg-light p-3 rounded">
+                            {% for error in result.errors %}
+                            <li class="mb-1">• {{ error }}</li>
+                            {% endfor %}
+                        </ul>
+                    </details>
+                    {% endif %}
+
+                    <div class="d-flex gap-2 mt-4">
+                        <a href="{% url 'absensi:sinkronisasi' %}" class="btn btn-primary flex-fill" onclick="return confirm('Yakin ingin sinkronisasi ulang?')">
+                            <i class="bi bi-arrow-repeat"></i> Sinkronisasi Ulang
+                        </a>
+                        <a href="{% url 'absensi:dashboard' %}" class="btn btn-outline-secondary flex-fill">
+                            <i class="bi bi-house"></i> Kembali ke Dashboard
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="alert alert-warning mt-3">
+                Tidak ada data proses yang ditemukan.
+                <a href="{% url 'absensi:dashboard' %}" class="alert-link">Kembali ke Dashboard</a>
+            </div>
+            {% endif %}
+
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -347,7 +347,7 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
         form pelimpahan tugas.
     """
 
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     model = LayananCuti
@@ -1156,7 +1156,7 @@ class LayanananCutiInlineCreateView(LoginRequiredMixin, CheckCuti, CreateView):
     
 
 class LayananCutiInlineFormView(LoginRequiredMixin, CheckCuti, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
     redirect_display = 'layanan_urls:layanan_cuti_view'
 
@@ -1424,7 +1424,7 @@ class LayananUpdateCUtiTundaView(LoginRequiredMixin, CheckCuti, UpdateView):
         
         
 class LayananCutiUpdateView(LoginRequiredMixin, CheckCuti, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id):
@@ -2046,6 +2046,8 @@ class GajiBerkalaCheck:
             data2 = second_last_date[1].get('tmt_gaji')+relativedelta(months=24)
             return data2
         elif nip and len(second_last_date) == 1:
+            if second_last_date[0].get('tmt_gaji') is None:
+                return None
             data3 = second_last_date[0].get('tmt_gaji')+relativedelta(months=24)
             return data3
         return None
@@ -2187,7 +2189,7 @@ def createlayananberkala(request, riwayat_id):
     
 
 class LayananGajiBerkalaUpdateView(LoginRequiredMixin, GajiBerkalaCheck, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     redirect_display = 'layanan_urls:layanan_berkala_view'
@@ -2232,7 +2234,7 @@ class LayananGajiBerkalaUpdateView(LoginRequiredMixin, GajiBerkalaCheck, View):
     
 
 class LayananGajiBerkalaAdminView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, layanan_id):
@@ -2275,7 +2277,7 @@ class LayananGajiBerkalaAdminView(LoginRequiredMixin, View):
 
 
 class LayananGajiBerkalaAdminAddView(LoginRequiredMixin, View):    
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
         
     def get_user(self, nip):
@@ -2335,7 +2337,7 @@ class LayananGajiBerkalaAdminAddView(LoginRequiredMixin, View):
         
 
 class LayananGajiBerkalaUpload(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id):
@@ -2505,7 +2507,7 @@ class PenugasanDiklatCreateView(LoginRequiredMixin, CreateView):
         return super().form_invalid(form)
 
 class LayananUsulanDiklatStaffView(LoginRequiredMixin, ListView):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
     template_name = '7_layanan_diklat/layanan_diklat_list.html'
     model = LayananUsulanDiklat
@@ -2513,14 +2515,14 @@ class LayananUsulanDiklatStaffView(LoginRequiredMixin, ListView):
     def get_queryset(self):
         queryset = None
         if self.request.user.is_staff and not self.request.user.is_superuser:
-            penempatan_admin = self.request.user.riwayatpenempatan_set.filter(status=True).last()
+            penempatan_admin = self.request.user.riwayat_penempatan.filter(status=True).last()
             if penempatan_admin:
                 queryset=self.model.objects.filter(
-                        riwayatdiklat__pegawai__riwayatpenempatan__penempatan_level3__sub_bidang=penempatan_admin.penempatan, riwayatdiklat__pegawai__riwayatpenempatan__status=True
+                        riwayatdiklat__pegawai__riwayat_penempatan__penempatan_level3__sub_bidang=penempatan_admin.penempatan, riwayatdiklat__pegawai__riwayat_penempatan__status=True
                     ).order_by('-id').exclude(riwayatdiklat__pegawai=self.request.user).distinct()|self.model.objects.filter(
-                        riwayatdiklat__pegawai__riwayatpenempatan__penempatan_level2__bidang=penempatan_admin.penempatan, riwayatdiklat__pegawai__riwayatpenempatan__status=True
+                        riwayatdiklat__pegawai__riwayat_penempatan__penempatan_level2__bidang=penempatan_admin.penempatan, riwayatdiklat__pegawai__riwayat_penempatan__status=True
                     ).order_by('-id').exclude(riwayatdiklat__pegawai=self.request.user).distinct()|self.model.objects.filter(
-                        riwayatdiklat__pegawai__riwayatpenempatan__penempatan_level1__unor=penempatan_admin.penempatan, riwayatdiklat__pegawai__riwayatpenempatan__status=True
+                        riwayatdiklat__pegawai__riwayat_penempatan__penempatan_level1__unor=penempatan_admin.penempatan, riwayatdiklat__pegawai__riwayat_penempatan__status=True
                     ).order_by('-id').exclude(riwayatdiklat__pegawai=self.request.user).distinct()  
         elif self.request.user.is_superuser:
             queryset = super().get_queryset()
@@ -2539,7 +2541,7 @@ class LayananUsulanDiklatStaffView(LoginRequiredMixin, ListView):
     
     
 class LayananUsulanDiklatListView(LoginRequiredMixin, ListView):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
     model = LayananUsulanDiklat
     
@@ -2570,7 +2572,7 @@ class LayananUsulanDiklatListView(LoginRequiredMixin, ListView):
     
     
 class LayananUsulanDiklatCreateView(LoginRequiredMixin, CreateView):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
     model = LayananUsulanDiklat
     form_class = FormUsulanLayananDiklat
@@ -2626,7 +2628,7 @@ class LayananUsulanDiklatCreateView(LoginRequiredMixin, CreateView):
     
 # LayananUsulanDiklatView ini tidak digunakan, hanya mengetahui logic awal saja    
 class LayananUsulanDiklatView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_user(self, nip):
@@ -2696,7 +2698,7 @@ context_tindaklanjut_diklat = {
     }
 
 class LayananUsulanDiklatUpdateView(LoginRequiredMixin, UpdateView):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
     model = LayananUsulanDiklat
     success_url = reverse_lazy('layanan_urls:layanan_diklat_list_view')
@@ -2743,7 +2745,7 @@ class LayananUsulanDiklatUpdateView(LoginRequiredMixin, UpdateView):
     def check_if_riwayatpenempatan(self, instance):
         data = RiwayatDiklat.objects.filter(usulan=instance).first()
         if data:
-            penempatan = data.pegawai.first().riwayatpenempatan_set.filter(status=True).last() if data.pegawai.first() is not None else None 
+            penempatan = data.pegawai.first().riwayat_penempatan.filter(status=True).last() if data.pegawai.first() is not None else None 
             if penempatan is not None:
                 return penempatan
         return None
@@ -2900,7 +2902,7 @@ class CatatanSDMUsulanLayananDiklatUpdateView(LoginRequiredMixin, UpdateView):
     
 
 class LayananUsulanInovasiView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_user(self, nip):
@@ -2963,7 +2965,7 @@ class LayananUsulanInovasiView(LoginRequiredMixin, View):
 
 
 class LayananUsulanInovasiUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id):

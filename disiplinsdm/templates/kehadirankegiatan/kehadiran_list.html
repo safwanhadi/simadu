@@ -27,7 +27,9 @@
                 <div>
                     {% if request.user.is_superuser %}
                         <a href="{% url 'disiplinsdm_urls:kehadiran_create' %}" class="btn btn-outline-primary btn-sm">Tambah Kehadiran</a>
-                        <a href="{% url 'disiplinsdm_urls:kehadiran_upload_fingerprint' %}" class="btn btn-outline-secondary btn-sm">Upload Fingerprint</a>
+                        <a href="{% url 'disiplinsdm_urls:penilaian-kehadiran' %}" class="btn btn-outline-secondary btn-sm">Penilaian Kehadiran</a>
+                        <a href="{% url 'disiplinsdm_urls:log-kehadiran' %}" class="btn btn-outline-success btn-sm">Log Kehadiran</a>
+                        <a href="{% url 'disiplinsdm_urls:sync_dashboard' %}" class="btn btn-outline-secondary btn-sm">Unsync Kehadiran</a>
                     {% endif %}
                 </div>
             </div>

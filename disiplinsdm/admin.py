@@ -10,7 +10,9 @@ from .models import (
     JenisKegiatan, 
     DaftarKegiatanPegawai,
     HariLibur,
-    AturanToleransiKeterlambatan
+    AturanToleransiKeterlambatan,
+    MappingMesinAbsensi,
+    LogKehadiran
     )
 
 # Register your models here.
@@ -45,6 +47,13 @@ class AturanToleransiAdmin(admin.ModelAdmin):
     list_editable = ('is_aktif', 'urutan', 'batas_atas_menit', 'status_yang_dihasilkan')
     list_filter = ('is_aktif',)
 
+class MappingMesinAbsensiAdmin(admin.ModelAdmin):
+    list_display=('mesin_id', 'pegawai')
+    # search_fields=('pegawai',)
+    autocomplete_fields = ('pegawai',)
+    
+admin.site.register(MappingMesinAbsensi, MappingMesinAbsensiAdmin)
+admin.site.register(LogKehadiran)
 admin.site.register(KategoriJadwalDinas)
 admin.site.register(DetailKategoriJadwalDinas, DetailKategoriJadwalDinasAdmin)
 admin.site.register(JenisSDMPerinstalasi)

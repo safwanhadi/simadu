@@ -183,8 +183,9 @@ class ProfilSDM(models.Model):
 
 
 class ProfilAdmin(models.Model):
+    # primary_id = models.BigIntegerField(null=True)
     user = models.OneToOneField(
-        Users, on_delete=models.CASCADE, primary_key=True, related_name="profil_admin")
+        Users, primary_key=True, related_name="profil_admin", on_delete=models.CASCADE)
     unor = models.ForeignKey('strukturorg.UnitOrganisasi', on_delete=models.SET_NULL, null=True, blank=True)
     bidang = models.ForeignKey('strukturorg.Bidang', on_delete=models.SET_NULL, null=True, blank=True)
     sub_bidang = models.ForeignKey('strukturorg.SubBidang', on_delete=models.SET_NULL, null=True, blank=True)

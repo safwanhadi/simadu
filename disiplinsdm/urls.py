@@ -4,6 +4,7 @@ from .views import (
     DeleteJadwalView,
     JadwalUpdateView,
     JadwalDinasFormsetUpdateView,
+    LogKehadiranListView,
     SalinJadwalView,
     SalinJadwalInstalasiView,
     JadwalDinasDetailView,
@@ -17,6 +18,7 @@ from .views import (
     ApprovalJadwalInstalasi,
     PengajuanJadwalInstalasi,
     VerifikasiJadwalView,
+    RekapPiketListView,
     
     KehadiranListView,
     KehadiranSpesialisListView,
@@ -24,6 +26,12 @@ from .views import (
     KehadiranUpdateView,
     DetailKehadiranView,
     FingerprintAutoUploadView,
+    SinkronisasiLogView,
+    SinkronisasiResultView,
+    process_single_sync,
+    sync_dashboard,
+    sync_individual_api,
+    PenilaianKehadiranView,
     
     HariLiburView,
     HariLiburCreateView,
@@ -50,6 +58,7 @@ urlpatterns = [
     path('pengajuan/<int:inst>/<int:bulan>/<int:tahun>/', PengajuanJadwalInstalasi.as_view(), name='pengajuan_jadwal_instalasi'),
     path('approval/<int:inst>/<int:bulan>/<int:tahun>/', ApprovalJadwalInstalasi.as_view(), name='approval_jadwal'),
     path('verifikasi-jadwal/<int:pk>/', VerifikasiJadwalView.as_view(), name='verifikasi_jadwal'),# verifikasi perubahan jadwal yang diajukan
+    path('rekap-piket/', RekapPiketListView.as_view(), name='rekap_piket'),
     
     path('kehadiran/', KehadiranListView.as_view(), name='kehadiran_list'),
     path('kehadiran-spesialis/', KehadiranSpesialisListView.as_view(), name='kehadiran_spesialis_list'),
@@ -57,7 +66,21 @@ urlpatterns = [
     path('kehadiran/<int:pk>/update/', KehadiranUpdateView.as_view(), name='kehadiran_update'),
     path('kehadiran/user/<int:pk>/', DetailKehadiranView.as_view(), name='kehadiran_detail_user'),
     path('kehadiran/upload-fingerprint/', FingerprintAutoUploadView.as_view(), name='kehadiran_upload_fingerprint'),
-    
+    path(
+        'sinkronisasi/', 
+        SinkronisasiLogView.as_view(), 
+        name='sinkronisasi'
+    ),
+    path(
+        'sinkronisasi/hasil/', 
+        SinkronisasiResultView.as_view(), 
+        name='sinkronisasi-result'
+    ),
+    path('log-kehadiran/', LogKehadiranListView.as_view(), name='log-kehadiran'),
+    path('penilaian-kehadiran/', PenilaianKehadiranView.as_view(), name='penilaian-kehadiran'),
+    path('sinkronisasi/dashboard/', sync_dashboard, name='sync_dashboard'),
+    path('sinkronisasi/api/', sync_individual_api, name='sync_individual_api'),
+    path('sync/process-single/', process_single_sync, name='process_single_sync'), 
     path('harilibur/', HariLiburView.as_view(), name='harilibur_list'),
     path('harilibur/add/', HariLiburCreateView.as_view(), name='harilibur_create'),
     path('harilibur/<int:pk>/update/', HariLiburUpdateView.as_view(), name='harilibur_update'),

@@ -2,15 +2,15 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse, reverse_lazy
 from django.db import transaction
 from django.views import View, generic
-from django.views.generic.edit import FormView
+# from django.views.generic.edit import FormView
 from django.db.models.query import QuerySet
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib import messages
 from django.db.models import Q, Min, Max, Value, CharField, Count, Case, When, BooleanField, OuterRef, Subquery, IntegerField
-from django.db.models.functions import Extract, Cast, TruncDate, Coalesce
+from django.db.models.functions import TruncDate, Coalesce
 from django.core.paginator import Paginator
 from django.contrib.staticfiles import finders
-from django.db.models.fields import TimeField, DateField
+from django.db.models.fields import TimeField
 # from django.db.models.functions import TruncMonth, ExtractMonth, TruncDate, TruncYear
 from django.utils.functional import cached_property
 from dateutil.relativedelta import relativedelta
@@ -24,6 +24,17 @@ from django.http import HttpResponse
 from collections import defaultdict
 from decimal import Decimal
 from openpyxl.drawing.image import Image as XLImage
+import requests
+from django.views.generic import ListView, TemplateView
+from django.conf import settings
+from django.db import IntegrityError
+
+from .models import MappingMesinAbsensi, LogKehadiran
+
+from django.views.generic import FormView
+
+from .services import KehadiranService, ApelPagiService
+from .forms import ProsesKehadiranForm
 
 from django.utils import timezone
 from .utils import get_mingguan_lengkap, hitung_total_jam, is_user_authorized_to_approve
@@ -223,11 +234,11 @@ class EvaluasiJadwal(LoginRequiredMixin, UserPassesTestMixin, generic.TemplateVi
         inst_id = self.get_inst_id(instalasi_qs)
 
         # Saring user berdasarkan instalasi yang dipilih
-        data_user = Users.objects.exclude(is_superuser=True, is_active=False).prefetch_related('riwayatpenempatan_set').order_by('-id')
+        data_user = Users.objects.exclude(is_superuser=True, is_active=False).prefetch_related('riwayat_penempatan').order_by('-id')
         if inst_id:
             data_user = data_user.filter(
-                riwayatpenempatan__penempatan_level4__id=inst_id,
-                riwayatpenempatan__status=True
+                riwayat_penempatan__penempatan_level4__id=inst_id,
+                riwayat_penempatan__status=True
             )
         else:
             data_user = data_user.none()
@@ -1790,7 +1801,7 @@ class JadwalListView(LoginRequiredMixin, generic.ListView):
             if profil.unor:
                 return UnitInstalasi.objects.filter(sub_bidang__bidang__unor=profil.unor).first()
         else:
-            instalasi = user.riwayatpenempatan_set.filter(status=True).first()
+            instalasi = user.riwayat_penempatan.filter(status=True).first()
             if instalasi is not None:
                 instalasi = instalasi.penempatan_level4
             else:
@@ -1800,7 +1811,7 @@ class JadwalListView(LoginRequiredMixin, generic.ListView):
 
     def get_user_queryset(self):
         user = self.request.user
-        users = Users.objects.exclude(is_superuser=True, is_active=False).prefetch_related('riwayatpenempatan_set')
+        users = Users.objects.exclude(is_superuser=True, is_active=False).prefetch_related('riwayat_penempatan')
         profil = getattr(user, 'profil_admin', None)
 
         if user.is_superuser:
@@ -1809,13 +1820,13 @@ class JadwalListView(LoginRequiredMixin, generic.ListView):
             return users.none()
 
         if profil.instalasi.exists():
-            return users.filter(riwayatpenempatan__penempatan_level4__in=profil.instalasi.values_list('pk', flat=True), riwayatpenempatan__status=True)
+            return users.filter(riwayat_penempatan__penempatan_level4__in=profil.instalasi.values_list('pk', flat=True), riwayat_penempatan__status=True)
         if profil.sub_bidang:
-            return users.filter(riwayatpenempatan__penempatan_level3=profil.sub_bidang, riwayatpenempatan__status=True)
+            return users.filter(riwayat_penempatan__penempatan_level3=profil.sub_bidang, riwayat_penempatan__status=True)
         if profil.bidang:
-            return users.filter(riwayatpenempatan__penempatan_level2=profil.bidang, riwayatpenempatan__status=True)
+            return users.filter(riwayat_penempatan__penempatan_level2=profil.bidang, riwayat_penempatan__status=True)
         if profil.unor:
-            return users.filter(riwayatpenempatan__penempatan_level1=profil.unor, riwayatpenempatan__status=True)
+            return users.filter(riwayat_penempatan__penempatan_level1=profil.unor, riwayat_penempatan__status=True)
         return users.none()
     
     def get_instalasi_queryset(self):
@@ -1833,19 +1844,19 @@ class JadwalListView(LoginRequiredMixin, generic.ListView):
         if profil.sub_bidang:
             return instalasi_list.filter(sub_bidang=profil.sub_bidang)
         if profil.bidang:
-            return instalasi_list.filter(sub_bidang__bidang=profil.bidang, riwayatpenempatan__status=True)
+            return instalasi_list.filter(sub_bidang__bidang=profil.bidang, riwayat_penempatan__status=True)
         if profil.unor:
-            return instalasi_list.filter(sub_bidang__bidang__unor=profil.unor, riwayatpenempatan__status=True)
+            return instalasi_list.filter(sub_bidang__bidang__unor=profil.unor, riwayat_penempatan__status=True)
         return instalasi_list.none()
 
     def get_queryset(self):
+        print('get it')
         params = self.get_filter_params()
         instalasi = self.get_active_instalasi()
-        queryset = JenisSDMPerinstalasi.objects.all().order_by('-id').exclude(
+        queryset = JenisSDMPerinstalasi.objects.select_related('pegawai', 'jenis_sdm', 'instalasi').order_by('-id').exclude(
                 Q(pegawai__is_active=False) |
                 Q(pegawai__is_superuser=True)
             )
-        
         if self.request.user.is_superuser:
             queryset = queryset
         if instalasi:
@@ -2355,7 +2366,7 @@ class SalinJadwalView(LoginRequiredMixin, UserPassesTestMixin, View):
     def _users_queryset_for_login(self, login_user):
         base = (Users.objects
                 .exclude(is_superuser=True, is_active=False)
-                .prefetch_related('riwayatpenempatan_set'))
+                .prefetch_related('riwayat_penempatan'))
 
         users = base.none()
         if login_user.is_superuser:
@@ -2365,15 +2376,15 @@ class SalinJadwalView(LoginRequiredMixin, UserPassesTestMixin, View):
             if not pa:
                 return base.none()
 
-            filt = Q(riwayatpenempatan__status=True)
+            filt = Q(riwayat_penempatan__status=True)
             if getattr(pa, 'instalasi', None) and pa.instalasi.exists():
-                filt &= Q(riwayatpenempatan__penempatan_level4__in=pa.instalasi.values_list('pk', flat=True))
+                filt &= Q(riwayat_penempatan__penempatan_level4__in=pa.instalasi.values_list('pk', flat=True))
             elif getattr(pa, 'sub_bidang', None):
-                filt &= Q(riwayatpenempatan__penempatan_level3=pa.sub_bidang)
+                filt &= Q(riwayat_penempatan__penempatan_level3=pa.sub_bidang)
             elif getattr(pa, 'bidang', None):
-                filt &= Q(riwayatpenempatan__penempatan_level2=pa.bidang)
+                filt &= Q(riwayat_penempatan__penempatan_level2=pa.bidang)
             elif getattr(pa, 'unor', None):
-                filt &= Q(riwayatpenempatan__penempatan_level1=pa.unor)
+                filt &= Q(riwayat_penempatan__penempatan_level1=pa.unor)
             else:
                 # fallback aman: tidak melihat siapa pun
                 return base.none()
@@ -3057,8 +3068,6 @@ class DetailKehadiranView(LoginRequiredMixin, generic.DetailView):
         
         return context
 
-
-
     
 class KehadiranCreateView(LoginRequiredMixin, UserPassesTestMixin, generic.CreateView):
     model = DaftarKegiatanPegawai
@@ -3485,4 +3494,453 @@ class FingerprintAutoUploadView(LoginRequiredMixin, UserPassesTestMixin, FormVie
 
         return super().form_valid(form)
     
+
+class RekapPiketListView(generic.ListView):
+    model = JadwalDinasSDM
+    template_name = 'jadwal_piket/rekap_piket.html'
+    context_object_name = 'daftar_jadwal'
+    paginated_by = 20
+
+    def get_active_instalasi(self):
+        """Logika penentuan penempatan sesuai hierarki"""
+        inst_param = self.request.GET.get('inst')
+        if inst_param:
+            return UnitInstalasi.objects.filter(pk=inst_param).first()
+
+        user = self.request.user
+        profil = getattr(user, 'profil_admin', None)
+
+        if user.is_superuser:
+            return None # Superuser default melihat semua jika tanpa param
+        
+        if profil:
+            if profil.instalasi.exists():
+                return profil.instalasi.first()
+            if profil.sub_bidang:
+                return profil.sub_bidang
+            if profil.bidang:
+                return profil.bidang
+            if profil.unor:
+                return profil.unor
+        
+        # Pegawai biasa
+        penempatan = user.riwayat_penempatan.filter(status=True).first()
+        return penempatan.penempatan_level4 if penempatan else None
+
+    def get_queryset(self):
+        tanggal_raw = self.request.GET.get('tanggal')
     
+        if tanggal_raw:
+            # Ambil hanya 10 karakter pertama (YYYY-MM-DD) 
+            # untuk membuang sampah seperti '?detail=Pagi' jika terselip
+            clean_date = tanggal_raw[:10] 
+            try:
+                self.target_date = date.fromisoformat(clean_date)
+            except ValueError:
+                self.target_date = date.today()
+        else:
+            self.target_date = date.today()
+
+        # Ambil filter detail jika ada (untuk memfilter tabel)
+        self.filter_detail = self.request.GET.get('detail') # Pagi, Siang, dll
+        self.obj_penempatan = self.get_active_instalasi()
+
+        # 2. Query Dasar
+        queryset = JadwalDinasSDM.objects.filter(tanggal=self.target_date)
+
+        # 3. Filter Berdasarkan Hierarki Penempatan
+        if self.obj_penempatan:
+            if isinstance(self.obj_penempatan, UnitInstalasi):
+                queryset = queryset.filter(pegawai__instalasi=self.obj_penempatan)
+            elif isinstance(self.obj_penempatan, SubBidang):
+                queryset = queryset.filter(pegawai__sub_bidang=self.obj_penempatan)
+            elif isinstance(self.obj_penempatan, Bidang):
+                queryset = queryset.filter(pegawai__bidang=self.obj_penempatan)
+            # Anda bisa tambah elif untuk Unor jika perlu
+        elif not self.request.user.is_superuser:
+            # Jika user biasa tanpa data penempatan, hanya lihat jadwal sendiri
+            queryset = queryset.filter(pegawai__pegawai=self.request.user)
+            
+        if self.filter_detail == 'Pagi':
+            queryset = queryset.filter(kategori_jadwal__kategori_jadwal__icontains='pagi')
+        elif self.filter_detail == 'Siang':
+            queryset = queryset.filter(kategori_jadwal__kategori_jadwal__icontains='siang')
+        elif self.filter_detail == 'Malam':
+            queryset = queryset.filter(kategori_jadwal__kategori_jadwal__icontains='malam')
+        elif self.filter_detail == 'Middle':
+            queryset = queryset.filter(kategori_jadwal__kategori_jadwal__icontains='middle')
+        elif self.filter_detail == 'Lain-lain':
+            queryset = queryset.exclude(
+                Q(kategori_jadwal__kategori_jadwal__icontains='pagi') |
+                Q(kategori_jadwal__kategori_jadwal__icontains='siang') |
+                Q(kategori_jadwal__kategori_jadwal__icontains='malam') |
+                Q(kategori_jadwal__kategori_jadwal__icontains='middle')
+            )
+
+        return queryset.select_related('pegawai__pegawai', 'kategori_jadwal')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        qs = self.get_queryset()
+
+        # LOGIKA GROUPING SHIFT (URUTAN SANGAT PENTING)
+        rekap_piket = (
+            qs.annotate(
+                grup_shift=Case(
+                    When(kategori_jadwal__kategori_jadwal__icontains='pagi', then=Value('Pagi')),
+                    When(kategori_jadwal__kategori_jadwal__icontains='siang', then=Value('Siang')),
+                    When(kategori_jadwal__kategori_jadwal__icontains='malam', then=Value('Malam')),
+                    When(kategori_jadwal__kategori_jadwal__icontains='middle', then=Value('Middle')),
+                    default=Value('Lain-lain'),
+                    output_field=CharField(),
+                )
+            )
+            .values('grup_shift') # Group By Alias
+            .annotate(total=Count('id')) # Count per Group
+            .order_by('grup_shift')
+        )
+        
+        # Ambil semua parameter URL saat ini (copy agar bisa dimodifikasi)
+        querydict = self.request.GET.copy()
+        querydict.pop('page', None)
+
+        context.update({
+            
+            'rekap_piket': rekap_piket,
+            'total_pegawai_masuk': qs.count(),
+            'target_date': self.target_date,
+            'active_loc': self.obj_penempatan,
+            'all_instalasi': UnitInstalasi.objects.all() if self.request.user.is_superuser else None,
+            'preserved_query': querydict.urlencode(),
+            'selected': 'disiplin',
+            'riwayat': 'active', 
+        })
+        return context
+    
+## LOGIKA PRESENSI MESIN BARU (HIKVISION)
+
+class SinkronisasiLogView(View):
+    """
+    Generic View untuk memproses sinkronisasi saat tombol diklik.
+    Hanya menerima request POST untuk keamanan.
+    """
+    
+    def post(self, request, *args, **kwargs):
+        result = self._proses_sinkronisasi()
+        
+        # Simpan hasil statistik ke session untuk ditampilkan di halaman result
+        request.session['sinkronisasi_result'] = result
+        
+        # Set flash message berdasarkan hasil
+        if result['new_data'] > 0:
+            messages.success(request, f"Berhasil menyimpan {result['new_data']} data fingerprint baru.")
+        elif result['total_fetched'] > 0 and result['skipped_exists'] > 0:
+            messages.info(request, "Semua data sudah ter-sync. Tidak ada data baru.")
+            
+        if result['skipped_no_mapping'] > 0:
+            messages.warning(request, f"{result['skipped_no_mapping']} data dilewati karena ID mesin belum ada di tabel Mapping.")
+            
+        if result['errors']:
+            messages.error(request, f"Terjadi {len(result['errors'])} error saat proses sinkronisasi.")
+            
+        return redirect('sinkronisasi-result')
+    
+    def _proses_sinkronisasi(self):
+        stats = {
+            'new_data': 0,
+            'skipped_exists': 0,
+            'skipped_no_mapping': 0,
+            'total_fetched': 0,
+            'errors': []
+        }
+        
+        url = settings.API_FINGERPRINT_URL
+        
+        # LOOPING UNTUK HANDLE PAGINATION
+        while url:
+            try:
+                response = requests.get(url, timeout=settings.API_FINGERPRINT_TIMEOUT)
+                response.raise_for_status()
+            except requests.RequestException as e:
+                stats['errors'].append(f'Gagal koneksi ke API: {str(e)}')
+                break
+            
+            data = response.json()
+            results = data.get('results', [])
+            
+            # LOOPING SETIAP ITEM LOG
+            for item in results:
+                stats['total_fetched'] += 1
+                
+                # 1. Ambil ID Pegawai dari Mesin (Field "id" pada API)
+                pegawai_mesin_id = str(item.get('id', '')).strip()
+                if not pegawai_mesin_id:
+                    continue
+                
+                # 2. Cari Mapping ke SIMADU berdasarkan ID Mesin
+                try:
+                    mapping = MappingMesinAbsensi.objects.select_related('pegawai').get(
+                        mesin_id=pegawai_mesin_id
+                    )
+                except MappingMesinAbsensi.DoesNotExist:
+                    stats['skipped_no_mapping'] += 1
+                    continue
+                
+                # 3. Parse Datetime
+                datetime_str = item.get('datetime', '')
+                try:
+                    parsed_datetime = datetime.strptime(datetime_str, '%Y-%m-%d %H:%M:%S')
+                except (ValueError, TypeError):
+                    stats['errors'].append(f'Format datetime error: {datetime_str}')
+                    continue
+                
+                # 4. Ambil dan Validasi Direction
+                direction = item.get('direction', '').strip().upper()
+                if direction not in ['IN', 'OUT']:
+                    continue
+                
+                # 5. CEK DUPLIKASI (Pegawai + Waktu Presisi Detik + Arah)
+                if LogKehadiran.objects.filter(
+                    mapping=mapping,
+                    datetime=parsed_datetime,
+                    direction=direction
+                ).exists():
+                    stats['skipped_exists'] += 1
+                    continue
+                
+                # 6. INSERT DATA BARU SAJA
+                try:
+                    LogKehadiran.objects.create(
+                        mapping=mapping,
+                        datetime=parsed_datetime,
+                        direction=direction,
+                        devicename=item.get('devicename', '').strip(),
+                        personname=item.get('personname', '').strip(),
+                    )
+                    stats['new_data'] += 1
+                except IntegrityError:
+                    # Double safety dari database constraint (jika ada race condition)
+                    stats['skipped_exists'] += 1
+                except Exception as e:
+                    stats['errors'].append(f'Gagal simpan log (ID Mesin: {pegawai_mesin_id}): {str(e)}')
+            
+            # Pindah ke URL halaman berikutnya jika ada
+            url = data.get('next')
+            
+        return stats
+
+
+class SinkronisasiResultView(TemplateView):
+    """
+    Generic Template View untuk menampilkan halaman hasil sinkronisasi.
+    """
+    template_name = 'absensi/sinkronisasi_result.html'
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        # Ambil data statistik dari session, jika tidak ada kosongkan
+        context['result'] = self.request.session.get('sinkronisasi_result', {})
+        return context
+    
+# Dashboard pengecekan kehadiran pegawai berdasarkan data log kehadiran dari mesin baru
+class LogKehadiranListView(ListView):
+    model = LogKehadiran
+    template_name = 'kehadirankegiatan/log_kehadiran_list.html'
+    context_object_name = 'log_kehadiran_list'
+    paginate_by = 50
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        pegawai_params = self.request.GET.get('pegawai')
+        context['pegawai'] = int(pegawai_params) if pegawai_params and pegawai_params.isdigit() else None
+        devicename = LogKehadiran.objects.filter(devicename__isnull=False).values_list('devicename', flat=True).distinct()
+        context['devicenames'] = devicename
+        pegawai = MappingMesinAbsensi.objects.filter(pegawai__isnull=False).select_related('pegawai')
+        context['pegawai_list'] = pegawai
+        context['title'] = 'Log Kehadiran dari Mesin Absensi'
+        context['selected'] = 'disiplin'
+        context['riwayat'] = 'active'
+        return context
+    
+    def get_queryset(self):
+        devicename = self.request.GET.get('devicename')
+        pegawai = self.request.GET.get('pegawai')
+        queryset = super().get_queryset().select_related('mapping__pegawai')
+        if devicename:
+            queryset = queryset.filter(devicename=devicename)
+        if pegawai:
+            queryset = queryset.filter(mapping__pegawai=pegawai)
+        return queryset.order_by('-datetime')
+    
+    
+from django.http import JsonResponse
+from .services import BridgeSyncService
+from django.views.decorators.http import require_POST
+from django.contrib.auth.decorators import login_required
+import json
+
+def sync_dashboard(request):
+    date_from = request.GET.get('date_from')
+    date_to = request.GET.get('date_to')
+    page = int(request.GET.get('page', 1))
+    personname = request.GET.get('personname', '').strip()
+
+    # 1. Ambil data dari Flask Bridge
+    # Kita asumsikan fetch_unsynced_by_date mengembalikan (data_list, metadata)
+    data_list, metadata = BridgeSyncService.fetch_unsynced_by_date(
+        limit=1000, 
+        date_from=date_from, 
+        date_to=date_to,
+        personname=personname,
+    )
+
+    # 2. Ambil Mapping Pegawai
+    mappings = {m.mesin_id: m for m in MappingMesinAbsensi.objects.select_related('pegawai')}
+
+    # 3. Kumpulkan Key Unik untuk Filter (ID + Datetime)
+    # Gunakan set tuple untuk pencarian O(1) yang super cepat
+    target_keys = set()
+    for log in data_list:
+        if 'id' in log and 'datetime' in log:
+            target_keys.add((str(log['id']), log['datetime']))
+
+    # 4. Ambil data yang SUDAH ADA di LogKehadiran SIMADU
+    # Kita hanya filter berdasarkan keys yang ada di data_list untuk efisiensi
+    existing_logs = {
+        (str(m_id), dt.strftime('%Y-%m-%dT%H:%M:%S') if hasattr(dt, 'strftime') else str(dt))
+        for m_id, dt in LogKehadiran.objects.filter(
+            mapping__mesin_id__in=[str(lk[0]) for lk in target_keys]
+        ).values_list('mapping__mesin_id', 'datetime')
+    }
+
+    filtered_data = []
+    for log in data_list:
+        mesin_id = str(log['id'])
+        log_datetime = log['datetime']
+        
+        # LOGIKA UTAMA: Jika sudah ada di LogKehadiran, skip (tidak perlu tampil di dashboard sync)
+        if (mesin_id, log_datetime) in existing_logs:
+            continue
+
+        mapping = mappings.get(mesin_id)
+        
+        filtered_data.append({
+            'raw_log': log,
+            'raw_log_json': json.dumps(log),
+            'mapping': mapping,
+            'is_ready': True if mapping else False,
+            # Tambahan: info status dari Bridge (biasanya False karena kita panggil endpoint 'unsynced')
+            'is_in_bridge_tracker': log.get('is_synced', False) 
+        })
+
+    # 5. Handle Parameter URL untuk Pagination agar tidak hilang
+    query_params = request.GET.copy()
+    if 'page' in query_params:
+        del query_params['page']
+    preserved_filters = query_params.urlencode()
+
+    # 6. Django Pagination
+    paginator = Paginator(filtered_data, 50)
+    page_obj = paginator.get_page(page)
+
+    context = {
+        'page_obj': page_obj,
+        'date_from': date_from,
+        'date_to': date_to,
+        'personname': personname,
+        'preserved_filters': preserved_filters,
+        'total_unsynced': len(filtered_data),
+        'title':'Data Belum Sinkron (Terbaru di Atas)',
+    }
+
+    return render(request, 'kehadirankegiatan/sync_table.html', context)
+
+
+def sync_individual_api(request):
+    """Endpoint untuk tombol 'Sinkronkan' per baris di UI"""
+    if request.method == 'POST':
+        log_data = json.loads(request.body)
+        # Eksekusi hanya untuk 1 data ini
+        count = BridgeSyncService.execute_sync([log_data])
+        return JsonResponse({'success': count > 0})
+    
+@login_required
+@require_POST
+def process_single_sync(request):
+    try:
+        # 1. Ambil data JSON yang dikirim oleh fetch JavaScript
+        data = json.loads(request.body)
+        
+        if not data:
+            return JsonResponse({'success': False, 'message': 'Data kosong'}, status=400)
+
+        # 2. Bungkus data ke dalam list karena execute_sync menerima format list/batch
+        # Data yang diterima adalah satu raw_log (dict)
+        logs_to_process = [data]
+        
+        # 3. Jalankan sinkronisasi menggunakan service yang sudah ada
+        success_count, ignored_count = BridgeSyncService.execute_sync(logs_to_process)
+        
+        if success_count > 0:
+            return JsonResponse({
+                'success': True, 
+                'message': f'Berhasil sinkronisasi: {data.get("personname")}'
+            })
+        else:
+            return JsonResponse({
+                'success': False, 
+                'message': 'Gagal sinkronisasi. Mungkin mapping belum ada.'
+            }, status=400)
+
+    except Exception as e:
+        return JsonResponse({
+            'success': False, 
+            'message': f'Server Error: {str(e)}'
+        }, status=500)
+        
+        
+
+class PenilaianKehadiranView(FormView):
+    template_name = 'kehadirankegiatan/form.html'
+    form_class = ProsesKehadiranForm
+    success_url = reverse_lazy('disiplinsdm_urls:kehadiran_list')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'title': 'Proses Penilaian Kehadiran Manual',
+            'selected': 'disiplin',
+            'url': self.success_url,
+        })
+        return context
+
+    def form_valid(self, form):
+        tanggal = form.cleaned_data['tanggal']
+        # Panggil Service
+        jumlah = KehadiranService.proses_kehadiran_massal(tanggal)
+        
+        messages.success(self.request, f"Berhasil memproses {jumlah} pegawai yang memiliki jadwal pada {tanggal}.")
+        return super().form_valid(form)
+    
+    
+class PenilaianKehadiranApelPagi(FormView):
+    template_name = "kehadirankegiatan/form.html"
+    form_class = ProsesKehadiranForm
+    success_url = reverse_lazy('disiplinsdm_urls:kehadiran_list')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'title': 'Proses Penilaian Kehadiran Apel Pagi',
+            'selected': 'disiplin',
+            'url': self.success_url,
+        })
+        return context
+
+    def form_valid(self, form):
+        tanggal = form.cleaned_data['tanggal']
+        # Panggil Service
+        jumlah = ApelPagiService.proses_penilaian_apel_massal(tanggal)
+
+        messages.success(self.request, f"Berhasil memproses {jumlah} pegawai yang apel pagi pada {tanggal}.")
+        return super().form_valid(form)

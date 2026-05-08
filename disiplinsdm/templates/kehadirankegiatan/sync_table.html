@@ -1,0 +1,196 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <div class="d-flex flex-row justify-content-between">
+            <div class="d-flex flex-row align-items-center">
+                <a href="{% url 'disiplinsdm_urls:jadwal_list' %}"><i class="fas fa-chevron-left mr-3" style="font-size:large;"></i></a>
+                <p class="h4 mb-0">{{ title }}</p>
+            </div>
+            
+        </div>
+    </div>
+    <div class="table-responsive">
+        <div class="card mb-3">
+            <div class="card-body">
+                <form method="get" class="row g-2">
+                    <div class="col-md-3">
+                        <label>Dari Tanggal</label>
+                        <input type="date" name="date_from" class="form-control"
+                            value="{{ date_from }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label>Sampai Tanggal</label>
+                        <input type="date" name="date_to" class="form-control"
+                            value="{{ date_to }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label>Cari Nama Pegawai</label>
+                        <input type="text" name="personname" class="form-control" 
+                            placeholder="Ketik nama..." value="{{ personname|default:'' }}">
+                    </div>
+                    <div class="col-md-3 align-self-end">
+                        <button type="submit" class="btn btn-primary">
+                            Filter
+                        </button>
+                        <a href="{% url 'disiplinsdm_urls:sync_dashboard' %}" class="btn btn-secondary">
+                            Reset
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Waktu (Mesin)</th>
+                    <th>Nama di Mesin</th>
+                    <th>Status Presensi</th>
+                    <th>Mapping SIMADU</th>
+                    <th>Status Tracker</th> <th>Aksi</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in page_obj %}
+                <tr id="row-{{ forloop.counter }}">
+                    <td>{{ item.raw_log.datetime }}</td>
+                    <td>
+                        {{ item.raw_log.personname }} 
+                        <small class="text-muted">(ID: {{ item.raw_log.id }})</small>
+                    </td>
+                    <td>
+                        {% if item.raw_log.direction == 'IN' %}
+                            <span class="badge bg-success">Masuk</span>
+                        {% elif item.raw_log.direction == 'OUT' %}
+                            <span class="badge bg-danger">Keluar</span>
+                        {% else %}
+                            <span class="badge bg-secondary">{{ item.raw_log.direction }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if item.mapping %}
+                            <span class="badge bg-success">{{ item.mapping.pegawai.full_name }}</span>
+                        {% else %}
+                            <span class="badge bg-danger">Belum Mapping</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if item.is_in_bridge_tracker %}
+                            <span class="badge bg-warning text-dark">In Bridge Tracker</span>
+                        {% else %}
+                            <span class="badge bg-info">New Data</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if item.is_ready %}
+                        <button class="btn btn-primary btn-sm" 
+                                onclick="doSync(this, {{ forloop.counter }})" 
+                                data-payload='{{ item.raw_log_json }}'>
+                            Sinkronkan
+                        </button>
+                        {% else %}
+                        <button class="btn btn-secondary btn-sm" disabled>Mapping Dulu</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="container mt-4">
+            <nav aria-label="Page navigation">
+                <ul class="pagination justify-content-center">
+                    
+                    {% if page_obj.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link" href="?{{ preserved_filters }}&page=1">&laquo; First</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" href="?{{ preserved_filters }}&page={{ page_obj.previous_page_number }}">Prev</a>
+                        </li>
+                    {% endif %}
+
+                    {% for num in page_obj.paginator.page_range %}
+                        {% if page_obj.number == num %}
+                            <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                        {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                            <li class="page-item">
+                                <a class="page-link" href="?{{ preserved_filters }}&page={{ num }}">{{ num }}</a>
+                            </li>
+                        {% endif %}
+                    {% endfor %}
+
+                    {% if page_obj.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="?{{ preserved_filters }}&page={{ page_obj.next_page_number }}">Next</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" href="?{{ preserved_filters }}&page={{ page_obj.paginator.num_pages }}">Last &raquo;</a>
+                        </li>
+                    {% endif %}
+
+                </ul>
+            </nav>
+        </div>
+    </div>
+</div>
+{% endblock content %}
+
+{% block script %}
+<script>
+function doSync(btn, rowIndex) {
+    // Ambil data dari atribut data-payload
+    const payloadStr = btn.getAttribute('data-payload');
+    const logData = JSON.parse(payloadStr);
+
+    // Ubah tampilan tombol agar user tahu sedang diproses
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>...';
+
+    // Kirim ke fungsi sinkronisasi (bisa via AJAX ke Django View)
+    fetch("{% url 'disiplinsdm_urls:process_single_sync' %}", {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify(logData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Hapus baris dari tabel jika sukses agar user tidak bingung
+            const row = document.getElementById('row-' + rowIndex);
+            row.classList.add('table-success');
+            setTimeout(() => row.remove(), 500);
+        } else {
+            alert('Gagal: ' + data.message);
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    });
+}
+</script>
+{% endblock script %}

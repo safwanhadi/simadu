@@ -1,0 +1,26 @@
+{
+    "status": "success",
+    "filter": {
+        "dari": "2026-02-01",
+        "sampai": "2026-02-04"
+    },
+    "count": 12,
+    "results": [
+        {
+            "no_rawat": "2026/02/02/000126",
+            "no_rm": "022100",
+            "pasien": "RAHMAN",
+            "tgl_operasi": "2026-02-03 14:13:12",
+            "ruangan": "RAWAT INAP",
+            "cara_bayar": "BPJS",
+            "diagnosa": null,
+            "paket_tindakan": "Sequestrectomy",
+            "tim_medis": [
+                {"nik": "123", "nama": "dr. Andi", "role": "Operator 1"},
+                {"nik": "456", "nama": "dr. Budi", "role": "Anestesi"},
+                // sisa tim medis
+            ],
+            "total_biaya": 3201000
+        }
+    ]
+}

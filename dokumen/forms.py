@@ -166,6 +166,24 @@ class RiwayatPenempatanForm(forms.ModelForm):
             self.fields['dokumen'].label = ''
         self.fields['tgl_sk'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['status'].label = 'Centang jika pegawai aktif dan berada diinstalasi ini'
+        
+    def clean(self):
+        cleaned_data = super().clean()
+        status = cleaned_data.get('status')
+        # Mengambil 4 field penempatan
+        lv1 = cleaned_data.get('penempatan_level1')
+        lv2 = cleaned_data.get('penempatan_level2')
+        lv3 = cleaned_data.get('penempatan_level3')
+        lv4 = cleaned_data.get('penempatan_level4')
+
+        penempatan_fields = [lv1, lv2, lv3, lv4]
+        filled_count = sum(1 for field in penempatan_fields if field)
+
+        if status and filled_count < 1:
+            raise forms.ValidationError(
+                'Untuk penempatan aktif, harap isi minimal satu level penempatan.'
+            )
+        return cleaned_data
 
 class UrutkanRiwayatPenempatanForm(forms.ModelForm):
     class Meta:

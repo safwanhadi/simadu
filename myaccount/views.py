@@ -33,17 +33,19 @@ from .forms import ProfilForm, UserAdminChangeForm
 
 
 class SimaduLoginView(LoginView):
-    template_name = 'login.html'
+    template_name = 'sso/login.html'
 
     def get_success_url(self):
         redirect_to = self.request.GET.get(self.redirect_field_name)
-        dashboard_url = reverse('dashboard_urls:dashboard_view')
-        dashboard_absensi_url = reverse('dashboard_urls:dashboard_absensi_view')
+        sso_url = reverse('myaccount_urls:sso_portal')
+        # dashboard_url = reverse('dashboard_urls:dashboard_view')
+        # dashboard_absensi_url = reverse('dashboard_urls:dashboard_absensi_view')
         # riwayat_url = reverse('riwayat_urls:riwayat_view')
-        if self.request.user.is_superuser:
-            return redirect_to if redirect_to else dashboard_url
-        else:
-            return redirect_to if redirect_to else dashboard_absensi_url
+        # if self.request.user.is_superuser:
+        #     return redirect_to if redirect_to else dashboard_url
+        # else:
+        #     return redirect_to if redirect_to else dashboard_absensi_url
+        return redirect_to if redirect_to else sso_url
     
 
 def logout_view(request):
@@ -63,7 +65,7 @@ class ChangePasswordDone(PasswordChangeDoneView):
 
 
 class ProfilView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self):
@@ -224,12 +226,29 @@ def me(request):
         "id": u.pk,
     })
 
-
 def sso_portal(request):
     # opsional: kalau ingin portal bisa diakses tanpa login, biarkan saja.
     # kalau ingin wajib login SIMADU dulu, tinggal cek request.user.is_authenticated.
-    clients = settings.SSO_CLIENTS
-    return render(request, "sso/portal.html", {"clients": clients})
+    if request.user.is_authenticated:
+        clients = settings.SSO_CLIENTS
+        Visuals = settings.APP_VISUAL
+        apps = []
+        for key, client in clients.items():
+            visual = Visuals.get(key, {})
+            app_data = {
+                "key": key,
+                "name": client.get("label", key),
+                "type": client.get("type"),
+                "icon": visual.get("icon", "fas fa-th-large"),
+                "bg_class": visual.get("bg_class", "bg-gradient-to-br from-blue-500 to-blue-600"),
+                "category": visual.get("category", "Umum"),
+            }
+            apps.append(app_data)
+
+        return render(request, "sso/portal.html", {"apps": apps})
+    else:
+        return redirect(reverse('myaccount_urls:login_view') + f"?{urlencode({'next': reverse('myaccount_urls:sso_portal')})}")
+    
 
 def sso_go(request, client_key):
     clients = settings.SSO_CLIENTS
@@ -240,8 +259,20 @@ def sso_go(request, client_key):
 
     # Kalau SIMADU sendiri: pakai login internal Django (LoginView)
     if c["type"] == "local":
-        next_url = request.GET.get("next") or "/"
-        return redirect(f'{c["login_url"]}?{urlencode({"next": next_url})}')
+        # next_url = request.GET.get("next") or "/"
+        if request.user.is_superuser:
+            return redirect(f'{c["dashboard"]}')
+        else:
+            return redirect(f'{c["dashboard_absensi"]}')
+        # redirect_to = request.GET.get('next') or "/"
+        # dashboard_url = redirect(reverse('dashboard_urls:dashboard_view'))
+        # dashboard_absensi_url = redirect(reverse('dashboard_urls:dashboard_absensi_view'))
+        # riwayat_url = redirect(reverse('riwayat_urls:riwayat_view'))
+        # if request.user.is_superuser:
+        #     return redirect_to if redirect_to else dashboard_url
+        # else:
+        #     return redirect_to if redirect_to else dashboard_absensi_url
+        
 
     # OAuth client: arahkan ke /o/authorize/ milik DOT (SIMADU)
     authorize_url = f"{settings.SSO_AUTH_BASE}/o/authorize/"

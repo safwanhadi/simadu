@@ -1,0 +1,136 @@
+{% extends 'base.html' %}
+
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block content %}
+<div class="container">
+    <div class="card">
+        <div class="card-header">
+            <div class="d-flex flex-row justify-content-between align-items-center">
+                <div class="d-flex flex-row align-items-center">
+                    <a href="{% url 'disiplinsdm_urls:jadwal_list' %}"><i class="fas fa-chevron-left mr-3" style="font-size:large;"></i></a>
+                    <p class="h4 mb-0">{{ title }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <div>
+                    <form method="get" id="filterForm" class="mb-4">
+                        <div class="row">
+                            <div class="col-md-12">
+                                <div class="form-group">
+                                    <label for="devicename">Perangkat</label>
+                                    <select name="devicename" id="devicename" class="form-control" onchange="document.getElementById('filterForm').submit();">
+                                        <option value="">Semua Perangkat</option>
+                                        {% for perangkat in devicenames %}
+                                            <option value="{{ perangkat }}" {% if perangkat == request.GET.devicename %}selected{% endif %}>
+                                                {{ perangkat }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-12">
+                                <div class="form-group">
+                                    <label for="pegawai">Pegawai</label>
+                                    <select name="pegawai" id="pegawai" class="form-control" onchange="document.getElementById('filterForm').submit();">
+                                        <option value="">Semua Pegawai</option>
+                                        {% for peg in pegawai_list %}
+                                            <option value="{{ peg.pegawai.id }}" {% if peg.pegawai.id == pegawai %}selected{% endif %}>
+                                                {{ peg.pegawai.full_name }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>No</th>
+                            <th>Nama Pegawai</th>
+                            <th>Perangkat</th>
+                            <th>Tanggal & Waktu</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in log_kehadiran_list %}
+                        <tr>
+                            <td>{{ forloop.counter }}</td>
+                            <td>{{ log.personname }}</td>
+                            <td>{{ log.devicename }}</td>
+                            <td>{{ log.datetime|date:"d M Y H:i:s" }}</td>
+                            <td>{{ log.direction }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5" class="text-center">Tidak ada data kehadiran.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+                <!-- Pagination -->
+                {% if is_paginated %}
+                <nav aria-label="Page navigation">
+                    <ul class="pagination justify-content-center">
+                        {% if page_obj.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if request.GET.inst %}&inst={{ request.GET.inst }}{% endif %}{% if request.GET.tanggal %}&tanggal={{ request.GET.tanggal }}{% endif %}" aria-label="Previous">
+                                <span aria-hidden="true">&laquo;</span>
+                            </a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled">
+                            <span class="page-link" aria-hidden="true">&laquo;</span>
+                        </li>
+                        {% endif %}
+
+                        {% for num in paginator.page_range %}
+                            {% if page_obj.number == num %}
+                                <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                            {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                                <li class="page-item"><a class="page-link" href="?page={{ num }}{% if request.GET.inst %}&inst={{ request.GET.inst }}{% endif %}{% if request.GET.tanggal %}&tanggal={{ request.GET.tanggal }}{% endif %}">{{ num }}</a></li>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if page_obj.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if request.GET.inst %}&inst={{ request.GET.inst }}{% endif %}{% if request.GET.tanggal %}&tanggal={{ request.GET.tanggal }}{% endif %}" aria-label="Next">
+                                <span aria-hidden="true">&raquo;</span>
+                            </a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled">
+                            <span class="page-link" aria-hidden="true">&raquo;</span>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock content %}
+
+{% block script %}
+{% endblock script %}

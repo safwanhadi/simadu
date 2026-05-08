@@ -1,0 +1,248 @@
+{% load static %}
+{% load socialaccount %}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Masuk | MediConnect SSO</title>
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="16x16" href="{% static 'dist/img/favicon_rsmandalika.png' %}">
+    <!-- Font & Ikon -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+        }
+        :root {
+            --primary: #0d7c7c;
+            --primary-dark: #095e5e;
+            --primary-light: #e0f5f5;
+        }
+        .bg-primary { background-color: var(--primary); }
+        .text-primary { color: var(--primary); }
+        .border-primary { border-color: var(--primary); }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+        }
+        .input-focus:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(0, 180, 180, 0.2);
+        }
+        .btn-teal {
+            background: var(--primary);
+            box-shadow: 0 6px 20px rgba(13,124,124,0.3);
+            transition: all 0.25s ease;
+        }
+        .btn-teal:hover {
+            background: var(--primary-dark);
+            box-shadow: 0 10px 30px rgba(13,124,124,0.4);
+            transform: translateY(-1px);
+        }
+        html, body {
+            overflow-x: hidden;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 md:p-8 relative overflow-hidden"
+      style="background: linear-gradient(135deg, #eef9f9 0%, #f4fcfc 100%);">
+
+    <!-- Orbs dekoratif -->
+    <div class="absolute inset-0 pointer-events-none overflow-hidden">
+        <div class="absolute w-[600px] h-[600px] bg-teal-500/10 rounded-full blur-[130px] -top-32 -right-32"></div>
+        <div class="absolute w-[450px] h-[450px] bg-teal-400/8 rounded-full blur-[110px] -bottom-24 -left-24"></div>
+    </div>
+
+    <!-- Container 2 Kolom -->
+    <div class="relative z-10 w-full max-w-6xl grid md:grid-cols-2 gap-0 rounded-3xl overflow-hidden shadow-2xl border border-teal-100/60">
+
+        <!-- ===== SISI KIRI: Branding & Informasi ===== -->
+        <div class="bg-gradient-to-br from-teal-700 to-teal-600 p-8 md:p-12 flex flex-col justify-center text-white relative overflow-hidden">
+            <!-- Orbs di dalam panel kiri -->
+            <div class="absolute -top-20 -right-20 w-72 h-72 bg-teal-400/20 rounded-full blur-3xl"></div>
+            <div class="absolute -bottom-16 -left-16 w-64 h-64 bg-teal-300/20 rounded-full blur-3xl"></div>
+
+            <div class="relative z-10">
+                <!-- Logo & Brand -->
+                <div class="flex items-center gap-3 mb-8">
+                    <div class="h-12 w-12 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
+                        <!-- <i class="ph ph-shield-check text-white text-2xl"></i> -->
+                        <img src="{% static 'dist/img/logo_rsmandalika.png' %}" alt="Logo RS" class="h-8 w-8">
+                    </div>
+                    <div>
+                        <h1 class="text-2xl font-bold tracking-tight">MedisConnect</h1>
+                        <p class="text-teal-100 text-sm">Rumah Sakit Mandalika</p>
+                    </div>
+                </div>
+
+                <!-- Badge SINGLE SIGN-ON -->
+                <span class="inline-block bg-white/20 backdrop-blur text-white text-xs font-semibold px-4 py-1.5 rounded-full uppercase tracking-wider mb-6">
+                    Single Sign-On
+                </span>
+
+                <!-- Headline -->
+                <h2 class="text-3xl md:text-4xl font-extrabold leading-tight mb-4">
+                    Akses semua sistem rumah sakit dengan satu akun.
+                </h2>
+                <p class="text-teal-100 text-sm md:text-base mb-8 leading-relaxed">
+                    Masuk sekali, lalu jelajahi seluruh aplikasi — dari aplikasi kepegawaian, keuangan, hingga rekam medis — tanpa perlu login berulang kali.
+                </p>
+
+                <!-- Fitur-fitur -->
+                <div class="space-y-3">
+                    <div class="flex items-center gap-3">
+                        <i class="ph ph-shield-check text-teal-200 text-xl"></i>
+                        <span class="font-medium">Keamanan Terenkripsi</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <i class="ph ph-lightning text-teal-200 text-xl"></i>
+                        <span class="font-medium">Akses Instan</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <i class="ph ph-devices text-teal-200 text-xl"></i>
+                        <span class="font-medium">Multi-Perangkat</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== SISI KANAN: Form Login ===== -->
+        <div class="bg-white p-8 md:p-12 flex flex-col justify-center">
+            <div class="max-w-md mx-auto w-full">
+                <!-- Judul Form -->
+                <div class="text-center mb-8">
+                    <h3 class="text-2xl font-bold text-gray-900">Masuk ke Portal</h3>
+                    <p class="text-gray-500 text-sm mt-1">Gunakan kredensial rumah sakit Anda</p>
+                </div>
+
+                <!-- Pesan Error Django -->
+                 {% if messages %}
+                    {% for message in messages %}
+                        <div class="mb-6 p-3 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl text-sm flex items-center gap-2">
+                            <i class="ph ph-warning-circle text-lg flex-shrink-0"></i>
+                            <span>{{ message }}</span>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+                {% if form.errors %}
+                <div class="mb-6 p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm flex items-center gap-2">
+                    <i class="ph ph-warning-circle text-lg flex-shrink-0"></i>
+                    <span>Email atau password salah. Silakan coba lagi.</span>
+                </div>
+                {% endif %}
+
+                <!-- Form Login -->
+                <form class="space-y-5" action="{% url 'myaccount_urls:login_view' %}" method="POST">
+                    {% csrf_token %}
+
+                    <!-- ID Karyawan / NIP -->
+                    <div>
+                        <label for="email" class="block text-sm font-semibold text-gray-700 mb-1.5">Email Anda</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
+                                <i class="ph ph-user text-lg"></i>
+                            </span>
+                            <input id="email" name="username" type="email" required
+                                   class="input-focus w-full rounded-xl border border-gray-200 py-3 pl-10 pr-4 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-0 sm:text-sm"
+                                   placeholder="Contoh: zizi@rsmandalika.com"/>
+                        </div>
+                    </div>
+
+                    <!-- Kata Sandi -->
+                    <div>
+                        <label for="password" class="block text-sm font-semibold text-gray-700 mb-1.5">Kata Sandi</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
+                                <i class="ph ph-lock text-lg"></i>
+                            </span>
+                            <input id="password" name="password" type="password" required
+                                   class="input-focus w-full rounded-xl border border-gray-200 py-3 pl-10 pr-12 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-0 sm:text-sm"
+                                   placeholder="••••••••"/>
+                            <button type="button" onclick="togglePassword()"
+                                    class="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-teal-600">
+                                <i id="toggleIcon" class="ph ph-eye text-lg"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Ingat saya & Lupa password -->
+                    <div class="flex items-center justify-between text-sm">
+                        <label class="flex items-center gap-2 cursor-pointer text-gray-600">
+                            <input type="checkbox" name="remember-me" class="h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500">
+                            Ingat saya
+                        </label>
+                        <a href="#" class="font-medium text-teal-600 hover:text-teal-700">Lupa kata sandi?</a>
+                    </div>
+
+                    <!-- Tombol Login -->
+                    <button type="submit" id="submitBtn"
+                            class="btn-teal w-full flex justify-center items-center gap-2 py-3 px-4 rounded-full text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-all duration-200">
+                        <i class="ph ph-sign-in text-lg"></i>
+                        <span id="btnText">Masuk Sekarang</span>
+                    </button>
+                </form>
+
+                <!-- Opsi SSO Eksternal -->
+                <div class="mt-6">
+                    <div class="relative flex items-center justify-center text-xs text-gray-400 mb-4">
+                        <span class="px-3 bg-white">atau masuk dengan</span>
+                    </div>
+                    
+                    <div class="flex gap-3">
+                        <a href="{% provider_login_url 'google' process='login' %}" id="googleBtn"
+                            class="flex-1 flex items-center justify-center gap-2 py-2.5 border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:bg-teal-50 hover:border-teal-200 transition">
+                                <i class="ph ph-google-logo text-lg text-red-500"></i> Google
+                            </a>
+                        <!-- <button type="button" class="flex-1 flex items-center justify-center gap-2 py-2.5 border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:bg-teal-50 hover:border-teal-200 transition">
+                            <i class="ph ph-microsoft-outlook-logo text-lg"></i> Microsoft
+                        </button> -->
+                    </div>
+                </div>
+
+                <!-- Footer kecil -->
+                <p class="text-center text-xs text-gray-400 mt-8">
+                    &copy; 2026 <span class="font-semibold text-gray-500">MedisConnect RS Mandalika</span> &middot; Enkripsi AES-256
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function togglePassword() {
+            const pwd = document.getElementById('password');
+            const icon = document.getElementById('toggleIcon');
+            if (pwd.type === 'password') {
+                pwd.type = 'text';
+                icon.classList.replace('ph-eye', 'ph-eye-slash');
+            } else {
+                pwd.type = 'password';
+                icon.classList.replace('ph-eye-slash', 'ph-eye');
+            }
+        }
+
+        document.querySelector('form').addEventListener('submit', function() {
+            const btn = document.getElementById('submitBtn');
+            const btnText = document.getElementById('btnText');
+            btnText.innerHTML = '<i class="ph ph-spinner animate-spin mr-1"></i> Memproses...';
+            btn.disabled = true;
+            btn.classList.add('opacity-80', 'cursor-not-allowed');
+        });
+    </script>
+    <script>
+        // Tambahkan class atau ID pada tag <a> Google tadi, misal id="googleBtn"
+        document.getElementById('googleBtn').addEventListener('click', function() {
+            this.innerHTML = '<i class="ph ph-circle-notch animate-spin text-lg"></i> Menghubungkan...';
+            this.classList.add('opacity-70', 'pointer-events-none');
+        });
+    </script>
+</body>
+</html>

@@ -35,6 +35,11 @@
                         <form method="post" enctype="multipart/form-data">
                             {% csrf_token %}
                             {{form | crispy}}
+                            {% if form.non_field_errors %}
+                                <div class="alert alert-danger">
+                                    {{ form.non_field_errors }}
+                                </div>
+                            {% endif %}
                             <input type="submit" value="Simpan" class="btn btn-success">
                         </form>
                     </div>

@@ -1,16 +1,137 @@
-{% extends "auth_base.html" %}
-{% block content %}
-<div class="container py-4">
-  <h3>SSO Portal</h3>
-  <p>Pilih aplikasi yang ingin Anda akses.</p>
+{% load static %}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal SSO | Rumah Sakit Mandalika</title>
+    
+    <!-- Tailwind CSS CDN (gunakan sesuai preferensi) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="16x16" href="{% static 'dist/img/favicon_rsmandalika.png' %}">
+    <!-- Font Awesome 6 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: #f8fafc;
+        }
+        .app-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .app-card:hover {
+            transform: translateY(-6px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+        /* Sticky navbar dengan backdrop blur */
+        .navbar-glass {
+            backdrop-filter: blur(10px);
+            background-color: rgba(255, 255, 255, 0.85);
+        }
+    </style>
+</head>
+<body class="antialiased text-gray-800">
 
-  <div class="list-group">
-    {% for key, c in clients.items %}
-      <a class="list-group-item list-group-item-action"
-         href="{% url 'myaccount_urls:sso_go' key %}">
-        {{ c.label }}
-      </a>
-    {% endfor %}
-  </div>
-</div>
-{% endblock %}
+    <!-- ========== NAVBAR ========== -->
+    <nav class="navbar-glass sticky top-0 z-50 border-b border-gray-200 px-4 md:px-8 py-3 flex justify-between items-center">
+        <!-- Brand -->
+        <div class="flex items-center space-x-3">
+            <div class="h-10 w-10 bg-teal-600 rounded-xl flex items-center justify-center shadow-lg shadow-teal-200">
+                <img src="{% static 'dist/img/logo_rsmandalika.png' %}" alt="Logo RS" class="h-8 w-8 rounded-full">
+            </div>
+            <div>
+                <h1 class="font-bold text-xl tracking-tight leading-none">MedisConnect</h1>
+                <span class="text-xs text-gray-500">Rumah Sakit Mandalika</span>
+            </div>
+        </div>
+        
+        <!-- User Area -->
+        <div class="flex items-center space-x-6">
+            <div class="hidden md:block text-right">
+                <p class="text-sm font-semibold leading-tight">{{ user.get_full_name|default:"User" }}</p>
+                <p class="text-xs text-gray-500">{{ user.email|default:"user@rs.id" }}</p>
+            </div>
+            <div class="relative group">
+                <img src="https://ui-avatars.com/api/?name={{ user.username|urlencode }}&background=0d9488&color=fff&size=128" 
+                     alt="avatar" 
+                     class="h-10 w-10 rounded-full cursor-pointer border-2 border-transparent group-hover:border-teal-500 transition-all">
+                <!-- Dropdown -->
+                <div class="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg py-1 hidden group-hover:block border border-gray-100 z-50">
+                    <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-teal-50 flex items-center gap-2">
+                        <i class="fas fa-user-circle"></i> Profil Saya
+                    </a>
+                    <a href="{% url 'myaccount_urls:logout_view' %}" class="block px-4 py-2 text-sm text-red-600 hover:bg-red-50 font-medium flex items-center gap-2">
+                        <i class="fas fa-sign-out-alt"></i> Keluar
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ========== MAIN CONTENT ========== -->
+    <main class="max-w-7xl mx-auto px-6 py-12">
+        <!-- Selamat Datang -->
+        <div class="mb-10">
+            <h2 class="text-3xl font-bold text-gray-900">
+                Selamat Datang, {{ user.first_name|default:"Rekan" }}! 👋
+            </h2>
+            <p class="text-gray-500 mt-2">Pilih aplikasi yang ingin Anda akses hari ini.</p>
+        </div>
+
+        <!-- Pencarian Aplikasi -->
+        <div class="relative max-w-md mb-10">
+            <span class="absolute inset-y-0 left-0 pl-3 flex items-center">
+                <i class="fas fa-search text-gray-400"></i>
+            </span>
+            <input type="text" id="appSearch" placeholder="Cari aplikasi..." 
+                class="block w-full pl-10 pr-3 py-3 border border-gray-200 rounded-xl leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 sm:text-sm shadow-sm">
+        </div>
+
+        <!-- Grid Aplikasi -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6" id="appsGrid">
+            {% for app in apps %}
+            <a href="{% url 'myaccount_urls:sso_go' client_key=app.key %}" 
+               class="app-item app-card bg-white p-6 rounded-2xl border border-gray-100 flex flex-col items-center text-center shadow-sm hover:shadow-xl transition-all duration-300">
+                <!-- Ikon Aplikasi -->
+                <div class="{{ app.bg_class }} w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform duration-300 group-hover:scale-110">
+                    <i class="{{ app.icon }} text-white text-xl"></i>
+                </div>
+                <!-- Nama & Kategori -->
+                <h3 class="font-bold text-gray-800 text-sm md:text-base">{{ app.name }}</h3>
+                <span class="text-xs text-gray-400 mt-1 uppercase tracking-wider">{{ app.category }}</span>
+            </a>
+            {% empty %}
+            <div class="col-span-full text-center py-12 text-gray-400">
+                <i class="fas fa-box-open text-4xl mb-3 block"></i>
+                <p>Tidak ada aplikasi yang tersedia.</p>
+            </div>
+            {% endfor %}
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="text-center text-gray-400 text-xs pb-6">
+        &copy; 2026 MedisConnect RS Mandalika — SSO Terintegrasi &middot; Keamanan AES-256
+    </footer>
+
+    <!-- Script Pencarian -->
+    <script>
+        document.getElementById('appSearch').addEventListener('input', function(e) {
+            const term = e.target.value.toLowerCase();
+            document.querySelectorAll('.app-item').forEach(item => {
+                const name = item.querySelector('h3').innerText.toLowerCase();
+                const category = item.querySelector('span').innerText.toLowerCase();
+                if (name.includes(term) || category.includes(term)) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

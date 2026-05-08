@@ -32,11 +32,13 @@
                 <a href="{% url 'disiplinsdm_urls:salin_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-secondary">Copy jadwal</a>
                 <a href="{% url 'disiplinsdm_urls:salin_jadwal_instalasi' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-warning">Copy instalasi</a>
                 <a href="{% url 'disiplinsdm_urls:evaluasi_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-success">Cek Status Jadwal</a>
+                <a href="{% url 'disiplinsdm_urls:rekap_piket' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-info">Rekap Piket</a>
             {% elif request.user.is_staff %}
                 <a href="{% url 'disiplinsdm_urls:salin_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-secondary">Copy jadwal</a>
                 <a href="{% url 'disiplinsdm_urls:salin_jadwal_instalasi' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-warning">Copy jadwal instalasi</a>
                 <a href="{% url 'disiplinsdm_urls:evaluasi_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-success">Cek Status Jadwal</a>
                 <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:kehadiran_list' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Kehadiran</a>
+                <a href="{% url 'disiplinsdm_urls:rekap_piket' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-info">Rekap Piket</a>
             {% else %}
             <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:kehadiran_list' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Kehadiran</a>
             {% endif %}

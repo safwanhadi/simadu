@@ -98,18 +98,18 @@ from .forms import (
 
 # Create your views here.
 
-def update_old_file(data):
-    if data_submitted.file: # Ini akan True jika file baru di-upload
-        # 3. Cek apakah file fisik lama benar-benar ada di disk
-        if os.path.exists(berkala_existing.file.path):
-            try:
-                # 4. Hapus file lama
-                os.remove(berkala_existing.file.path)
-                print(f"File lama {berkala_existing.file.path} berhasil dihapus.")
-            except OSError as e:
-                print(f"Gagal menghapus file lama {berkala_existing.file.path}: {e}")
-        return None
-    return None
+# def update_old_file(data):
+#     if data_submitted.file: # Ini akan True jika file baru di-upload
+#         # 3. Cek apakah file fisik lama benar-benar ada di disk
+#         if os.path.exists(berkala_existing.file.path):
+#             try:
+#                 # 4. Hapus file lama
+#                 os.remove(berkala_existing.file.path)
+#                 print(f"File lama {berkala_existing.file.path} berhasil dihapus.")
+#             except OSError as e:
+#                 print(f"Gagal menghapus file lama {berkala_existing.file.path}: {e}")
+#         return None
+#     return None
 
 class NotFoundPage(LoginRequiredMixin, View):
     def get(self, request, *args, **kwargs):
@@ -468,7 +468,7 @@ class RiwayatPendidikanView(LoginRequiredMixin, View):
 
 
 class RiwayatPendidikanUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -607,7 +607,7 @@ class CheckRiwayatPanggol:
                 return data1
             data2 = second_last_date[1].get('tmt_gol')+relativedelta(months=interval_date.periode_max)
             return data2
-        elif nip and len(second_last_date) == 1:
+        elif nip and len(second_last_date) == 1 and hasattr(second_last_date[0], 'tmt_gol') and second_last_date[0].get('tmt_gol') is not None:
             data3 = second_last_date[0].get('tmt_gol')+relativedelta(months=interval_date.periode_max)
             return data3
         return None
@@ -616,7 +616,7 @@ class CheckRiwayatPanggol:
 template_panggol = 'riwayat_panggol/riwayat_panggol_master.html'
 
 class RiwayatPanggolView(LoginRequiredMixin, CheckRiwayatPanggol, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_user(self, id):
@@ -693,7 +693,7 @@ class RiwayatPanggolView(LoginRequiredMixin, CheckRiwayatPanggol, View):
 
 
 class RiwayatPanggolUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -944,7 +944,7 @@ class CheckRiwayatJabatan:
         
 
 class RiwayatJabatanView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_jabatan_object(self, user, request=None):
@@ -1013,7 +1013,7 @@ class RiwayatJabatanView(LoginRequiredMixin, View):
 
 
 class RiwayatJabatanUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -1154,7 +1154,7 @@ class RiwayatJabatanDeleteView(SuccessMessageMixin, DeleteView):
     
 
 class RiwayatPengangkatanView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get(self, request, **kwargs):
@@ -1204,7 +1204,7 @@ class RiwayatPengangkatanView(LoginRequiredMixin, View):
     
 
 class RiwayatPengangkatanUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -1342,7 +1342,7 @@ class RiwayatPengangkatanDeleteView(SuccessMessageMixin, DeleteView):
     
 
 class RiwayatPenempatanView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id):
@@ -1376,7 +1376,7 @@ class RiwayatPenempatanView(LoginRequiredMixin, View):
         if selected_nip:
             nip = selected_nip
             data = RiwayatPenempatan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen').order_by('-status')
-        form = RiwayatPenempatanForm(initial=initial)
+        form = RiwayatPenempatanForm(initial=initial, request=request)
         update_form = False
         if get_id:
             update_form = True
@@ -1404,7 +1404,7 @@ class RiwayatPenempatanView(LoginRequiredMixin, View):
         get_id = kwargs.get('id')
         detail = self.get_object(get_id)
         instance = self.get_object(get_id)
-        form = RiwayatPenempatanForm(request.POST, request.FILES, instance=instance)
+        form = RiwayatPenempatanForm(request.POST, request.FILES, instance=instance, request=request)
         if form.is_valid():
             riwayat_penempatan = form.save(commit=False)
             riwayat_penempatan.pegawai = form.cleaned_data.get('pegawai')
@@ -1554,7 +1554,7 @@ class RiwayatPenempatanDeleteView(SuccessMessageMixin, DeleteView):
     
 
 class RiwayatGajiBerkalaView(LoginRequiredMixin, GajiBerkalaCheck, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get(self, request, **kwargs):
@@ -1605,7 +1605,7 @@ class RiwayatGajiBerkalaView(LoginRequiredMixin, GajiBerkalaCheck, View):
 
 
 class RiwayatGajiBerkalaUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -1732,7 +1732,7 @@ class RiwayatGajiBerkalaDeleteView(SuccessMessageMixin, DeleteView):
 
 
 class RiwayatKinerjaView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get(self, request, **kwargs):
@@ -1781,7 +1781,7 @@ class RiwayatKinerjaView(LoginRequiredMixin, View):
 
 
 class RiwayatKinerjaUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -1908,7 +1908,7 @@ class RiwayatKinerjaDeleteView(SuccessMessageMixin, DeleteView):
     
 
 class RiwayatPenghargaanView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get(self, request, **kwargs):
@@ -1957,7 +1957,7 @@ class RiwayatPenghargaanView(LoginRequiredMixin, View):
     
 
 class RiwayatPenghargaanUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id):
@@ -2083,7 +2083,7 @@ class RiwayatPenghargaanDeleteView(SuccessMessageMixin, DeleteView):
     
 
 class RiwayatHukumanView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get(self, request, **kwargs):
@@ -2132,7 +2132,7 @@ class RiwayatHukumanView(LoginRequiredMixin, View):
     
 
 class RiwayatHukumanUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id):
@@ -2258,7 +2258,7 @@ class RiwayatHukumanDeleteView(SuccessMessageMixin, DeleteView):
     
 
 class RiwayatCutiView(LoginRequiredMixin, CheckCuti, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get(self, request, **kwargs):
@@ -2309,7 +2309,7 @@ class RiwayatCutiView(LoginRequiredMixin, CheckCuti, View):
 
 
 class RiwayatCutiUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -2402,7 +2402,7 @@ class UrutkanRiwayatCutiView(LoginRequiredMixin, SuccessMessageMixin, UpdateView
     
 
 class RiwayatCutiMonitoringListView(LoginRequiredMixin, ListView):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
     model = RiwayatCuti
     template_name = '10_riwayat_cuti/riwayat_cuti_monitoring.html'
@@ -2424,30 +2424,30 @@ class RiwayatCutiMonitoringListView(LoginRequiredMixin, ListView):
         )
 
     def _build_penempatan_filter(self, penempatan):
-        filters = Q(pegawai__riwayatpenempatan__status=True)
+        filters = Q(pegawai__riwayat_penempatan__status=True)
         if penempatan.penempatan_level4:
             unit = penempatan.penempatan_level4
-            filters &= Q(pegawai__riwayatpenempatan__penempatan_level4=unit)
+            filters &= Q(pegawai__riwayat_penempatan__penempatan_level4=unit)
         elif penempatan.penempatan_level3:
             sub_bidang = penempatan.penempatan_level3
             filters &= (
-                Q(pegawai__riwayatpenempatan__penempatan_level3=sub_bidang)
-                | Q(pegawai__riwayatpenempatan__penempatan_level4__sub_bidang=sub_bidang)
+                Q(pegawai__riwayat_penempatan__penempatan_level3=sub_bidang)
+                | Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang=sub_bidang)
             )
         elif penempatan.penempatan_level2:
             bidang = penempatan.penempatan_level2
             filters &= (
-                Q(pegawai__riwayatpenempatan__penempatan_level2=bidang)
-                | Q(pegawai__riwayatpenempatan__penempatan_level3__bidang=bidang)
-                | Q(pegawai__riwayatpenempatan__penempatan_level4__sub_bidang__bidang=bidang)
+                Q(pegawai__riwayat_penempatan__penempatan_level2=bidang)
+                | Q(pegawai__riwayat_penempatan__penempatan_level3__bidang=bidang)
+                | Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang=bidang)
             )
         elif penempatan.penempatan_level1:
             unor = penempatan.penempatan_level1
             filters &= (
-                Q(pegawai__riwayatpenempatan__penempatan_level1=unor)
-                | Q(pegawai__riwayatpenempatan__penempatan_level2__unor=unor)
-                | Q(pegawai__riwayatpenempatan__penempatan_level3__bidang__unor=unor)
-                | Q(pegawai__riwayatpenempatan__penempatan_level4__sub_bidang__bidang__unor=unor)
+                Q(pegawai__riwayat_penempatan__penempatan_level1=unor)
+                | Q(pegawai__riwayat_penempatan__penempatan_level2__unor=unor)
+                | Q(pegawai__riwayat_penempatan__penempatan_level3__bidang__unor=unor)
+                | Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang__unor=unor)
             )
         return filters
 
@@ -2516,7 +2516,7 @@ class RiwayatCutiMonitoringListView(LoginRequiredMixin, ListView):
     
         
 class RiwayatDiklatListView(LoginRequiredMixin, ListView):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
     model = Users
     template_name = '11_riwayat_diklat/riwayat_diklat_list_pegawai.html'
@@ -2532,15 +2532,15 @@ class RiwayatDiklatListView(LoginRequiredMixin, ListView):
             ).distinct()
             return queryset
         if self.request.user.is_staff:
-            queryset = data.filter(riwayatpenempatan__penempatan_level3__sub_bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan
+            queryset = data.filter(riwayat_penempatan__penempatan_level3__sub_bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan
             ).values('id', 'riwayatdiklat__tgl_mulai__year', 'first_name', 'last_name', 'profil_user__nip').annotate(
                 frekuensi_diklat=Count('riwayatdiklat', distinct=True),
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True) 
-            ).distinct()|data.filter(riwayatpenempatan__penempatan_level2__bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan
+            ).distinct()|data.filter(riwayat_penempatan__penempatan_level2__bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan
             ).values('id', 'riwayatdiklat__tgl_mulai__year', 'first_name', 'last_name', 'profil_user__nip').annotate(
                 frekuensi_diklat=Count('riwayatdiklat', distinct=True),
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True)
-            ).distinct()|data.filter(riwayatpenempatan__penempatan_level1__unor=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan
+            ).distinct()|data.filter(riwayat_penempatan__penempatan_level1__unor=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan
             ).values('id', 'riwayatdiklat__tgl_mulai__year', 'first_name', 'last_name', 'profil_user__nip').annotate(
                 frekuensi_diklat=Count('riwayatdiklat', distinct=True),
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True)
@@ -2567,7 +2567,7 @@ class RiwayatDiklatListView(LoginRequiredMixin, ListView):
     
 
 class RiwayatDiklatDetailView(LoginRequiredMixin, DeleteView):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
     model = Users
     template_name = '11_riwayat_diklat/riwayat_diklat_list_perorang.html'
@@ -2586,7 +2586,7 @@ class RiwayatDiklatDetailView(LoginRequiredMixin, DeleteView):
             
 
 class RiwayatDiklatCreateView(LoginRequiredMixin, CreateView):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
     model = RiwayatDiklat
     form_class = RiwayatDiklatForm
@@ -2615,7 +2615,7 @@ class RiwayatDiklatCreateView(LoginRequiredMixin, CreateView):
         return super().form_invalid(form)
                 
 class RiwayatDiklatView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get(self, request, **kwargs):
@@ -2678,13 +2678,13 @@ class RiwayatDiklatPegawaiView(LoginRequiredMixin, ListView):
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran')
             )
         elif self.request.user.is_staff:
-            data = Users.objects.filter(riwayatpenempatan__penempatan_level3__sub_bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan).annotate(
+            data = Users.objects.filter(riwayat_penempatan__penempatan_level3__sub_bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan).annotate(
                 frekuensi_diklat=Count('riwayatdiklat', distinct=True),
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True) 
-            ).distinct()|Users.objects.filter(riwayatpenempatan__penempatan_level2__bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan).annotate(
+            ).distinct()|Users.objects.filter(riwayat_penempatan__penempatan_level2__bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan).annotate(
                 frekuensi_diklat=Count('riwayatdiklat', distinct=True),
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True)
-            ).distinct()|Users.objects.filter(riwayatpenempatan__penempatan_level1__unor=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan).annotate(
+            ).distinct()|Users.objects.filter(riwayat_penempatan__penempatan_level1__unor=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan).annotate(
                 frekuensi_diklat=Count('riwayatdiklat', distinct=True),
                 jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True)
             ).distinct()
@@ -2708,7 +2708,7 @@ class RiwayatDiklatPegawaiView(LoginRequiredMixin, ListView):
     
     
 class RiwayatDiklatUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -2835,7 +2835,7 @@ class RiwayatDiklatDeleteView(SuccessMessageMixin, DeleteView):
     
 
 class RiwayatKompetensiView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get(self, request, *args, **kwargs):
@@ -2884,7 +2884,7 @@ class RiwayatKompetensiView(LoginRequiredMixin, View):
         
 
 class RiwayatKomptensiUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -3010,7 +3010,7 @@ class RiwayatKompetensiDeleteView(SuccessMessageMixin, DeleteView):
 
 
 class RiwayatOrganisasiView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get(self, request, **kwargs):
@@ -3059,7 +3059,7 @@ class RiwayatOrganisasiView(LoginRequiredMixin, View):
 
 
 class RiwayatOrganisasiUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -3186,7 +3186,7 @@ class RiwayatOrganisasiDeleteView(SuccessMessageMixin, DeleteView):
 
 
 class RiwayatProfesiView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get(self, request, **kwargs):
@@ -3236,7 +3236,7 @@ class RiwayatProfesiView(LoginRequiredMixin, View):
     
 
 class RiwayatProfesiUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -3325,7 +3325,7 @@ class RiwayatProfesiDeleteView(SuccessMessageMixin, DeleteView):
 
 
 class RiwayatSIPProfesiView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_str_object(self, id):
@@ -3370,7 +3370,7 @@ class RiwayatSIPProfesiView(LoginRequiredMixin, View):
 
 
 class RiwayatSIPProfesiUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_str_object(self, id):
@@ -3504,7 +3504,7 @@ class RiwayatSIPDeleteView(SuccessMessageMixin, DeleteView):
 
 
 class RiwayatBekerjaView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get(self, request, **kwargs):
@@ -3552,7 +3552,7 @@ class RiwayatBekerjaView(LoginRequiredMixin, View):
 
 
 class RiwayatBekerjaUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -3679,7 +3679,7 @@ class RiwayatBekerjaDeleteView(SuccessMessageMixin, DeleteView):
 
 
 class RiwayatKeluargaView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get(self, request, **kwargs):
@@ -3735,7 +3735,7 @@ class RiwayatKeluargaView(LoginRequiredMixin, View):
 
 
 class RiwayatKeluargaUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -3827,7 +3827,7 @@ class RiwayatKeluargaDeleteView(SuccessMessageMixin, DeleteView):
 
 
 class RiwayatAnggotaKeluargaView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -3899,7 +3899,7 @@ class RiwayatAnggotaKeluargaView(LoginRequiredMixin, View):
 
 
 class RiwayatAnggotaKeluargaUpdateView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get_object(self, id, request=None):
@@ -4017,7 +4017,7 @@ class RiwayatOrangTuaDeleteView(SuccessMessageMixin, DeleteView):
 
 
 class RiwayatInovasiView(LoginRequiredMixin, View):
-    login_url = '/accounts/login/'
+    login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
     def get(self, request, *args, **kwargs):

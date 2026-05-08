@@ -1,11 +1,11 @@
 from django.db import models
 from django.db.models import ExpressionWrapper, DurationField
-from datetime import timedelta
 from django.dispatch import receiver
 from django.db.models.signals import pre_save
 from django.template.defaultfilters import slugify
 from django.db.models import Sum, Case, When, F, Q, Count
-from datetime import datetime, date
+from django.utils import timezone
+from datetime import datetime, timedelta, date
 from .utils import hitung_standar_jam_kerja, hitung_standar_max_jam_kerja, jam_standar_min_hari, jam_standar_max_hari
 
 # Create your models here.
@@ -105,19 +105,48 @@ class JenisSDMPerinstalasi(models.Model):
     def __str__(self):
         return f'{self.pegawai.full_name} ({self.bulan}/{self.tahun}) - {self.kurang_lebih_jam_kerja}'
     
+    # @property
+    # def kurang_lebih_jam_kerja(self):
+    #     total = 0
+    #     for jadwal in self.jadwaldinassdm_set.select_related('kategori_jadwal'):
+    #         datang = jadwal.kategori_jadwal.waktu_datang if hasattr(jadwal, 'kategori_jadwal') and hasattr(jadwal.kategori_jadwal, 'waktu_datang') else None
+    #         pulang = jadwal.kategori_jadwal.waktu_pulang if hasattr(jadwal, 'kategori_jadwal') and hasattr(jadwal.kategori_jadwal, 'waktu_pulang') else None
+    #         if datang and pulang:
+    #             dt_mulai = datetime.combine(date.today(), datang)
+    #             dt_selesai = datetime.combine(date.today(), pulang)
+    #             if dt_selesai < dt_mulai:
+    #                 dt_selesai += timedelta(days=1)
+    #             durasi_jam = (dt_selesai - dt_mulai).total_seconds() / 3600
+    #             total += durasi_jam
+    #     return round(total, 1)
+    
     @property
     def kurang_lebih_jam_kerja(self):
-        total = 0
+        total = 0.0
+        tz = timezone.get_current_timezone()
+
         for jadwal in self.jadwaldinassdm_set.select_related('kategori_jadwal'):
-            datang = jadwal.kategori_jadwal.waktu_datang if hasattr(jadwal, 'kategori_jadwal') and hasattr(jadwal.kategori_jadwal, 'waktu_datang') else None
-            pulang = jadwal.kategori_jadwal.waktu_pulang if hasattr(jadwal, 'kategori_jadwal') and hasattr(jadwal.kategori_jadwal, 'waktu_pulang') else None
+            kj = getattr(jadwal, 'kategori_jadwal', None)
+            datang = getattr(kj, 'waktu_datang', None)
+            pulang = getattr(kj, 'waktu_pulang', None)
+
             if datang and pulang:
-                dt_mulai = datetime.combine(date.today(), datang)
-                dt_selesai = datetime.combine(date.today(), pulang)
+                dt_mulai = timezone.make_aware(
+                    datetime.combine(date.today(), datang),
+                    tz
+                )
+                dt_selesai = timezone.make_aware(
+                    datetime.combine(date.today(), pulang),
+                    tz
+                )
+
+                # shift malam
                 if dt_selesai < dt_mulai:
                     dt_selesai += timedelta(days=1)
+
                 durasi_jam = (dt_selesai - dt_mulai).total_seconds() / 3600
                 total += durasi_jam
+
         return round(total, 1)
     
     @property
@@ -324,3 +353,53 @@ class KehadiranKegiatan(models.Model):
         if self.hadir:
             return f'{self.pegawai.pegawai.full_name} Hadir'
         return f'{self.pegawai.pegawai.full_name} Tidak hadir'
+
+    
+class MappingMesinAbsensi(models.Model):
+    mesin_id = models.CharField(max_length=255, unique=True, verbose_name="ID Pegawai Mesin")
+    pegawai = models.OneToOneField('myaccount.Users', on_delete=models.CASCADE, verbose_name="Pegawai SIMADU")
+    
+    class Meta:
+        verbose_name = "Mapping Mesin Absensi"
+        verbose_name_plural = "Mapping Mesin Absensi"
+    
+    def __str__(self):
+        return f'Mesin ID: {self.mesin_id} - Pegawai: {self.pegawai.full_name}'
+      
+    
+class LogKehadiran(models.Model):
+    mapping = models.ForeignKey(MappingMesinAbsensi, on_delete=models.CASCADE)
+    datetime = models.DateTimeField()
+    direction = models.CharField(max_length=10)  # 'IN' atau 'OUT'
+    devicename = models.CharField(max_length=255)
+    personname = models.CharField(max_length=255)
+    
+    class Meta:
+        verbose_name = "Log Kehadiran"
+        verbose_name_plural = "Log Kehadiran"
+        # Mencegah duplikasi jika pegawai melakukan presensi ulang (shift ganti)
+        constraints = [
+            models.UniqueConstraint(
+                fields=['mapping', 'datetime', 'direction'],
+                name='unique_log_pegawai_waktu_arah'
+            )
+        ]
+        ordering = ['-datetime'] # Default urutkan data terbaru di atas
+        indexes = [
+            models.Index(fields=['mapping', 'datetime']),
+        ]
+    
+    def __str__(self):
+        return f'{self.personname} - {self.direction} at {self.datetime} (Device: {self.devicename})'
+
+
+# class AttLog(models.Model):
+#     id = models.CharField(max_length=255, primary_key=True)
+#     datetime = models.DateTimeField()
+#     date = models.DateField()
+#     time = models.TimeField()
+#     direction = models.CharField(max_length=10)  # 'IN' atau 'OUT'
+#     devicename = models.CharField(max_length=255)
+#     devicesn = models.CharField(max_length=255)
+#     personname = models.CharField(max_length=255)
+#     cardno = models.CharField(max_length=255)
