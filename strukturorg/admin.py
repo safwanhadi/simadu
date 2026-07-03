@@ -20,12 +20,17 @@ class StandarInstalasiAdmin(admin.ModelAdmin):
     
 class UnitInstalasiAdmin(admin.ModelAdmin):
       list_display = ('instalasi', 'sub_bidang', 'slug')
+      autocomplete_fields = ['nama_pimpinan']
       # search_fields = ['instalasi', 'sub_bidang', ]
+      
+class SubBidangAdmin(admin.ModelAdmin):
+    list_display = ('sub_bidang', 'bidang')
+    autocomplete_fields = ['nama_pimpinan']
 
 admin.site.register(InstansiDaerah)
 admin.site.register(SatuanKerjaInduk)
 admin.site.register(UnitOrganisasi)
 admin.site.register(Bidang)
-admin.site.register(SubBidang)
+admin.site.register(SubBidang, SubBidangAdmin)
 admin.site.register(StandarSDM)
 admin.site.register(UnitInstalasi, UnitInstalasiAdmin)

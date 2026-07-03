@@ -1,0 +1,127 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title_page %}{{ title_page }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4" style="background-color: #f8f9fa; min-height: 100vh;">
+    
+    <div class="mb-3">
+        <a href="{% url 'disiplinsdm_urls:rekap_kehadiran_bulanan' %}?bulan={{ selected_bulan }}&tahun={{ selected_tahun }}" class="btn btn-sm btn-light border text-secondary fw-semibold shadow-sm">
+            <i class="fas fa-arrow-left me-2"></i> Kembali ke Rekap Bulanan
+        </a>
+    </div>
+
+    <div class="card bg-white text-white border-0 shadow-sm mb-4">
+        <div class="card-body p-4">
+            <div class="d-flex align-items-center">
+                <div class="bg-primary text-primary rounded-circle d-flex align-items-center justify-content-center shadow mr-2" style="width: 55px; height: 55px;">
+                    <i class="fas fa-user fa-lg"></i>
+                </div>
+                <div class="ms-3 flex-grow-1">
+                    <h4 class="mb-1 text-capitalize fw-bold" style="letter-spacing: 0.3px;">{{ pegawai.full_name }}</h4>
+                    <div class="small opacity-85 d-flex flex-wrap gap-5">
+                        <span><i class="fas fa-id-card me-1"></i> ID Pegawai: <strong>{{ pegawai.profil_user.nip|default:"-" }}</strong></span>
+                        <span><i class="fas fa-map-marker-alt me-1 ml-2"></i> Penempatan: 
+                            <strong>
+                                {% for item in pegawai.riwayat_penempatan.all %}
+                                    {% if item.status %}
+                                        {{ item.penempatan }}
+                                    {% endif %}
+                                {% endfor %}
+                            </strong>
+                        </span>
+                    </div>
+                </div>
+                <div class="text-end d-none d-md-block">
+                    <span class="badge bg-dark bg-opacity-25 px-3 py-2 border border-white border-opacity-25 rounded fs-6">
+                        <i class="fas fa-calendar-alt me-1"></i> Periode: {{ label_periode }}
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white py-3 border-bottom border-light d-flex align-items-center">
+            <h5 class="card-title h6 mb-0 text-dark fw-bold">
+                <i class="fas fa-history text-secondary me-2"></i> Jurnal Aktivitas Presensi Harian
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" style="font-size: 0.88rem;">
+                    <thead class="table-light text-secondary text-uppercase fw-bold" style="font-size: 0.75rem; border-bottom: 2px solid #edf2f7;">
+                        <tr>
+                            <th class="ps-4" style="width: 15%;">Tanggal</th>
+                            <th class="text-center" style="width: 15%;">Status Final</th>
+                            <th class="ps-3" style="width: 35%;">Jam Presensi</th>
+                            <th class="ps-3" style="width: 30%;">Keterangan Tambahan</th>
+                            <th class="text-center" style="width: 5%;">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for hari in riwayat_harian %}
+                            <tr style="border-bottom: 1px solid #edf2f7;">
+                                <td class="ps-4">
+                                    <div class="fw-bold text-dark">{{ hari.tanggal|date:"d M Y" }}</div>
+                                    <small class="text-muted text-capitalize">{{ hari.tanggal|date:"l" }}</small>
+                                </td>
+                                
+                                <td class="text-center">
+                                    <span class="badge rounded border border-{{ hari.status_css }} text-{{ hari.status_css }} bg-{{ hari.status_css }} bg-opacity-10 px-3 py-1.5 fw-bold w-75" style="font-size: 0.75rem; letter-spacing: 0.5px;">
+                                        {{ hari.status_final }}
+                                    </span>
+                                </td>
+                                
+                                <td class="ps-3">
+                                    {% if hari.has_logs %}
+                                        <div class="d-flex flex-wrap gap-2 py-1">
+                                            {% for detak in hari.list_detak_log %}
+                                                <div class="border rounded text-center shadow-sm" style="min-width: 90px; font-size: 0.78rem; overflow: hidden;">
+                                                    <div class="bg-light text-muted py-0.5 border-bottom px-2 font-weight-bold text-uppercase" style="font-size: 0.65rem;">
+                                                        {{ detak.label_tipe }}
+                                                    </div>
+                                                    <div class="p-1 fw-bold text-dark fs-6">
+                                                        {{ detak.jam|date:"H:i" }}
+                                                    </div>
+                                                    {% if detak.ketepatan %}
+                                                        <div class="bg-{{ detak.bg_box }} py-0.5 px-1 font-weight-semibold" style="font-size: 0.65rem;">
+                                                            {{ detak.ketepatan }}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            {% endfor %}
+                                        </div>
+                                    {% else %}
+                                        <span class="text-warning small d-inline-flex align-items-center">
+                                            <i class="fas fa-exclamation-triangle me-1"></i> Tidak ada ketukan mesin/absen harian
+                                        </span>
+                                    {% endif %}
+                                </td>
+                                
+                                <td class="ps-3 text-muted small" style="white-space: normal; line-height: 1.4;">
+                                    {{ hari.keterangan_tambahan|default:"-" }}
+                                </td>
+                                
+                                <td class="text-center pe-3">
+                                    {% if request.user.is_superuser and hari.id %}
+                                        <a href="{% url 'disiplinsdm_urls:update_kehadiran_pegawai' hari.id %}?bulan={{request.GET.bulan}}&tahun={{request.GET.tahun}}" class="btn btn-sm btn-outline-danger p-1 rounded-circle d-inline-flex align-items-center justify-content-center shadow-sm" style="width: 28px; height: 28px;" title="Koreksi Data Absen">
+                                            <i class="fas fa-edit" style="font-size: 0.75rem;"></i>
+                                        </a>
+                                    {% else %}
+                                        <a href="#" class="btn btn-sm btn-outline-danger p-1 rounded-circle d-inline-flex align-items-center justify-content-center shadow-sm" style="width: 28px; height: 28px;" title="Koreksi Data Absen">
+                                            <i class="fas fa-edit" style="font-size: 0.75rem;"></i>
+                                        </a>
+                                    {% endif %}
+                                    
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -3,19 +3,23 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.generics import ListAPIView
+from rest_framework.generics import ListAPIView, get_object_or_404
 from oauth2_provider.contrib.rest_framework import OAuth2Authentication
 from rest_framework.authentication import SessionAuthentication
-
-from django.core.cache import cache
-from django.db.models import OuterRef, Subquery, F, Prefetch
-from django.db.models.functions import Coalesce
 from datetime import date
-from django.utils import timezone
+from django.db.models import F, OuterRef, Subquery, Prefetch, Value, Case, When, BooleanField
+from django.db.models.functions import Coalesce
+from rest_framework.generics import RetrieveAPIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import SessionAuthentication
+from oauth2_provider.contrib.rest_framework import OAuth2Authentication
 
-from .models import Users
+# Pastikan import model Anda sudah benar sesuai struktur aplikasi
+
+from .models import Users, ProfilSDM
+from strukturorg.models import UnitOrganisasi, Bidang, SubBidang
 from disiplinsdm.models import JenisSDMPerinstalasi
-from .serializers import PegawaiSerializer, DokterSpesialisSerializer
+from .serializers import DataMinimalPegawaiSerializer, PegawaiSerializer, DokterSpesialisSerializer
 from dokumen.models import RiwayatPanggol, RiwayatPendidikan, RiwayatPenempatan, RiwayatJabatan
 
 
@@ -39,6 +43,117 @@ def api_me(request):
         "is_active": user.is_active,
         "is_staff": user.is_staff,
     })
+    
+
+class DetailMeAPIView(APIView):
+    """
+    Menu ini mengembalikan data pegawai yang sedang login dengan informasi yang lebih lengkap dibanding api_me.
+    bisa digunakan sebagai bahan untuk menentukan role pegawai.
+    """
+    authentication_classes = [OAuth2Authentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    # Matikan filter backend otomatis jika ada global setting
+    filter_backends = [] 
+
+    def get_queryset(self):
+        now = date.today()
+        try:
+            bulan = int(self.request.GET.get("bulan") or now.month)
+            tahun = int(self.request.GET.get("tahun") or now.year)
+        except ValueError:
+            bulan = now.month
+            tahun = now.year
+
+        # 1. Subquery untuk mencari jabatan terakhir pegawai
+        latest_jabatan = RiwayatJabatan.objects.filter(
+            pegawai=OuterRef('pk')
+        ).order_by(
+            F('tmt_jabatan').desc(nulls_last=True),
+            '-created_at',
+            '-id',
+        )
+        
+        # 2. Subquery untuk mencari penempatan aktif terakhir pegawai
+        latest_penempatan = RiwayatPenempatan.objects.filter(
+            pegawai=OuterRef('pk'),
+            status=True,
+        ).order_by(
+            F('tgl_sk').desc(nulls_last=True),
+            '-created_at',
+            '-id',
+        )
+        
+        # 3. Subquery evaluasi struktural pimpinan jika pegawai merupakan pejabat
+        direktur = UnitOrganisasi.objects.filter(nama_pimpinan=OuterRef('pk'))
+        bidang = Bidang.objects.filter(nama_pimpinan=OuterRef('pk'))
+        sub_bidang = SubBidang.objects.filter(nama_pimpinan=OuterRef('pk'))
+
+        # 4. Prefetch kustom
+        jsdm_qs = (
+            JenisSDMPerinstalasi.objects
+            .filter(bulan=bulan, tahun=tahun)
+            .prefetch_related('jadwaldinassdm_set__kategori_jadwal')
+            .order_by('-updated_at', '-id')
+        )
+
+        # 5. Query Utama
+        qs = (
+            Users.objects
+            .select_related('profil_user', 'profil_user__gender')
+            .prefetch_related(
+                'unitorganisasi_set', 
+                'bidang_set', 
+                'subbidang_set',
+                Prefetch(
+                    'jenissdmperinstalasi_set',
+                    queryset=jsdm_qs,
+                    to_attr='jsdm_bulan_ini'
+                )
+            )
+            .annotate(
+                data_pejabat=Coalesce(
+                    Subquery(direktur.values('unor')[:1]),
+                    Subquery(bidang.values('bidang')[:1]),
+                    Subquery(sub_bidang.values('sub_bidang')[:1]),
+                    default=None
+                ),
+                jabatan_terakhir=Coalesce(
+                    Subquery(latest_jabatan.values('nama_jabatan__jenis_sdm')[:1]),
+                    Subquery(latest_jabatan.values('detail_nama_jabatan')[:1]),
+                ),
+                penempatan_saat_ini=Coalesce(
+                    Subquery(latest_penempatan.values('penempatan_level4__instalasi')[:1]),
+                    Subquery(latest_penempatan.values('penempatan_level3__sub_bidang')[:1]),
+                    Subquery(latest_penempatan.values('penempatan_level2__bidang')[:1]),
+                    Subquery(latest_penempatan.values('penempatan_level1__unor')[:1]),
+                    Subquery(latest_penempatan.values('unit_sebelumnya')[:1]),
+                    Subquery(latest_penempatan.values('seksi_sebelumnya')[:1]),
+                    Subquery(latest_penempatan.values('bidang_sebelumnya')[:1]),
+                    Subquery(latest_penempatan.values('instansi_sebelumnya')[:1]),
+                ),
+            ).annotate(
+                pejabat=Case(
+                    When(data_pejabat__isnull=False, then=Value(True)),
+                    default=Value(False),
+                    output_field=BooleanField()
+                )
+            )
+        )
+        return qs
+
+    # --- UBAH METHOD MENJADI 'get' ---
+    def get(self, request, *args, **kwargs):
+        """
+        Mengambil data pegawai berdasarkan user yang sedang login
+        """
+        logged_in_user = request.user
+        queryset = self.get_queryset()
+        instance = get_object_or_404(queryset, pk=logged_in_user.id)
+        serializer = DataMinimalPegawaiSerializer(
+            instance, context={"request": request}
+        )
+        return Response(serializer.data)
     
 
 class PegawaiAPIView(ListAPIView):

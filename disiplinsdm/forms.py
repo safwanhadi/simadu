@@ -3,8 +3,9 @@ from django.forms import inlineformset_factory
 from calendar import monthrange, month_name
 from datetime import date
 from django.utils import timezone
+from django.forms import inlineformset_factory
 
-from .models import JadwalDinasSDM, JenisSDMPerinstalasi, DaftarKegiatanPegawai, KehadiranKegiatan, DetailKategoriJadwalDinas
+from .models import JadwalDinasSDM, JenisSDMPerinstalasi, DaftarKegiatanPegawai, KehadiranKegiatan, DetailKategoriJadwalDinas, LogAktivitasAbsen, AbsensiHarian
 from myaccount.models import Users
 from strukturorg.models import UnitInstalasi
 from dokumen.models import RiwayatPenempatan
@@ -352,8 +353,28 @@ class UploadFingerprintForm(forms.Form):
                 raise forms.ValidationError('Ukuran file terlalu besar. Maksimal 5 MB.')
             
             
+class PenilaianKehadiranForm(forms.Form):
+    tanggal = forms.DateField(
+        label="Tanggal Kerja",
+        widget=forms.DateInput(attrs={
+            'class': 'form-control form-control-sm', # Menjaga layout bootstrap tetap rapi
+            'type': 'date' # Wajib agar muncul pop-up kalender bawaan browser
+        })
+    )
+    
 class ProsesKehadiranForm(forms.Form):
     tanggal = forms.DateField(
         widget=forms.DateInput(attrs={'type': 'date'}),
-        initial=timezone.now().date()
+        initial=timezone.now().date(),
+        help_text='Menu sinkronisasi dengan mesin absen',
+        label=""
     )
+    
+    
+LogAktivitasFormSet = inlineformset_factory(
+    AbsensiHarian, 
+    LogAktivitasAbsen,
+    fields=('tipe', 'status_ketepatan', 'devicename'), 
+    extra=0,             # Menampilkan log yang eksis saja, tidak menambah baris kosong baru
+    can_delete=False     # Admin hanya mengedit status, tidak diizinkan menghapus log dari form ini
+)

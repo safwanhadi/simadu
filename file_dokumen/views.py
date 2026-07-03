@@ -826,12 +826,12 @@ def build_verifikator_chain_from_penempatan(rp):
         u = b.unor
 
         chain.append({
-            "level": 1,
+            "level": 2,
             "user": b.nama_pimpinan,
             "label": f"{b.pimpinan} {b.bidang}",
         })
         chain.append({
-            "level": 2,
+            "level": 3,
             "user": u.nama_pimpinan,
             "label": f"{u.pimpinan} {u.unor}",
         })
@@ -843,12 +843,12 @@ def build_verifikator_chain_from_penempatan(rp):
         sk = u.satker_induk
 
         chain.append({
-            "level": 1,
+            "level": 2,
             "user": u.nama_pimpinan,
             "label": f"{u.pimpinan} {u.unor}",
         })
         chain.append({
-            "level": 2,
+            "level": 3,
             "user": sk.nama_pimpinan,
             "label": f"{sk.pimpinan} {sk.satuan_kerja}",
         })
@@ -860,12 +860,12 @@ def build_verifikator_chain_from_penempatan(rp):
         inst = sk.instansi_daerah
 
         chain.append({
-            "level": 1,
+            "level": 2,
             "user": sk.nama_pimpinan,
             "label": f"{sk.pimpinan} {sk.satuan_kerja}",
         })
         chain.append({
-            "level": 2,
+            "level": 3,
             "user": inst.nama_pimpinan,
             "label": f"{inst.pimpinan} {inst.instansi}",
         })
@@ -914,9 +914,7 @@ def formulir_cuti_pdf(request, pk):
         .first()
     )
     unit_kerja = penempatan.penempatan if penempatan else "-"
-    jabatan_atasan = penempatan.jabatan_atasan if penempatan else {}
-    nama_atasan = penempatan.nama_atasan if penempatan else {}
-    _, level = penempatan._penempatan_aktif
+    # _, level = penempatan._penempatan_aktif
     
     # === chain verifikator berdasar penempatan ===
     chain = build_verifikator_chain_from_penempatan(penempatan)
@@ -936,25 +934,25 @@ def formulir_cuti_pdf(request, pk):
         except VerifikasiCuti.DoesNotExist:
             verifikasi = None
 
-    # ====== Atasan Langsung (LEVEL 1) ======
-    level1_entry = next((c for c in chain if c["level"] == 1), None)
+    # ====== Atasan Langsung (LEVEL 2) ======
+    level2_entry = next((c for c in chain if c["level"] == 2), None)
+    level3_entry = next((c for c in chain if c["level"] == 3), None)
 
-    # user yang tercatat sebagai verifikator1 (kalau ada), kalau belum isi pakai chain
-    user_atasan = getattr(verifikasi, "verifikator1", None) if verifikasi else None
-    if user_atasan is None and level1_entry:
-        user_atasan = level1_entry["user"]
+    # user yang tercatat sebagai verifikator2 (kalau ada), kalau belum isi pakai chain
+    user_atasan = getattr(verifikasi, "verifikator2", None) if verifikasi else None
+    jabatan_atasan = "Atasan Langsung"
+    if user_atasan is None and level2_entry:
+        user_atasan = level2_entry["user"]
+        jabatan_atasan = level2_entry["label"] if level2_entry else "Atasan Langsung"
 
     # Nama & NIP atasan diambil langsung dari user_atasan (sesuai TTE)
-    nama_atasan1 = "-"
-    nip_atasan1 = "-"
+    nama_atasan2 = "-"
+    nip_atasan2 = "-"
     if user_atasan:
-        nama_atasan1 = _safe_get(user_atasan, "full_name_2",
+        nama_atasan2 = _safe_get(user_atasan, "full_name_2",
                                  _safe_get(user_atasan, "full_name", "-"))
         profil_atasan = getattr(user_atasan, "profil_user", None)
-        nip_atasan1 = _safe_get(profil_atasan, "nip", "-")
-
-    # Jabatan atasan: pakai label dari chain level 1
-    jabatan_atasan1 = level1_entry["label"] if level1_entry else "Atasan Langsung"
+        nip_atasan2 = _safe_get(profil_atasan, "nip", "-")
 
     status_line_lvl1 = _status_checkbox_line(
         verifikasi.persetujuan1 if verifikasi else None
@@ -962,48 +960,34 @@ def formulir_cuti_pdf(request, pk):
     
     # ====== Pejabat Penandatangan TERTINGGI (final signer) ======
     # Urutan: kalau ada verifikator3 → pakai dia; kalau tidak, cek verifikator2, lalu verifikator1
-    final_user = None
+    final_user = "-"
     final_label = "Pejabat Berwenang"
+    
+    user_atasan3 = getattr(verifikasi, "verifikator3", None) if verifikasi else None
+    if user_atasan3 is None and level3_entry:
+        user_atasan3 = level3_entry["user"]
+        final_label = level3_entry["label"] if level3_entry else "Pejabat Berwenang"
 
-    if verifikasi:
-        if verifikasi.verifikator3:
-            final_user = verifikasi.verifikator3
-            level_final = 3
-        elif verifikasi.verifikator2:
-            final_user = verifikasi.verifikator2
-            level_final = 2
-        elif verifikasi.verifikator1:
-            final_user = verifikasi.verifikator1
-            level_final = 1
-        else:
-            level_final = None
-    else:
-        level_final = None
-
-    if final_user is not None and level_final is not None:
-        entry = next((c for c in chain if c["level"] == level_final), None)
-        if entry:
-            final_label = entry["label"]
 
     nama_pejabat = "-"
     nip_pejabat = "-"
-    if final_user:
-        nama_pejabat = _safe_get(final_user, "full_name_2",
-                                 _safe_get(final_user, "full_name", "-"))
-        profil_pejabat = getattr(final_user, "profil_user", None)
+    if user_atasan3:
+        nama_pejabat = _safe_get(user_atasan3, "full_name_2",
+                                 _safe_get(user_atasan3, "full_name", "-"))
+        profil_pejabat = getattr(user_atasan3, "profil_user", None)
         nip_pejabat = _safe_get(profil_pejabat, "nip", "-")
 
     jabatan_pejabat = final_label
 
-    status_line_lvl3 = _status_checkbox_line(persetujuan=None)
-    if level == 'level4':
-        status_line_lvl3 = _status_checkbox_line(
-            verifikasi.persetujuan3 if verifikasi else None
-        )
-    else:
-        status_line_lvl3 = _status_checkbox_line(
-            verifikasi.persetujuan2 if verifikasi else None
-        )
+    # status_line_lvl3 = _status_checkbox_line(persetujuan=None)
+    # if level == 'level4':
+    #     status_line_lvl3 = _status_checkbox_line(
+    #         verifikasi.persetujuan3 if verifikasi else None
+    #     )
+    # else:
+    status_line_lvl3 = _status_checkbox_line(
+        verifikasi.persetujuan2 if verifikasi else None
+    )
 
     # ---------------- QR DATA (TTD ELEKTRONIK) ----------------
     qr_data_pemohon = {
@@ -1014,8 +998,8 @@ def formulir_cuti_pdf(request, pk):
     }
     qr_data_atasan = {
         "jenis": "TTE Atasan Langsung",
-        "nama": nama_atasan1,
-        "nip": nip_atasan1,
+        "nama": nama_atasan2,
+        "nip": nip_atasan2,
         "dokumen": doc_url,
     }
     qr_data_pejabat = {
@@ -1033,14 +1017,14 @@ def formulir_cuti_pdf(request, pk):
     qr_atasan_drawing = None
     qr_pejabat_drawing = None
     
-    if verifikasi is not None and verifikasi.keputusan1 == 'setuju':
+    if verifikasi is not None and verifikasi.keputusan2 == 'setuju':
         qr_atasan_drawing = make_qr_drawing(qr_str_atasan, size_mm=25 * mm)
-    if level == 'level4':
-        if verifikasi is not None and verifikasi.keputusan3 == 'setuju':
-            qr_pejabat_drawing = make_qr_drawing(qr_str_pejabat, size_mm=25 * mm)
-    else:
-        if verifikasi is not None and verifikasi.keputusan2 == 'setuju':
-            qr_pejabat_drawing = make_qr_drawing(qr_str_pejabat, size_mm=25 * mm)
+    # if level == 'level4':
+    if verifikasi is not None and verifikasi.keputusan3 == 'setuju':
+        qr_pejabat_drawing = make_qr_drawing(qr_str_pejabat, size_mm=25 * mm)
+    # else:
+    #     if verifikasi is not None and verifikasi.keputusan2 == 'setuju':
+    #         qr_pejabat_drawing = make_qr_drawing(qr_str_pejabat, size_mm=25 * mm)
 
     # ==========================================================
     #               SETUP REPORTLAB PDF
@@ -1280,7 +1264,7 @@ def formulir_cuti_pdf(request, pk):
         [
             "",
             Paragraph(
-                f"{nama_atasan1}<br/>NIP. {nip_atasan1}",
+                f"{nama_atasan2}<br/>NIP. {nip_atasan2}",
                 styles["BodySmall"],
             ),
         ],

@@ -295,28 +295,28 @@ class RiwayatCutiBawahanView(LoginRequiredMixin, UserPassesTestMixin, ListView):
                 pegawai__riwayat_penempatan__penempatan_level4__in=p.instalasi.all()
             )
 
-        elif p.sub_bidang:
+        elif p.sub_bidang.exists():
             # atasan sub_bidang → semua yg langsung di sub_bidang + instalasi di bawahnya
             qs = qs.filter(
-                Q(pegawai__riwayat_penempatan__penempatan_level3=p.sub_bidang) |
-                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang=p.sub_bidang)
+                Q(pegawai__riwayat_penempatan__penempatan_level3__in=p.sub_bidang.all()) |
+                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__in=p.sub_bidang.all())
             )
 
-        elif p.bidang:
+        elif p.bidang.exists():
             # atasan bidang → semua level di bawah bidang tsb
             qs = qs.filter(
-                Q(pegawai__riwayat_penempatan__penempatan_level2=p.bidang) |
-                Q(pegawai__riwayat_penempatan__penempatan_level3__bidang=p.bidang) |
-                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang=p.bidang)
+                Q(pegawai__riwayat_penempatan__penempatan_level2__in=p.bidang.all()) |
+                Q(pegawai__riwayat_penempatan__penempatan_level3__bidang__in=p.bidang.all()) |
+                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang__in=p.bidang.all())
             )
 
-        elif p.unor:
+        elif p.unor.exists():
             # atasan unor (level 1) → semua pegawai di unit tsb
             qs = qs.filter(
-                Q(pegawai__riwayat_penempatan__penempatan_level1=p.unor) |
-                Q(pegawai__riwayat_penempatan__penempatan_level2__unor=p.unor) |
-                Q(pegawai__riwayat_penempatan__penempatan_level3__bidang__unor=p.unor) |
-                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang__unor=p.unor)
+                Q(pegawai__riwayat_penempatan__penempatan_level1__in=p.unor.all()) |
+                Q(pegawai__riwayat_penempatan__penempatan_level2__unor__in=p.unor.all()) |
+                Q(pegawai__riwayat_penempatan__penempatan_level3__bidang__unor__in=p.unor.all()) |
+                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang__unor__in=p.unor.all())
             )
         else:
             return RiwayatCuti.objects.none()

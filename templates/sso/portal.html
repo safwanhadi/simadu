@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Portal SSO | Rumah Sakit Mandalika</title>
     
-    <!-- Tailwind CSS CDN (gunakan sesuai preferensi) -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tailwind CSS (gunakan sesuai preferensi) -->
+     <link rel="stylesheet" href="{% static 'dist/css/output.css' %}">
     <!-- Favicon -->
     <link rel="icon" type="image/png" sizes="16x16" href="{% static 'dist/img/favicon_rsmandalika.png' %}">
     <!-- Font Awesome 6 -->
@@ -52,21 +52,26 @@
         <!-- User Area -->
         <div class="flex items-center space-x-6">
             <div class="hidden md:block text-right">
-                <p class="text-sm font-semibold leading-tight">{{ user.get_full_name|default:"User" }}</p>
+                <p class="text-sm font-semibold leading-tight">{{ user.full_name|default:"User" }}</p>
                 <p class="text-xs text-gray-500">{{ user.email|default:"user@rs.id" }}</p>
             </div>
             <div class="relative group">
-                <img src="https://ui-avatars.com/api/?name={{ user.username|urlencode }}&background=0d9488&color=fff&size=128" 
+                <img src="{% static 'dist/img/avatar-user.png' %}?background=0d9488&color=fff&size=128" 
                      alt="avatar" 
                      class="h-10 w-10 rounded-full cursor-pointer border-2 border-transparent group-hover:border-teal-500 transition-all">
-                <!-- Dropdown -->
-                <div class="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg py-1 hidden group-hover:block border border-gray-100 z-50">
-                    <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-teal-50 flex items-center gap-2">
-                        <i class="fas fa-user-circle"></i> Profil Saya
-                    </a>
-                    <a href="{% url 'myaccount_urls:logout_view' %}" class="block px-4 py-2 text-sm text-red-600 hover:bg-red-50 font-medium flex items-center gap-2">
-                        <i class="fas fa-sign-out-alt"></i> Keluar
-                    </a>
+                <!-- Dropdown --> 
+                <div class="absolute right-0 pt-2 w-48 opacity-0 invisible transition-all duration-200 z-50 
+                            [.group:hover_&]:opacity-100 [.group:hover_&]:visible">
+                    <!-- Jembatan tak terlihat untuk menjaga hover -->
+                    <div class="h-2 w-full"></div> 
+                    <div class="bg-white rounded-xl shadow-lg py-1 border border-gray-100">
+                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-teal-50 flex items-center gap-2">
+                            <i class="fas fa-user-circle"></i> Profil Saya
+                        </a>
+                        <a href="{% url 'myaccount_urls:logout_view' %}" class="block px-4 py-2 text-sm text-red-600 hover:bg-red-50 font-medium flex items-center gap-2">
+                            <i class="fas fa-sign-out-alt"></i> Keluar
+                        </a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -92,24 +97,121 @@
         </div>
 
         <!-- Grid Aplikasi -->
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6" id="appsGrid">
-            {% for app in apps %}
-            <a href="{% url 'myaccount_urls:sso_go' client_key=app.key %}" 
-               class="app-item app-card bg-white p-6 rounded-2xl border border-gray-100 flex flex-col items-center text-center shadow-sm hover:shadow-xl transition-all duration-300">
-                <!-- Ikon Aplikasi -->
-                <div class="{{ app.bg_class }} w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform duration-300 group-hover:scale-110">
-                    <i class="{{ app.icon }} text-white text-xl"></i>
+        <div class="space-y-12" id="appsGrid">
+            
+            <!-- SEKSI PRODUCTION -->
+            <div>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                    {% for app in apps %}
+                        {% if app.id or app.type == 'local' %}
+                            
+                            {% if "localhost" in app.url or "127.0.0.1" in app.url %}
+                                
+                                {% if app.is_dev %}
+                                    {% if app.login_url %}
+                                        <a href="{{ app.login_url}}" 
+                                            data-endpoint="{{ app.url }}"
+                                            class="app-item app-card bg-white p-6 rounded-2xl border border-gray-100 flex flex-col items-center text-center shadow-sm hover:shadow-xl transition-all duration-300 group relative">
+                                            
+                                            <span class="absolute top-2 right-2 bg-purple-100 text-purple-700 text-[9px] font-bold px-2 py-0.5 rounded shadow-sm">
+                                                IT DEV
+                                            </span>
+
+                                            <div class="{{ app.bg_class }} w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform duration-300 group-hover:scale-110 shadow-lg">
+                                                <i class="{{ app.icon }} text-white text-xl"></i>
+                                            </div>
+                                            <h3 class="font-bold text-gray-800 text-sm md:text-base">{{ app.name }}</h3>
+                                            <span class="text-xs text-gray-400 mt-1 uppercase tracking-wider">{{ app.category }}</span>
+                                        </a>
+                                    {% else %}
+                                        <a href="{% url 'myaccount_urls:sso_go' client_key=app.key %}" 
+                                            data-endpoint="{{ app.url }}" 
+                                            class="app-item app-card bg-white p-6 rounded-2xl border border-gray-100 flex flex-col items-center text-center shadow-sm hover:shadow-xl transition-all duration-300 group relative">
+                                            
+                                            <span class="absolute top-2 right-2 bg-purple-100 text-purple-700 text-[9px] font-bold px-2 py-0.5 rounded shadow-sm">
+                                                IT DEV
+                                            </span>
+
+                                            <div class="{{ app.bg_class }} w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform duration-300 group-hover:scale-110 shadow-lg">
+                                                <i class="{{ app.icon }} text-white text-xl"></i>
+                                            </div>
+                                            <h3 class="font-bold text-gray-800 text-sm md:text-base">{{ app.name }}</h3>
+                                            <span class="text-xs text-gray-400 mt-1 uppercase tracking-wider">{{ app.category }}</span>
+                                        </a>
+                                    {% endif %}
+                                {% endif %}
+                            {% else %}
+                                {% if app.login_url %}
+                                    <a href="{{ app.login_url}}"
+                                        data-endpoint="{{ app.url }}"
+                                        class="app-item app-card bg-white p-6 rounded-2xl border border-gray-100 flex flex-col items-center text-center shadow-sm hover:shadow-xl transition-all duration-300 group">
+                                        
+                                        <div class="{{ app.bg_class }} w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform duration-300 group-hover:scale-110 shadow-lg">
+                                            <i class="{{ app.icon }} text-white text-xl"></i>
+                                        </div>
+                                        <h3 class="font-bold text-gray-800 text-sm md:text-base">{{ app.name }}</h3>
+                                        <span class="text-xs text-gray-400 mt-1 uppercase tracking-wider">{{ app.category }}</span>
+                                    </a>
+                                {% else %}
+                                    <a href="{% url 'myaccount_urls:sso_go' client_key=app.key %}" 
+                                        data-endpoint="{{ app.url }}" 
+                                        class="app-item app-card bg-white p-6 rounded-2xl border border-gray-100 flex flex-col items-center text-center shadow-sm hover:shadow-xl transition-all duration-300 group">
+                                        
+                                        <div class="{{ app.bg_class }} w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform duration-300 group-hover:scale-110 shadow-lg">
+                                            <i class="{{ app.icon }} text-white text-xl"></i>
+                                        </div>
+                                        <h3 class="font-bold text-gray-800 text-sm md:text-base">{{ app.name }}</h3>
+                                        <span class="text-xs text-gray-400 mt-1 uppercase tracking-wider">{{ app.category }}</span>
+                                    </a>
+                                {% endif %}
+                            {% endif %}
+
+                        {% endif %}
+                    {% endfor %}
                 </div>
-                <!-- Nama & Kategori -->
-                <h3 class="font-bold text-gray-800 text-sm md:text-base">{{ app.name }}</h3>
-                <span class="text-xs text-gray-400 mt-1 uppercase tracking-wider">{{ app.category }}</span>
-            </a>
-            {% empty %}
-            <div class="col-span-full text-center py-12 text-gray-400">
+            </div>
+
+            <div class="pt-8 border-t border-gray-200">
+                <h2 class="text-lg font-semibold text-gray-500 mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-amber-400 rounded-full"></span>
+                    Dalam Pengembangan
+                </h2>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                    
+                    {% for app in apps %}
+                        {% if not app.id and app.type != 'local' %}
+                            <div class="app-item opacity-75 grayscale bg-white p-6 rounded-2xl border border-dashed border-gray-300 flex flex-col items-center text-center relative overflow-hidden group">
+                                <div class="absolute top-0 right-0 bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-bl-lg">ON DEV</div>
+                                <div class="bg-gray-200 w-14 h-14 rounded-2xl flex items-center justify-center mb-3">
+                                    <i class="{{ app.icon }} text-gray-500 text-xl"></i>
+                                </div>
+                                <h3 class="font-bold text-gray-600 text-sm md:text-base">{{ app.name }}</h3>
+                                <p class="text-[10px] text-amber-600 mt-1 font-medium italic">Sedang disiapkan</p>
+                            </div>
+                        
+                        {% elif "localhost" in app.url or "127.0.0.1" in app.url %}
+                            {% if not app.is_dev %}
+                                <div class="app-item opacity-75 grayscale bg-white p-6 rounded-2xl border border-dashed border-gray-300 flex flex-col items-center text-center relative overflow-hidden group">
+                                    <div class="absolute top-0 right-0 bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-bl-lg">ON DEV</div>
+                                    <div class="bg-gray-200 w-14 h-14 rounded-2xl flex items-center justify-center mb-3">
+                                        <i class="{{ app.icon }} text-gray-500 text-xl"></i>
+                                    </div>
+                                    <h3 class="font-bold text-gray-600 text-sm md:text-base">{{ app.name }}</h3>
+                                    <p class="text-[10px] text-amber-600 mt-1 font-medium italic">Sedang disiapkan</p>
+                                </div>
+                            {% endif %}
+                        {% endif %}
+                    {% endfor %}
+
+                </div>
+            </div>
+
+            {% if not apps %}
+            <div class="text-center py-12 text-gray-400">
                 <i class="fas fa-box-open text-4xl mb-3 block"></i>
                 <p>Tidak ada aplikasi yang tersedia.</p>
             </div>
-            {% endfor %}
+            {% endif %}
         </div>
     </main>
 
@@ -123,14 +225,81 @@
         document.getElementById('appSearch').addEventListener('input', function(e) {
             const term = e.target.value.toLowerCase();
             document.querySelectorAll('.app-item').forEach(item => {
-                const name = item.querySelector('h3').innerText.toLowerCase();
-                const category = item.querySelector('span').innerText.toLowerCase();
-                if (name.includes(term) || category.includes(term)) {
+                const name = item.querySelector('h3')
+                const category = item.querySelector('span')
+                if (name || category) {
+                    const nameText = name ? name.textContent.toLowerCase() : '';
+                    const categoryText = category ? category.textContent.toLowerCase() : '';
+                if (nameText.includes(term) || categoryText.includes(term)) {
                     item.style.display = '';
                 } else {
                     item.style.display = 'none';
                 }
+            }});
+        });
+    </script>
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            const BLOCKED_PAGE_URL = "/accounts/access-denied/"; 
+            const LOCAL_IDENTIFIERS = ["172.16.16.", "12.12.12.", "192.168.3.", "dash.rsmandalika.com", "simrs.rsmandalika.com"];
+            const TIMEOUT_MS = 2500; 
+
+            const appLinks = document.querySelectorAll("#appsGrid a");
+
+            appLinks.forEach(app => {
+                app.addEventListener("click", function(e) {
+                    const ssoUrl = this.getAttribute("href");
+                    const actualTargetUrl = this.getAttribute("data-endpoint");
+
+                    if (!actualTargetUrl) return;
+
+                    const isPrivateApp = LOCAL_IDENTIFIERS.some(id => actualTargetUrl.includes(id));
+
+                    if (isPrivateApp) {
+                        e.preventDefault(); // Tahan pengalihan
+                        setElementLoadingState(this, true);
+
+                        // Format URL pengecekan agar bersih
+                        let checkUrl = actualTargetUrl;
+                        if (!checkUrl.startsWith('http://') && !checkUrl.startsWith('https://')) {
+                            checkUrl = `https://${checkUrl}`; // Gunakan http/https sesuai jaringan lokal
+                        }
+
+                        // Gunakan AbortController untuk timeout
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+                        console.log(`Browser mengecek langsung jaringan ke: ${checkUrl}`);
+
+                        // Lakukan fetch langsung dari browser ke target (gunakan mode: 'no-cors')
+                        fetch(checkUrl, { 
+                            method: 'HEAD', 
+                            mode: 'no-cors', // Penting agar tidak terblokir kebijakan CORS
+                            signal: controller.signal 
+                        })
+                        .then(() => {
+                            clearTimeout(timeoutId);
+                            console.log("Browser sukses menjangkau target privat! Meneruskan...");
+                            window.location.href = ssoUrl;
+                        })
+                        .catch((error) => {
+                            clearTimeout(timeoutId);
+                            console.warn("Browser GAGAL menjangkau target privat. User di luar jaringan.");
+                            window.location.href = BLOCKED_PAGE_URL;
+                        });
+                    }
+                });
             });
+
+            function setElementLoadingState(element, isLoading) {
+                if (isLoading) {
+                    element.style.opacity = "0.5";
+                    element.style.pointerEvents = "none";
+                } else {
+                    element.style.opacity = "1";
+                    element.style.pointerEvents = "auto";
+                }
+            }
         });
     </script>
 </body>

@@ -9,6 +9,8 @@
                 <th>Sekolah/Universitas</th>
                 <th>Tgl Lulus</th>
                 <th>Nomor Ijazah</th>
+                <th>Verifikasi</th>
+                <th>File Verifikasi</th>
                 <th>Status File</th>
                 <th>Aksi</th>
             </tr>
@@ -23,6 +25,13 @@
                 <td>{{item.nama_sek}}</td>
                 <td>{{item.tgl_lulus}}</td>
                 <td>{{item.no_ijazah}}</td>
+                <td>{{item.is_verifikasi|yesno:"Ya,Tidak"}}</td>
+                <td>{% if item.file_verifikasi %}
+                    <a href="{{item.file_verifikasi.url}}"><i class="fas fa-cloud-download-alt"></i></a>
+                    {% else %}
+                    <i class="fas fa-times" style="font-weight: bold; color:red"></i>
+                    {% endif %}
+                </td>
                 <td>{% if item.file_ijazah %}
                     <a href="{{item.file_ijazah.url}}"><i class="fas fa-cloud-download-alt"></i></a>
                     {% else %}

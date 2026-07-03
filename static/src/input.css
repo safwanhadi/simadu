@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+/* Beritahu Tailwind lokasi template Django Anda */
+@source "../../templates/**/*.html";
+@source "../../../**/templates/**/*.html";
+
+@theme {
+  /* Tambahkan branding RS Mandalika di sini */
+  --color-mandalika-teal: #0d9488;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui;
+}

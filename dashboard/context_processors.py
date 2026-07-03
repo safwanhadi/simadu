@@ -43,49 +43,99 @@ def notifikasi_layanan(request):
         }
 
     # === Blok 3: Untuk User Biasa dan Admin Hirarki ===
+    # Inisialisasi awal agar tidak terjadi NameError jika kondisi tidak terpenuhi
     layanan_cuti_admin = LayananCuti.objects.none()
     layanan_diklat_admin = LayananUsulanDiklat.objects.none()
 
     # Query notifikasi untuk admin hirarki (jika user adalah staff)
     if request.user.is_staff and hasattr(request.user, 'profil_admin'):
-        from strukturorg.models import Bidang, SubBidang  # Pastikan impor model yang diperlukan
+        from strukturorg.models import SubBidang, Bidang  # Import di dalam fungsi untuk menghindari circular import
         profil_admin = request.user.profil_admin
 
         # Level 4: Kepala Instalasi
-        if profil_admin.instalasi.exists():
+        if profil_admin.instalasi.exists() and profil_admin.is_pejabat:
             instalasi_pks = profil_admin.instalasi.values_list('pk', flat=True)
-            layanan_cuti_admin = LayananCuti.objects.filter(status="pengajuan", pegawai__riwayat_penempatan__penempatan_level4__in=instalasi_pks, pegawai__riwayat_penempatan__status=True)
-            layanan_diklat_admin = LayananUsulanDiklat.objects.filter(status="usulan", riwayatdiklat__pegawai__riwayat_penempatan__penempatan_level4__in=instalasi_pks, riwayatdiklat__pegawai__riwayat_penempatan__status=True).distinct()
+            layanan_cuti_admin = LayananCuti.objects.filter(
+                status="pengajuan", 
+                pegawai__riwayat_penempatan__penempatan_level4__in=instalasi_pks, 
+                pegawai__riwayat_penempatan__status=True
+            )
+            layanan_diklat_admin = LayananUsulanDiklat.objects.filter(
+                status="usulan", 
+                riwayatdiklat__pegawai__riwayat_penempatan__penempatan_level4__in=instalasi_pks, 
+                riwayatdiklat__pegawai__riwayat_penempatan__status=True
+            ).distinct()
 
         # Level 3: Kepala Seksi/Sub-Bagian
-        elif profil_admin.sub_bidang:
-            sub_bidang = profil_admin.sub_bidang
-            layanan_cuti_admin = LayananCuti.objects.filter(status="pengajuan", pegawai__riwayat_penempatan__penempatan_level3=sub_bidang, pegawai__riwayat_penempatan__status=True).exclude(pegawai=request.user)
-            layanan_diklat_admin = LayananUsulanDiklat.objects.filter(status="usulan", riwayatdiklat__pegawai__riwayat_penempatan__penempatan_level3=sub_bidang, riwayatdiklat__pegawai__riwayat_penempatan__status=True)
+        elif profil_admin.sub_bidang.exists() and profil_admin.is_pejabat:
+            # Perbaikan typo: values_list & flat=True
+            sub_bidang_pks = profil_admin.sub_bidang.values_list('pk', flat=True)
+            layanan_cuti_admin = LayananCuti.objects.filter(
+                status="pengajuan", 
+                pegawai__riwayat_penempatan__penempatan_level3__in=sub_bidang_pks, 
+                pegawai__riwayat_penempatan__status=True
+            ).exclude(pegawai=request.user)
+            
+            layanan_diklat_admin = LayananUsulanDiklat.objects.filter(
+                status="usulan", 
+                riwayatdiklat__pegawai__riwayat_penempatan__penempatan_level3__in=sub_bidang_pks, 
+                riwayatdiklat__pegawai__riwayat_penempatan__status=True
+            ).distinct()
 
-        # Level 2: Kepala Bidang
-        elif profil_admin.bidang:
-            admin_bidang = profil_admin.bidang
-            sub_bidangs = SubBidang.objects.filter(bidang=admin_bidang)
+        # Level 2: Kepala Bidang (UPDATED)
+        elif profil_admin.bidang.exists() and profil_admin.is_pejabat:
+            # 1. Ambil semua PK bidang yang ditekuni admin ini
+            bidang_pks = profil_admin.bidang.values_list('pk', flat=True)
+            
+            # 2. Cari semua SubBidang yang berada di bawah bidang-bidang tersebut
+            sub_bidangs = SubBidang.objects.filter(bidang__in=bidang_pks)
+            
+            # 3. Ambil pimpinan_ids (Kepala Seksi/Sub-Bagian) dari sub-bidang terkait
             pimpinan_ids = list(sub_bidangs.values_list('nama_pimpinan_id', flat=True).distinct())
 
+            # Filter Cuti: Bawahan di penempatan level 3 ATAU user pimpinan itu sendiri
             q_filter = Q(pegawai__riwayat_penempatan__penempatan_level3__in=sub_bidangs) | Q(pegawai_id__in=pimpinan_ids)
-            layanan_cuti_admin = LayananCuti.objects.filter(q_filter, status="pengajuan", pegawai__riwayat_penempatan__status=True).distinct()
+            layanan_cuti_admin = LayananCuti.objects.filter(
+                q_filter, 
+                status="pengajuan", 
+                pegawai__riwayat_penempatan__status=True
+            ).distinct()
             
+            # Filter Diklat
             q_filter_diklat = Q(riwayatdiklat__pegawai__riwayat_penempatan__penempatan_level3__in=sub_bidangs) | Q(riwayatdiklat__pegawai__id__in=pimpinan_ids)
-            layanan_diklat_admin = LayananUsulanDiklat.objects.filter(q_filter_diklat, status="usulan", riwayatdiklat__pegawai__riwayat_penempatan__status=True).distinct()
+            layanan_diklat_admin = LayananUsulanDiklat.objects.filter(
+                q_filter_diklat, 
+                status="usulan", 
+                riwayatdiklat__pegawai__riwayat_penempatan__status=True
+            ).distinct()
 
-        # Level 1: Direktur / Pimpinan Unit Organisasi
-        elif profil_admin.unor:
-            admin_unor = profil_admin.unor
-            bidangs = Bidang.objects.filter(unor=admin_unor)
+        # Level 1: Direktur / Pimpinan Unit Organisasi (UPDATED)
+        elif profil_admin.unor.exists() and profil_admin.is_pejabat:
+            # 1. Ambil semua PK unor yang ditekuni admin ini
+            unor_pks = profil_admin.unor.values_list('pk', flat=True)
+            
+            # 2. Cari semua Bidang yang berada di bawah unor-unor tersebut
+            bidangs = Bidang.objects.filter(unor__in=unor_pks)
+            
+            # 3. Ambil pimpinan_ids (Kepala Bidang) dari bidang terkait
             pimpinan_ids = list(bidangs.values_list('nama_pimpinan_id', flat=True).distinct())
 
+            # Filter Cuti: Bawahan di penempatan level 2 ATAU pimpinan bidang terkait
             q_filter = Q(pegawai__riwayat_penempatan__penempatan_level2__in=bidangs) | Q(pegawai__id__in=pimpinan_ids)
-            layanan_cuti_admin = LayananCuti.objects.filter(q_filter, status="pengajuan", pegawai__riwayat_penempatan__status=True, verifikasicuti__persetujuan2=True).distinct()
+            layanan_cuti_admin = LayananCuti.objects.filter(
+                q_filter, 
+                status="pengajuan", 
+                pegawai__riwayat_penempatan__status=True, 
+                verifikasicuti__persetujuan2=True
+            ).distinct()
 
+            # Filter Diklat
             q_filter_diklat = Q(riwayatdiklat__pegawai__riwayat_penempatan__penempatan_level2__in=bidangs) | Q(riwayatdiklat__pegawai__id__in=pimpinan_ids)
-            layanan_diklat_admin = LayananUsulanDiklat.objects.filter(q_filter_diklat, status="usulan", riwayatdiklat__pegawai__riwayat_penempatan__status=True).distinct()
+            layanan_diklat_admin = LayananUsulanDiklat.objects.filter(
+                q_filter_diklat, 
+                status="usulan", 
+                riwayatdiklat__pegawai__riwayat_penempatan__status=True
+            ).distinct()
 
     # Query notifikasi untuk pegawai (pribadi)
     layanan_cuti_pegawai = LayananCuti.objects.filter(pegawai=request.user, status="selesai", is_read=False)

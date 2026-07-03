@@ -1,0 +1,127 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block navigation %}
+
+{% endblock navigation %}
+
+{% block content %}
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex flex-row justify-content-between">
+                    <div class="d-flex flex-row mb-1">
+                        <div>
+                            <a href="{{url}}"><i class="fas fa-chevron-left mr-3 pt-1" style="font-size:x-large;"></i></a>
+                        </div>
+                        <p class="h4">{{title}}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-12">
+                        <form method="post">
+                            {% csrf_token %}
+                            
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <h5>{{ title }}</h5>
+                                </div>
+                                <div class="card-body">
+                                    {{ form|crispy }}
+                                </div>
+                            </div>
+
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <h5>Rincian Kartu Log Aktivitas Mesin</h5>
+                                </div>
+                                <div class="card-body">
+                                    {{ log_formset.management_form }}
+                                    
+                                    <table class="table table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>Tipe Log</th>
+                                                <th>Status Ketepatan / Keterangan</th>
+                                                <th>Nama Perangkat / Mesin</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for form_row in log_formset %}
+                                                <tr>
+                                                    {% for hidden in form_row.hidden_fields %}
+                                                        {{ hidden }}
+                                                    {% endfor %}
+                                                    
+                                                    <td>{{ form_row.tipe }}</td>
+                                                    <td>{{ form_row.status_ketepatan }}</td>
+                                                    <td>{{ form_row.devicename }}</td>
+                                                </tr>
+                                            {% empty %}
+                                                <tr>
+                                                    <td colspan="3" class="text-center text-muted">Tidak ditemukan rincian ketukan log mesin pada hari ini.</td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; justify-content:flex-end;">
+                                <button class="btn btn-primary" style="margin-right: 10px;" type="submit">Simpan</button>
+                                <button class="btn btn-danger" style="margin-right: 10px;" type="button" onclick="window.location.href='{{url}}'">Batal</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+{% endblock %}
+
+
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+
+    $(document).ready(function() {
+        $('.sdm').select2();
+        selectOnClose: true
+    });
+</script>
+
+<script>
+    $(document).ready(function(){
+        $('.pegawai').hide();
+        $('.select2').select2();
+    });
+</script>
+
+{% endblock script %}

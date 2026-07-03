@@ -12,7 +12,9 @@ from .models import (
     HariLibur,
     AturanToleransiKeterlambatan,
     MappingMesinAbsensi,
-    LogKehadiran
+    LogKehadiran,
+    AbsensiHarian,
+    LogAktivitasAbsen,
     )
 
 # Register your models here.
@@ -33,7 +35,7 @@ class KehadiranKegiatanAdmin(admin.ModelAdmin):
     get_pegawai.admin_order_field = 'pegawai__pegawai__full_name'
     
 class DaftarKegiatanPegawaiAdmin(admin.ModelAdmin):
-    list_display = ('get_pegawai', 'instalasi', 'bulan', 'tahun')
+    list_display = ('get_pegawai', 'instalasi', 'kegiatan', 'bulan', 'tahun')
     
     def get_pegawai(self, obj):
         return obj.pegawai.full_name
@@ -52,8 +54,16 @@ class MappingMesinAbsensiAdmin(admin.ModelAdmin):
     # search_fields=('pegawai',)
     autocomplete_fields = ('pegawai',)
     
+class ApprovedJadwalDinasSDMAdmin(admin.ModelAdmin):
+    raw_id_fields = ['pegawai', 'kategori_jadwal', 'approved_by']
+    
+class LogAktivitasAbsenAdmin(admin.ModelAdmin):
+    list_display = ('absensi_harian', 'tipe', 'waktu', 'status_ketepatan')
+    
 admin.site.register(MappingMesinAbsensi, MappingMesinAbsensiAdmin)
 admin.site.register(LogKehadiran)
+admin.site.register(AbsensiHarian)
+admin.site.register(LogAktivitasAbsen, LogAktivitasAbsenAdmin)
 admin.site.register(KategoriJadwalDinas)
 admin.site.register(DetailKategoriJadwalDinas, DetailKategoriJadwalDinasAdmin)
 admin.site.register(JenisSDMPerinstalasi)
@@ -63,4 +73,4 @@ admin.site.register(AlasanTidakHadir)
 admin.site.register(KehadiranKegiatan, KehadiranKegiatanAdmin)
 admin.site.register(JenisKegiatan)
 admin.site.register(HariLibur)
-admin.site.register(ApprovedJadwalDinasSDM)
+admin.site.register(ApprovedJadwalDinasSDM, ApprovedJadwalDinasSDMAdmin)

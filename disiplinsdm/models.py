@@ -103,22 +103,7 @@ class JenisSDMPerinstalasi(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f'{self.pegawai.full_name} ({self.bulan}/{self.tahun}) - {self.kurang_lebih_jam_kerja}'
-    
-    # @property
-    # def kurang_lebih_jam_kerja(self):
-    #     total = 0
-    #     for jadwal in self.jadwaldinassdm_set.select_related('kategori_jadwal'):
-    #         datang = jadwal.kategori_jadwal.waktu_datang if hasattr(jadwal, 'kategori_jadwal') and hasattr(jadwal.kategori_jadwal, 'waktu_datang') else None
-    #         pulang = jadwal.kategori_jadwal.waktu_pulang if hasattr(jadwal, 'kategori_jadwal') and hasattr(jadwal.kategori_jadwal, 'waktu_pulang') else None
-    #         if datang and pulang:
-    #             dt_mulai = datetime.combine(date.today(), datang)
-    #             dt_selesai = datetime.combine(date.today(), pulang)
-    #             if dt_selesai < dt_mulai:
-    #                 dt_selesai += timedelta(days=1)
-    #             durasi_jam = (dt_selesai - dt_mulai).total_seconds() / 3600
-    #             total += durasi_jam
-    #     return round(total, 1)
+        return f'{self.pegawai.first_name} ({self.bulan}/{self.tahun})'
     
     @property
     def kurang_lebih_jam_kerja(self):
@@ -301,6 +286,18 @@ class DaftarKegiatanPegawai(models.Model):
     kegiatan = models.ForeignKey(JenisKegiatan, on_delete=models.SET_NULL, null=True)
     bulan = models.SmallIntegerField(null=True, blank=True)
     tahun = models.SmallIntegerField(null=True, blank=True)
+    
+    class Meta:
+        verbose_name = "Daftar Kegiatan Pegawai"
+        verbose_name_plural = "Daftar Kegiatan Pegawai"
+        
+        # DEFINISI UNIQUE CONSTRAINT UNTUK BULK_CREATE
+        constraints = [
+            models.UniqueConstraint(
+                fields=['pegawai', 'kegiatan', 'bulan', 'tahun'],
+                name='unique_rekap_kegiatan_pegawai_bulanan'
+            )
+        ]
 
     def __str__(self):
         return f'{self.pegawai.full_name}-{self.kegiatan} ({self.bulan}/{self.tahun})'
@@ -353,6 +350,17 @@ class KehadiranKegiatan(models.Model):
         if self.hadir:
             return f'{self.pegawai.pegawai.full_name} Hadir'
         return f'{self.pegawai.pegawai.full_name} Tidak hadir'
+    
+    class Meta:
+        verbose_name = "Kehadiran Kegiatan"
+        verbose_name_plural = "Kehadiran Kegiatan"
+        ordering = ['-tanggal']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['pegawai_id', 'tanggal'],
+                name='unique_kehadiran_pegawai_tanggal'
+            )
+        ]
 
     
 class MappingMesinAbsensi(models.Model):
@@ -393,13 +401,69 @@ class LogKehadiran(models.Model):
         return f'{self.personname} - {self.direction} at {self.datetime} (Device: {self.devicename})'
 
 
-# class AttLog(models.Model):
-#     id = models.CharField(max_length=255, primary_key=True)
-#     datetime = models.DateTimeField()
-#     date = models.DateField()
-#     time = models.TimeField()
-#     direction = models.CharField(max_length=10)  # 'IN' atau 'OUT'
-#     devicename = models.CharField(max_length=255)
-#     devicesn = models.CharField(max_length=255)
-#     personname = models.CharField(max_length=255)
-#     cardno = models.CharField(max_length=255)
+################################### MODEL BARU UNTUK PRESENSI #################################
+
+class AbsensiHarian(models.Model):
+    """
+    MODEL PARENT (Header)
+    Mencatat rangkuman kehadiran seorang pegawai dalam satu hari tertentu.
+    """
+    pegawai = models.ForeignKey('myaccount.Users', on_delete=models.CASCADE)
+    tanggal = models.DateField()
+    unor = models.ForeignKey('strukturorg.UnitOrganisasi', on_delete=models.PROTECT, verbose_name="Unit Organisasi")
+    bidang = models.ForeignKey('strukturorg.Bidang', on_delete=models.PROTECT, null=True, blank=True, verbose_name="Bidang / Bagian")
+    sub_bidang = models.ForeignKey('strukturorg.SubBidang', on_delete=models.PROTECT, null=True, blank=True, verbose_name="Tim Kerja / Sub Bagian")
+    instalasi = models.ForeignKey('strukturorg.UnitInstalasi', on_delete=models.PROTECT, null=True, blank=True, verbose_name="Instalasi / Ruangan")
+    
+    # Rangkuman status final hari itu (diisi otomatis via trigger/save method atau background task)
+    STATUS_PILIHAN = [
+        ('', 'Belum Presensi'),
+        ('HADIR', 'Hadir'),
+        ('ALPA', 'Alpa / Tanpa Keterangan'),
+        ('IZIN', 'Izin / Sakit / Cuti'),
+        ('DINAS', 'Dinas Luar'),
+        ('LIBUR', 'Libur')
+    ]
+    status_final = models.CharField(max_length=10, choices=STATUS_PILIHAN, default='')
+    keterangan = models.TextField(blank=True, null=True)
+
+    class Meta:
+        unique_together = ('pegawai', 'tanggal') # Memastikan 1 pegawai hanya punya 1 parent per hari
+        ordering = ['-tanggal']
+        # Tambahkan indexing pada kombinasi struktur ini untuk mempercepat query laporan manajemen
+        indexes = [
+            models.Index(fields=['tanggal', 'unor']),
+            models.Index(fields=['tanggal', 'bidang']),
+            models.Index(fields=['tanggal', 'sub_bidang']),
+        ]
+
+    def __str__(self):
+        return f"{self.pegawai.full_name} - {self.tanggal}: {self.status_final}"
+
+
+class LogAktivitasAbsen(models.Model):
+    """
+    MODEL CHILD (Detail)
+    Mencatat setiap detak transaksi/kegiatan absen pegawai pada hari tersebut.
+    """
+    TIPE_LOG = [
+        ('DATANG', 'Absen Datang'),
+        ('APEL', 'Apel Pagi'),
+        ('PULANG', 'Absen Pulang'),
+        ('ISHOMA_OUT', 'Keluar Istirahat'),
+        ('ISHOMA_IN', 'Masuk Istirahat'),
+    ]
+    
+    absensi_harian = models.ForeignKey(AbsensiHarian, on_delete=models.CASCADE, related_name='logs')
+    tipe = models.CharField(max_length=15, choices=TIPE_LOG)
+    waktu = models.DateTimeField() # Menyimpan tanggal dan jam presisi dari mesin/aplikasi
+    
+    status_ketepatan = models.CharField(max_length=50, blank=True, null=True) # Misal: "Tepat Waktu", "Terlambat"
+    alasan = models.ForeignKey('AlasanTidakHadir', on_delete=models.SET_NULL, null=True, blank=True)
+    devicename = models.CharField(max_length=50, blank=True, null=True) # Untuk pelacakan fingerprint/perangkat
+
+    class Meta:
+        ordering = ['waktu']
+
+    def __str__(self):
+        return f"{self.tipe} - {self.waktu.time()}"

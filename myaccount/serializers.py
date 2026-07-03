@@ -180,3 +180,49 @@ class DokterSpesialisSerializer(serializers.ModelSerializer):
         model = Users
         # Daftarkan field yang Anda butuhkan
         fields = ['id', 'nama_user', 'is_spesialis', 'nik_user']
+        
+        
+class DataMinimalPegawaiSerializer(serializers.Serializer):
+    first_name = serializers.SerializerMethodField()
+    last_name = serializers.SerializerMethodField()
+    full_name = serializers.SerializerMethodField()
+    nik = serializers.SerializerMethodField()
+    email = serializers.SerializerMethodField()
+    status_pegawai = serializers.SerializerMethodField()
+    jabatan_terakhir = serializers.SerializerMethodField()
+    penempatan_saat_ini = serializers.SerializerMethodField()
+    jabatan = serializers.CharField(allow_null=True)
+    pejabat = serializers.CharField(allow_null=True)
+    is_dokter_spesialis = serializers.SerializerMethodField()
+
+    def get_profile(self, obj):
+        return getattr(obj, "profil_user", None)
+    
+    def get_nik(self, obj):
+        profile = self.get_profile(obj)
+        return profile.no_ktp if profile else None
+
+    def get_first_name(self, obj):
+        return obj.first_name
+
+    def get_last_name(self, obj):
+        return obj.last_name
+
+    def get_full_name(self, obj):
+        return obj.full_name_2
+
+    def get_email(self, obj):
+        return obj.email
+
+    def get_status_pegawai(self, obj):
+        return "AKTIF" if obj.is_active else "PENSIUN"
+    
+    def get_jabatan_terakhir(self, obj):
+        return obj.jabatan_terakhir
+
+    def get_penempatan_saat_ini(self, obj):
+        return obj.penempatan_saat_ini
+    
+    def get_is_dokter_spesialis(self, obj):
+        profile = self.get_profile(obj)
+        return profile.is_dokter_spesialis if profile else False

@@ -6,17 +6,16 @@ from django.views import View, generic
 from django.db.models.query import QuerySet
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib import messages
-from django.db.models import Q, Min, Max, Value, CharField, Count, Case, When, BooleanField, OuterRef, Subquery, IntegerField
+from django.db.models import Q, Min, Max, Value, CharField, Count, Case, When, F, OuterRef, Subquery, IntegerField, Exists, Prefetch, FilteredRelation
 from django.db.models.functions import TruncDate, Coalesce
-from django.core.paginator import Paginator
 from django.contrib.staticfiles import finders
 from django.db.models.fields import TimeField
 # from django.db.models.functions import TruncMonth, ExtractMonth, TruncDate, TruncYear
 from django.utils.functional import cached_property
+from django.http import HttpResponse, HttpResponseRedirect
 from dateutil.relativedelta import relativedelta
 from dateutil.parser import parse
 from datetime import date, datetime, time, timedelta
-from django.utils.timezone import make_aware, get_current_timezone
 from calendar import monthrange, month_name
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
@@ -28,13 +27,18 @@ import requests
 from django.views.generic import ListView, TemplateView
 from django.conf import settings
 from django.db import IntegrityError
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
 from .models import MappingMesinAbsensi, LogKehadiran
 
 from django.views.generic import FormView
+from django.http import JsonResponse
+from .services import BridgeSyncService
+from django.views.decorators.http import require_POST
+from django.contrib.auth.decorators import login_required
+import json
 
-from .services import KehadiranService, ApelPagiService
-from .forms import ProsesKehadiranForm
+from .services import KehadiranService, ApelPagiService, AttendanceOrchestrator, NewAttendanceOrchestrator
 
 from django.utils import timezone
 from .utils import get_mingguan_lengkap, hitung_total_jam, is_user_authorized_to_approve
@@ -50,7 +54,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-from strukturorg.models import SatuanKerjaInduk, UnitOrganisasi, Bidang, SubBidang
+from strukturorg.models import SatuanKerjaInduk, UnitOrganisasi, Bidang, SubBidang, UnitInstalasi
 
 from .models import (
     JenisSDMPerinstalasi, 
@@ -84,6 +88,9 @@ from .forms import (
     SearchForm,
     PengajuanJadwalForm,
     PersetujuanForm,
+    ProsesKehadiranForm,
+    PenilaianKehadiranForm,
+    LogAktivitasFormSet,
     )
 
 # Create your views here.
@@ -207,10 +214,10 @@ class EvaluasiJadwal(LoginRequiredMixin, UserPassesTestMixin, generic.TemplateVi
         if profil:
             if profil.instalasi.exists():
                 return qs.filter(pk__in=profil.instalasi.values_list('pk', flat=True))
-            if profil.sub_bidang:
-                return qs.filter(sub_bidang=profil.sub_bidang)
-            if profil.bidang:
-                return qs.filter(sub_bidang__bidang=profil.bidang)
+            if profil.sub_bidang.exists():
+                return qs.filter(sub_bidang__in=profil.sub_bidang.values_list('pk', flat=True))
+            if profil.bidang.exists():
+                return qs.filter(sub_bidang__bidang__in=profil.bidang.values_list('pk', flat=True))
         return qs.none()
 
     def get_inst_id(self, instalasi_qs):
@@ -947,12 +954,18 @@ class PengajuanJadwalInstalasi(LoginRequiredMixin, UserPassesTestMixin, generic.
         
 class ApprovalJadwalInstalasi(LoginRequiredMixin, UserPassesTestMixin, generic.View):
     def test_func(self):
-        instalasi_id = self.kwargs['inst']
         user = self.request.user
-        sub_bidang = user.profil_admin.sub_bidang if hasattr(user, 'profil_admin') and hasattr(user.profil_admin, 'sub_bidang') else None
-        instalasi_pimpinan_list = UnitInstalasi.objects.filter(sub_bidang=sub_bidang)
-        if user.is_staff and instalasi_pimpinan_list.filter(pk=instalasi_id).exists():
-            return True
+        profil = getattr(user, 'profil_admin', None)
+        if user.is_staff:
+            if profil and profil.instalasi.exists():
+                return True
+            if profil and profil.sub_bidang.exists():
+                return True
+            if profil and profil.bidang.exists():
+                return True
+            if profil and profil.unor.exists():
+                return True
+            return False
         return False
 
     def handle_no_permission(self):
@@ -1130,122 +1143,6 @@ def draft_export_jadwal_excel(request, inst, bulan, tahun):
     return response
 
 
-# def draft_export_jadwal_excel(request, inst, bulan, tahun):
-#     jumlah_hari = monthrange(tahun, bulan)[1]
-#     nama_bulan = date(tahun, bulan, 1).strftime('%B')
-
-#     try:
-#         instalasi = UnitInstalasi.objects.get(pk=inst)
-#     except UnitInstalasi.DoesNotExist:
-#         instalasi = None
-
-#     metadata = JenisSDMPerinstalasi.objects.filter(
-#         bulan=bulan, tahun=tahun, instalasi=instalasi
-#     ).select_related('pegawai')
-
-#     pegawai_list = [md.pegawai for md in metadata]
-
-#     jadwal_qs = JadwalDinasSDM.objects.filter(
-#         tanggal__month=bulan,
-#         tanggal__year=tahun,
-#         pegawai__pegawai__in=pegawai_list
-#     ).select_related('kategori_jadwal', 'pegawai__pegawai')
-
-#     data = {}
-#     for md in metadata:
-#         data[md.pegawai.id] = {
-#             'nama': md.pegawai.full_name,
-#             'jadwal': defaultdict(str)
-#         }
-
-#     for j in jadwal_qs:
-#         hari = j.tanggal.day
-#         kategori = j.kategori_jadwal.akronim if j.kategori_jadwal else "-"
-#         slot = data[j.pegawai.pegawai.id]['jadwal']
-#         slot[hari] = f"{slot[hari]},{kategori}" if slot[hari] else kategori
-
-#     jam_pegawai = defaultdict(lambda: defaultdict(lambda: Decimal("0")))
-#     for j in jadwal_qs:
-#         if not j.kategori_jadwal or not j.kategori_jadwal.waktu_datang or not j.kategori_jadwal.waktu_pulang:
-#             continue
-
-#         dt = datetime.combine(date.min, j.kategori_jadwal.waktu_datang)
-#         pt = datetime.combine(date.min, j.kategori_jadwal.waktu_pulang)
-#         if pt <= dt:
-#             pt += timedelta(days=1)
-#         durasi = Decimal(str((pt - dt).total_seconds() / 3600))
-#         jam_pegawai[j.pegawai.pegawai.id][j.tanggal.day] += durasi
-
-#     standar_min = hitung_standar_jam_kerja(HariLibur, bulan, tahun)
-#     standar_max = hitung_standar_jam_kerja_maks(HariLibur, bulan, tahun)
-
-#     wb = openpyxl.Workbook()
-#     ws = wb.active
-#     ws.title = f"Jadwal {bulan}-{tahun}"
-
-#     judul = f"Jadwal Instalasi {instalasi.instalasi} Bulan {nama_bulan} {tahun}"
-#     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=jumlah_hari + 4)
-#     judul_cell = ws.cell(row=1, column=1, value=judul)
-#     judul_cell.font = Font(size=14, bold=True)
-#     judul_cell.alignment = Alignment(horizontal='center')
-
-#     header = ["No", "Nama Pegawai"] + list(range(1, jumlah_hari + 1)) + ["Total Jam", "Evaluasi"]
-#     ws.append(header)
-
-#     for cell in ws[2]:
-#         cell.font = Font(bold=True)
-#         cell.fill = PatternFill(start_color="DDDDDD", fill_type="solid")
-#         cell.alignment = Alignment(horizontal='center')
-
-#     for idx, (pid, row) in enumerate(data.items(), start=1):
-#         baris = [idx, row['nama']]
-#         total_jam = Decimal("0")
-#         for tgl in range(1, jumlah_hari + 1):
-#             isi = row['jadwal'].get(tgl, "-")
-#             jam = jam_pegawai[pid].get(tgl, Decimal("0"))
-#             total_jam += jam
-#             baris.append(isi)
-#         baris.append(float(total_jam))
-#         baris.append(evaluasi_beban(total_jam, standar_min, standar_max))
-#         ws.append(baris)
-
-#     border = Border(
-#         left=Side(style='thin'), right=Side(style='thin'),
-#         top=Side(style='thin'), bottom=Side(style='thin')
-#     )
-
-#     for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=jumlah_hari + 4):
-#         for cell in row:
-#             cell.border = border
-#             cell.alignment = Alignment(horizontal='center', vertical='center')
-
-#     ws.column_dimensions["A"].width = 5
-#     ws.column_dimensions["B"].width = 25
-
-#     ws.append([])
-#     ws.append([f"Standar jam kerja bulan ini:", f"{float(standar_min)} – {float(standar_max)} jam"])
-#     ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
-
-#     ws.append([])
-#     ws.append(["Keterangan Akronim:"])
-#     ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
-
-#     keterangan_akronim = {
-#         "P": "Pagi", "S": "Siang", "M": "Malam", "Md": "Middle",
-#         "LP": "Lepas Piket", "L": "Libur", "LX": "Libur Extra", "C": "Cuti"
-#     }
-
-#     for kode, ket in keterangan_akronim.items():
-#         ws.append([kode, ket])
-#         ws.cell(row=ws.max_row, column=1).alignment = Alignment(horizontal='center')
-        
-#     filename = f"jadwal_{bulan}_{tahun}.xlsx"
-#     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-#     response['Content-Disposition'] = f'attachment; filename="{filename}"'
-#     wb.save(response)
-#     return response
-
-
 def export_jadwal_excel(request, inst, bulan, tahun):
     jumlah_hari = monthrange(tahun, bulan)[1]
     nama_bulan = date(tahun, bulan, 1).strftime('%B')
@@ -1404,7 +1301,9 @@ def export_jadwal_excel(request, inst, bulan, tahun):
     return response
     
 
-class AjukanJadwalView(generic.UpdateView):
+class AjukanJadwalView(LoginRequiredMixin, generic.UpdateView):
+    login_url = reverse_lazy('myaccount_urls:login_view')
+    redirect_field_name = 'next'
     model = JenisSDMPerinstalasi
     form_class = PengajuanJadwalForm
     template_name = 'jadwal_piket/jadwal_pengajuan_persetujuan.html'
@@ -1498,6 +1397,8 @@ class AjukanJadwalView(generic.UpdateView):
 
 
 class SetujuiJadwalView(LoginRequiredMixin, UserPassesTestMixin, generic.UpdateView):
+    login_url = reverse_lazy('myaccount_urls:login_view')
+    redirect_field_name = 'next'
     model = JenisSDMPerinstalasi
     template_name = 'jadwal_piket/jadwal_pengajuan_persetujuan.html'
     fields = []
@@ -1794,12 +1695,15 @@ class JadwalListView(LoginRequiredMixin, generic.ListView):
         elif profil:
             if profil.instalasi.exists():
                 return profil.instalasi.first()
-            if profil.sub_bidang:
-                return UnitInstalasi.objects.filter(sub_bidang=profil.sub_bidang).first()
-            if profil.bidang:
-                return UnitInstalasi.objects.filter(sub_bidang__bidang=profil.bidang).first()
-            if profil.unor:
-                return UnitInstalasi.objects.filter(sub_bidang__bidang__unor=profil.unor).first()
+            if profil.sub_bidang.exists():
+                sub_bidang_pks = profil.sub_bidang.values_list('pk', flat=True)
+                return UnitInstalasi.objects.filter(sub_bidang__in=sub_bidang_pks).first()
+            if profil.bidang.exists():
+                bidang_pks = profil.bidang.values_list('pk', flat=True)
+                return UnitInstalasi.objects.filter(sub_bidang__bidang__in=bidang_pks).first()
+            if profil.unor.exists():
+                unor_pks = profil.unor.values_list('pk', flat=True)
+                return UnitInstalasi.objects.filter(sub_bidang__bidang__unor__in=unor_pks).first()
         else:
             instalasi = user.riwayat_penempatan.filter(status=True).first()
             if instalasi is not None:
@@ -1821,12 +1725,12 @@ class JadwalListView(LoginRequiredMixin, generic.ListView):
 
         if profil.instalasi.exists():
             return users.filter(riwayat_penempatan__penempatan_level4__in=profil.instalasi.values_list('pk', flat=True), riwayat_penempatan__status=True)
-        if profil.sub_bidang:
-            return users.filter(riwayat_penempatan__penempatan_level3=profil.sub_bidang, riwayat_penempatan__status=True)
-        if profil.bidang:
-            return users.filter(riwayat_penempatan__penempatan_level2=profil.bidang, riwayat_penempatan__status=True)
-        if profil.unor:
-            return users.filter(riwayat_penempatan__penempatan_level1=profil.unor, riwayat_penempatan__status=True)
+        if profil.sub_bidang.exists():
+            return users.filter(riwayat_penempatan__penempatan_level3__in=profil.sub_bidang.values_list('pk', flat=True), riwayat_penempatan__status=True)
+        if profil.bidang.exists():
+            return users.filter(riwayat_penempatan__penempatan_level2__in=profil.bidang.values_list('pk', flat=True), riwayat_penempatan__status=True)
+        if profil.unor.exists():
+            return users.filter(riwayat_penempatan__penempatan_level1__in=profil.unor.values_list('pk', flat=True), riwayat_penempatan__status=True)
         return users.none()
     
     def get_instalasi_queryset(self):
@@ -1840,17 +1744,16 @@ class JadwalListView(LoginRequiredMixin, generic.ListView):
             return instalasi_list.none()
 
         if profil.instalasi.exists():
-            return instalasi_list.filter(pk__in=profil.instalasi.values_list('pk', flat=True))
-        if profil.sub_bidang:
-            return instalasi_list.filter(sub_bidang=profil.sub_bidang)
-        if profil.bidang:
-            return instalasi_list.filter(sub_bidang__bidang=profil.bidang, riwayat_penempatan__status=True)
-        if profil.unor:
-            return instalasi_list.filter(sub_bidang__bidang__unor=profil.unor, riwayat_penempatan__status=True)
+            return instalasi_list.filter(pk__in=profil.instalasi.values_list('pk', flat=True), riwayatpenempatan__status=True)
+        if profil.sub_bidang.exists():
+            return instalasi_list.filter(sub_bidang__in=profil.sub_bidang.values_list('pk', flat=True), riwayatpenempatan__status=True)
+        if profil.bidang.exists():
+            return instalasi_list.filter(sub_bidang__bidang__in=profil.bidang.values_list('pk', flat=True), riwayatpenempatan__status=True)
+        if profil.unor.exists():
+            return instalasi_list.filter(sub_bidang__bidang__unor__in=profil.unor.values_list('pk', flat=True), riwayatpenempatan__status=True)
         return instalasi_list.none()
 
     def get_queryset(self):
-        print('get it')
         params = self.get_filter_params()
         instalasi = self.get_active_instalasi()
         queryset = JenisSDMPerinstalasi.objects.select_related('pegawai', 'jenis_sdm', 'instalasi').order_by('-id').exclude(
@@ -1954,6 +1857,8 @@ class JadwalListView(LoginRequiredMixin, generic.ListView):
     
 
 class JadwalDinasFormsetUpdateView(LoginRequiredMixin, UserPassesTestMixin, generic.UpdateView):#view pembuatan multipiket 1 hari
+    login_url = reverse_lazy('myaccount_urls:login_view')
+    redirect_field_name = 'next'
     model = JenisSDMPerinstalasi
     fields = []
     template_name = 'jadwal_piket/jadwal_dinas_form.html'
@@ -1972,8 +1877,18 @@ class JadwalDinasFormsetUpdateView(LoginRequiredMixin, UserPassesTestMixin, gene
         return reverse('disiplinsdm_urls:jadwal_auto_create', kwargs={'pk':pk})
     
     def test_func(self):
-        if self.request.user.is_staff:
-            return True
+        user = self.request.user
+        if user.is_staff:
+            profil = user.profil_admin if hasattr(user, 'profil_admin') else None
+            if profil and profil.instalasi.exists():
+                return True
+            if profil and profil.sub_bidang.exists():
+                return True
+            if profil and profil.bidang.exists():
+                return True
+            if profil and profil.unor.exists():
+                return True
+            return False
         return False
     
     def handle_no_permission(self):
@@ -2379,12 +2294,12 @@ class SalinJadwalView(LoginRequiredMixin, UserPassesTestMixin, View):
             filt = Q(riwayat_penempatan__status=True)
             if getattr(pa, 'instalasi', None) and pa.instalasi.exists():
                 filt &= Q(riwayat_penempatan__penempatan_level4__in=pa.instalasi.values_list('pk', flat=True))
-            elif getattr(pa, 'sub_bidang', None):
-                filt &= Q(riwayat_penempatan__penempatan_level3=pa.sub_bidang)
-            elif getattr(pa, 'bidang', None):
-                filt &= Q(riwayat_penempatan__penempatan_level2=pa.bidang)
-            elif getattr(pa, 'unor', None):
-                filt &= Q(riwayat_penempatan__penempatan_level1=pa.unor)
+            elif getattr(pa, 'sub_bidang', None) and pa.sub_bidang.exists():
+                filt &= Q(riwayat_penempatan__penempatan_level3__in=pa.sub_bidang.values_list('pk', flat=True))
+            elif getattr(pa, 'bidang', None) and pa.bidang.exists():
+                filt &= Q(riwayat_penempatan__penempatan_level2__in=pa.bidang.values_list('pk', flat=True))
+            elif getattr(pa, 'unor', None) and pa.unor.exists():
+                filt &= Q(riwayat_penempatan__penempatan_level1__in=pa.unor.values_list('pk', flat=True))
             else:
                 # fallback aman: tidak melihat siapa pun
                 return base.none()
@@ -2817,30 +2732,31 @@ class KehadiranSpesialisListView(LoginRequiredMixin, generic.ListView):
             'tahun': tahun,
             'pegawai__profil_user__is_dokter_spesialis':True,
         }
+        user = self.request.user
         # Jika user adalah superuser, filter berdasarkan instalasi jika ada
-        if self.request.user.is_superuser:
+        if user.is_superuser:
             if instalasi:
                 base_filter['instalasi'] = instalasi
             return DaftarKegiatanPegawai.objects.filter(**base_filter)
 
-        elif self.request.user.is_staff:
-            profil = self.request.user.profil_admin
+        elif user.is_staff:
+            profil = user.profil_admin if hasattr(user, 'profil_admin') else None
             if instalasi:
                 if isinstance(instalasi, QuerySet):
                     instalasi = instalasi.pk
                     base_filter['instalasi'] = instalasi
                 else:
                     base_filter['instalasi'] = instalasi
-            elif profil.instalasi.exists():
+            elif profil and profil.instalasi.exists():
                 base_filter['instalasi__in'] = profil.instalasi.values_list('pk', flat=True)
-            elif profil.sub_bidang:
-                base_filter['sub_bidang'] = profil.sub_bidang
-            elif profil.bidang:
-                base_filter['bidang'] = profil.bidang
+            elif profil and profil.sub_bidang.exists():
+                base_filter['sub_bidang__in'] = profil.sub_bidang.values_list('pk', flat=True)
+            elif profil and profil.bidang.exists():
+                base_filter['bidang__in'] = profil.bidang.values_list('pk', flat=True)
             return DaftarKegiatanPegawai.objects.filter(**base_filter)
 
         # Default untuk user biasa (pegawai)
-        base_filter['pegawai'] = self.request.user
+        base_filter['pegawai'] = user
         return DaftarKegiatanPegawai.objects.filter(**base_filter)
 
     def get_queryset(self):
@@ -2851,18 +2767,20 @@ class KehadiranSpesialisListView(LoginRequiredMixin, generic.ListView):
     
     def get_instalasi_list(self):
         instalasi = None
-        if self.request.user.is_superuser:
+        user = self.request.user
+        if user.is_superuser:
             instalasi = UnitInstalasi.objects.filter(jenissdmperinstalasi__isnull=False).order_by('instalasi').distinct()
 
-        elif self.request.user.is_staff:
-            profil = self.request.user.profil_admin
-            if profil.instalasi.exists():
+        elif user.is_staff:
+            profil = user.profil_admin if hasattr(user, 'profil_admin') else None
+            if profil and profil.instalasi.exists():
                 instalasis = profil.instalasi.values_list('pk', flat=True)
                 instalasi = UnitInstalasi.objects.filter(pk__in=instalasis)
-            elif profil.sub_bidang:
-                instalasi = UnitInstalasi.objects.filter(sub_bidang=profil.sub_bidang)
-            elif profil.bidang:
-                instalasi = UnitInstalasi.objects.filter(sub_bidang__bidang=profil.bidang)
+            elif profil and profil.sub_bidang.exists():
+                sub_bidang_ids = profil.sub_bidang.values_list('pk', flat=True)
+                instalasi = UnitInstalasi.objects.filter(sub_bidang__in=sub_bidang_ids)
+            elif profil and profil.bidang.exists():
+                instalasi = UnitInstalasi.objects.filter(sub_bidang__bidang__in=profil.bidang.values_list('pk', flat=True))
         return instalasi
     
     def get_context_data(self, **kwargs):
@@ -2881,14 +2799,36 @@ class KehadiranSpesialisListView(LoginRequiredMixin, generic.ListView):
             'url': reverse('disiplinsdm_urls:jadwal_list'),
         })
         return context
-    
 
-class KehadiranListView(LoginRequiredMixin, generic.ListView):
+    
+class PenilaianKehadiranApelPagi(FormView):
+    template_name = "kehadirankegiatan/form.html"
+    form_class = ProsesKehadiranForm
+    success_url = reverse_lazy('disiplinsdm_urls:kehadiran_list')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'title': 'Proses Penilaian Kehadiran Apel Pagi',
+            'selected': 'disiplin',
+            'url': self.success_url,
+        })
+        return context
+
+    def form_valid(self, form):
+        tanggal = form.cleaned_data['tanggal']
+        # Panggil Service
+        jumlah = ApelPagiService.proses_penilaian_apel_massal(tanggal)
+
+        messages.success(self.request, f"Berhasil memproses {jumlah} pegawai yang apel pagi pada {tanggal}.")
+        return super().form_valid(form)
+
+
+class KehadiranUtamaView(LoginRequiredMixin, BridgeSyncService, View):
     login_url = reverse_lazy('myaccount_urls:login_view')
     model = DaftarKegiatanPegawai
-    template_name = 'kehadirankegiatan/kehadiran_list.html'
-    paginate_by = 25
-
+    success_url = reverse_lazy('disiplinsdm_urls:kehadiran_list') # Sesuaikan name url view ini
+    
     def get_date_params(self):
         """Mengurai tanggal dari query string dan mengembalikan bulan dan tahun."""
         tgl = self.request.GET.get('tanggal')
@@ -2926,26 +2866,39 @@ class KehadiranListView(LoginRequiredMixin, generic.ListView):
                  base_filter['instalasi'] = instalasi
             elif profil.instalasi.exists():
                 base_filter['instalasi__in'] = profil.instalasi.all()
-            elif profil.sub_bidang:
-                base_filter['sub_bidang'] = profil.sub_bidang
-            elif profil.bidang:
-                base_filter['bidang'] = profil.bidang
+            elif profil.sub_bidang.exists():
+                base_filter['sub_bidang__in'] = profil.sub_bidang.values_list('pk', flat=True)
+            elif profil.bidang.exists():
+                base_filter['bidang__in'] = profil.bidang.values_list('pk', flat=True)
             return self.model.objects.filter(**base_filter)
 
         base_filter['pegawai'] = user
         return self.model.objects.filter(**base_filter)
 
-    def get_queryset(self):
+    def get_instalasi_list(self):
+        """Menyediakan daftar instalasi untuk filter dropdown berdasarkan hak akses."""
+        user = self.request.user
+        if user.is_superuser:
+            return UnitInstalasi.objects.filter(jenissdmperinstalasi__isnull=False).order_by('instalasi').distinct()
+
+        elif user.is_staff and hasattr(user, 'profil_admin'):
+            profil = user.profil_admin
+            if profil.instalasi.exists():
+                return profil.instalasi.all().order_by('instalasi')
+            elif profil.sub_bidang.exists():
+                return UnitInstalasi.objects.filter(sub_bidang__in=profil.sub_bidang.values_list('pk', flat=True))
+            elif profil.bidang.exists():
+                return UnitInstalasi.objects.filter(sub_bidang__bidang__in=profil.bidang.values_list('pk', flat=True))
+        return None
+
+    def get(self, request, *args, **kwargs):
+        """Menangani pemuatan halaman daftar kehadiran, filter, pencarian, dan export excel."""
         tanggal, bulan, tahun = self.get_date_params()
         instalasi = self.get_instalasi()
         base_queryset = self.get_queryset_for_user(bulan, tahun, instalasi)
 
         # --- Subquery Definitions ---
-        # Logika subquery disederhanakan menggunakan Count(..., distinct=True)
-        # untuk menghitung jumlah HARI unik, yang lebih efisien dan mudah dibaca.
-        
         def create_count_subquery(filter_kwargs):
-            """Helper function to create a distinct day count subquery."""
             return KehadiranKegiatan.objects.filter(
                 pegawai_id=OuterRef('pk'), **filter_kwargs
             ).values('pegawai_id').annotate(
@@ -2961,103 +2914,133 @@ class KehadiranListView(LoginRequiredMixin, generic.ListView):
         terlambat_subquery = create_count_subquery({'status_ketepatan__in': status_terlambat})
 
         # --- Terapkan Anotasi ---
-        # Nama anotasi diubah untuk menghindari konflik dengan properti model.
-        # Misalnya, 'jumlah_hadir' menjadi 'rekap_hadir'.
         annotated_queryset = base_queryset.annotate(
             rekap_hadir=Coalesce(Subquery(hadir_subquery, output_field=IntegerField()), 0),
             rekap_tidak_hadir=Coalesce(Subquery(tidak_hadir_subquery, output_field=IntegerField()), 0),
             rekap_terlambat=Coalesce(Subquery(terlambat_subquery, output_field=IntegerField()), 0),
             rekap_izin=Coalesce(Subquery(izin_subquery, output_field=IntegerField()), 0),
             rekap_sakit=Coalesce(Subquery(sakit_subquery, output_field=IntegerField()), 0)
-        )
+        ).select_related('pegawai', 'instalasi').order_by('pegawai__first_name', 'pegawai__last_name')
 
-        return annotated_queryset.select_related(
-            'pegawai', 'instalasi'
-        ).order_by('pegawai__first_name', 'pegawai__last_name')
+        # --- LOGIKA EXPORT EXCEL (Jika dipicu) ---
+        if request.GET.get('export') == 'excel':
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Rekap Kehadiran"
+            ws.append(['No', 'Nama Pegawai', 'Instalasi', 'Hadir', 'Terlambat', 'Absen', 'Izin', 'Sakit'])
+            
+            for index, item in enumerate(annotated_queryset, start=1):
+                ws.append([
+                    index, item.pegawai.get_full_name() if item.pegawai else '',
+                    item.instalasi.instalasi if item.instalasi else '',
+                    item.rekap_hadir, item.rekap_terlambat, item.rekap_tidak_hadir,
+                    item.rekap_izin, item.rekap_sakit
+                ])
+            response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            response['Content-Disposition'] = f'attachment; filename="Rekap_Kehadiran_{bulan}_{tahun}.xlsx"'
+            wb.save(response)
+            return response
 
-    def get_instalasi_list(self):
-        """Menyediakan daftar instalasi untuk filter dropdown berdasarkan hak akses."""
-        user = self.request.user
-        if user.is_superuser:
-            return UnitInstalasi.objects.filter(jenissdmperinstalasi__isnull=False).order_by('instalasi').distinct()
-
-        elif user.is_staff and hasattr(user, 'profil_admin'):
-            profil = user.profil_admin
-            if profil.instalasi.exists():
-                return profil.instalasi.all().order_by('instalasi')
-            elif profil.sub_bidang:
-                return UnitInstalasi.objects.filter(sub_bidang=profil.sub_bidang)
-            elif profil.bidang:
-                return UnitInstalasi.objects.filter(sub_bidang__bidang=profil.bidang)
-        return None
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        tanggal, bulan, tahun = self.get_date_params()
+        # --- INTEGRASI PAGINASI MANUAL ---
+        paginate_by = 25
+        paginator = Paginator(annotated_queryset, paginate_by)
+        page_number = request.GET.get('page', 1)
         
-        preserved_filters = self.request.GET.copy()
+        try:
+            page_obj = paginator.page(page_number)
+        except PageNotAnInteger:
+            page_obj = paginator.page(1)
+        except EmptyPage:
+            page_obj = paginator.page(paginator.num_pages)
+
+        # Pertahankan parameter filter untuk navigasi link halaman template
+        preserved_filters = request.GET.copy()
         if 'page' in preserved_filters:
             del preserved_filters['page']
-        
-        context.update({
+        if 'export' in preserved_filters:
+            del preserved_filters['export']
+
+        context = {
+            'object_list': page_obj.object_list, # Kompatibel dengan template ListView lama
+            'page_obj': page_obj,
+            'is_paginated': page_obj.has_other_pages(),
+            'form': PenilaianKehadiranForm(), # Form penilaian manual disatukan di sini
             'instalasi_list': self.get_instalasi_list(),
             'bulan': bulan,
             'tahun': tahun,
-            'title': 'Daftar Kehadiran Pegawai',
+            'title': 'Daftar Kehadiran & Penilaian Pegawai',
             'riwayat': 'active',
             'selected': 'disiplin',
             'preserved_filters': preserved_filters.urlencode()
-        })
-        return context
+        }
+        return render(request, 'kehadirankegiatan/kehadiran_list.html', context)
+
+    def post(self, request, *args, **kwargs):
+        """Menangani eksekusi pengiriman data form penilaian massal."""
+        form = PenilaianKehadiranForm(request.POST)
+        if form.is_valid():
+            tanggal = form.cleaned_data['tanggal']
+            
+            # Eksekusi Service Penilaian Massal
+            jumlah = KehadiranService.proses_kehadiran_massal(tanggal)
+            
+            messages.success(
+                request, 
+                f"Berhasil memproses {jumlah} pegawai yang memiliki jadwal pada {tanggal}."
+            )
+            # Dapatkan parameter filter aktif saat ini dari URL asal / HTTP_REFERER
+            # agar filter user tidak hilang setelah form di-submit
+            return HttpResponseRedirect(request.META.get('HTTP_REFERER', self.success_url))
+        
+        # Jika form tidak valid, arahkan kembali dengan pesan error
+        messages.error(request, "Gagal memproses penilaian. Pastikan format tanggal benar.")
+        return HttpResponseRedirect(request.META.get('HTTP_REFERER', self.success_url))
 
 
-
-class DetailKehadiranView(LoginRequiredMixin, generic.DetailView):
+class DetailKehadiranView(LoginRequiredMixin, generic.ListView):
     login_url = reverse_lazy('myaccount_urls:login_view')
     model = DaftarKegiatanPegawai
     template_name = 'kehadirankegiatan/kehadiran_detail_list.html'
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        daftar_kegiatan = self.get_object()
-
-        kehadiran_queryset = daftar_kegiatan.kehadirankegiatan_set.select_related('alasan')
-
+        pegawai_id = self.kwargs.get('pk')
+        queryset = super().get_queryset().filter(pegawai_id=pegawai_id)
+        pegawai = queryset.annotate(tgl=TruncDate('kehadirankegiatan__tanggal'))
+        
         riwayat_kehadiran = (
-            kehadiran_queryset.annotate(
-                tgl=TruncDate('tanggal')
-            )
-            .values('tgl') 
+            pegawai.values('tgl')  # Group by berdasarkan Tanggal
             .annotate(
-                jumlah_record=Count('id'),
-                ## REFACTOR: Cek apakah pegawai hadir pada hari itu.
-                # Max('hadir') akan menghasilkan True jika ada minimal satu record 'hadir=True'.
-                is_present=Max('hadir', output_field=BooleanField()),
-
-                ## REFACTOR: Hanya tampilkan jam datang jika statusnya hadir.
+                # Solusi: Definisikan jumlah_record di awal agar bisa dibaca oleh Case/When di bawahnya
+                jumlah_record=Count('kehadirankegiatan__id'),
+                
+                # Ambil jam terkecil sebagai jam datang jika ada yang hadir
                 jam_datang=Case(
-                    When(is_present=True, then=Min('tanggal__time')),
+                    When(kehadirankegiatan__hadir=True, then=Min('kehadirankegiatan__tanggal__time')),
                     default=Value(None, output_field=TimeField())
                 ),
 
-                ## REFACTOR: Hanya tampilkan jam pulang jika hadir & ada >1 record.
+                # Gunakan alias 'jumlah_record' yang sudah didefinisikan di atas
                 jam_pulang=Case(
-                    When(is_present=True, jumlah_record__gt=1, then=Max('tanggal__time')),
+                    When(
+                        kehadirankegiatan__hadir=True, 
+                        jumlah_record__gt=1,  # <--- SEKARANG AMAN, Menggunakan alias yang valid
+                        then=Max('kehadirankegiatan__tanggal__time')
+                    ),
                     default=Value(None, output_field=TimeField())
                 ),
 
-                ## REFACTOR: Status sekarang dinamis berdasarkan data, bukan hardcode.
                 status=Case(
-                    When(is_present=True, then=Value('Hadir')),
+                    When(kehadirankegiatan__hadir=True, then=Value('Hadir')),
                     default=Value('Tidak Hadir'),
                     output_field=CharField()
                 ),
 
-                ketepatan=Min('status_ketepatan'),
-                alasan=Max('alasan__alasan'),
-                keterangan=Max('ket'),
+                ketepatan=Min('kehadirankegiatan__status_ketepatan'),
+                alasan=Max('kehadirankegiatan__alasan__alasan'),
+                keterangan=Max('kehadirankegiatan__ket'),
             )
-            .order_by('tgl')
+            .order_by('-tgl')
         )
 
         context['riwayat_kehadiran'] = riwayat_kehadiran
@@ -3203,298 +3186,6 @@ class KehadiranUpdateView(LoginRequiredMixin, UserPassesTestMixin, generic.Updat
         return url
 
 
-class FingerprintProcessor:
-    """
-    Versi final FingerprintProcessor dengan logika yang disempurnakan untuk memastikan
-    konsistensi data antara status kehadiran, ketepatan, dan alasan.
-    """
-    COL_WAKTU, COL_NIP, COL_IO_FLAG = 0, 4, 10
-    TIPE_DATANG, TIPE_PULANG = 'Absen Datang', 'Absen Pulang'
-
-    def __init__(self, file_path):
-        self.file_path = file_path
-        self.profil_cache = {}
-        self.jadwal_cache = defaultdict(list)
-        self.relasi_sdm_cache = {}
-        self.aturan_toleransi = list(
-            AturanToleransiKeterlambatan.objects.filter(is_aktif=True).order_by('urutan')
-        )
-        if not self.aturan_toleransi:
-            logger.warning("Peringatan: Tidak ada aturan toleransi aktif di database.")
-        
-        self.matched_schedule_slots = defaultdict(lambda: defaultdict(dict))
-
-    def run(self):
-        """Titik masuk utama untuk menjalankan seluruh proses."""
-        try:
-            wb = load_workbook(self.file_path, read_only=True, data_only=True)
-            ws = wb.active
-        except Exception as e:
-            logger.error(f"Gagal membuka file Excel: {e}")
-            return
-
-        rows = list(ws.iter_rows(min_row=3))
-        if not rows: return
-
-        all_dates = self._get_all_dates_from_rows(rows)
-        self._prefetch_related_data(rows, all_dates)
-        
-        scans_by_employee = self._group_and_sort_scans(rows)
-        
-        for (user_id, scan_date), scans in scans_by_employee.items():
-            self._process_scans_for_employee_day(user_id, scan_date, scans)
-            
-        self._mark_absent_employees()
-
-    # --- TAHAP 1: PERSIAPAN DATA ---
-    def _get_all_dates_from_rows(self, rows):
-        dates = set()
-        for row in rows:
-            waktu_scan = self._parse_waktu(row[self.COL_WAKTU].value)
-            if waktu_scan:
-                dates.add(waktu_scan.date())
-        return dates
-
-    def _prefetch_related_data(self, rows, all_dates):
-        all_nips = {str(r[self.COL_NIP].value).strip().replace(" ", "") for r in rows if r[self.COL_NIP].value}
-        if not all_nips: return
-
-        self.profil_cache = {p.nip: p for p in ProfilSDM.objects.filter(nip__in=all_nips)}
-        user_ids = [p.user_id for p in self.profil_cache.values()]
-        
-        dates_to_fetch = all_dates.copy()
-        for d in all_dates:
-            dates_to_fetch.add(d - timedelta(days=1))
-        
-        schedules = ApprovedJadwalDinasSDM.objects.filter(
-            pegawai__pegawai_id__in=user_ids, tanggal__in=dates_to_fetch
-        ).select_related('pegawai__pegawai', 'kategori_jadwal')
-
-        for jadwal in schedules:
-            self.jadwal_cache[(jadwal.pegawai.pegawai_id, jadwal.tanggal)].append(jadwal)
-        
-        for date in all_dates:
-            relations = JenisSDMPerinstalasi.objects.filter(pegawai_id__in=user_ids, bulan=date.month, tahun=date.year)
-            for relasi in relations:
-                self.relasi_sdm_cache[(relasi.pegawai_id, date.month, date.year)] = relasi
-
-    def _parse_waktu(self, waktu_value):
-        if isinstance(waktu_value, datetime): return waktu_value
-        if isinstance(waktu_value, str):
-            try: return parse(waktu_value.replace('.', ':'), dayfirst=True)
-            except (ValueError, TypeError): return None
-        return None
-
-    def _group_and_sort_scans(self, rows):
-        scans_by_employee = defaultdict(list)
-        for row in rows:
-            waktu_scan = self._parse_waktu(row[self.COL_WAKTU].value)
-            nip_val, io_flag = row[self.COL_NIP].value, row[self.COL_IO_FLAG].value
-            if not all([waktu_scan, nip_val, io_flag in [1, 2]]): continue
-
-            profil = self.profil_cache.get(str(nip_val).strip().replace(" ", ""))
-            if not profil: continue
-            
-            tipe_kegiatan = self.TIPE_DATANG if io_flag == 1 else self.TIPE_PULANG
-            scans_by_employee[(profil.user_id, waktu_scan.date())].append({'waktu': waktu_scan, 'tipe': tipe_kegiatan})
-        
-        for key in scans_by_employee:
-            scans_by_employee[key].sort(key=lambda x: x['waktu'])
-        return scans_by_employee
-
-    # --- TAHAP 2: PROSES INTI ---
-    def _process_scans_for_employee_day(self, user_id, scan_date, scans):
-        for scan in scans:
-            tipe_kegiatan_scan, waktu_scan = scan['tipe'], scan['waktu']
-            
-            jadwal_dinas = None
-            
-            available_schedules_today = self._get_available_schedules(user_id, scan_date, tipe_kegiatan_scan)
-            if available_schedules_today:
-                jadwal_dinas, _ = self._calculate_best_schedule_fit(available_schedules_today, waktu_scan, tipe_kegiatan_scan)
-
-            if not jadwal_dinas and tipe_kegiatan_scan == self.TIPE_PULANG:
-                kemarin = scan_date - timedelta(days=1)
-                available_schedules_kemarin = self._get_available_schedules(user_id, kemarin, tipe_kegiatan_scan)
-                jadwal_malam_kemarin = [j for j in available_schedules_kemarin if j.kategori_jadwal and 'malam' in j.kategori_jadwal.kategori_jadwal.lower()]
-                if jadwal_malam_kemarin:
-                    jadwal_dinas, _ = self._calculate_best_schedule_fit(jadwal_malam_kemarin, waktu_scan, tipe_kegiatan_scan)
-            
-            if jadwal_dinas:
-                status_ketepatan, alasan = self._cek_status_dan_alasan(waktu_scan.time(), jadwal_dinas, tipe_kegiatan_scan)
-
-                self._save_kehadiran(
-                    user_id, jadwal_dinas.tanggal, tipe_kegiatan_scan, waktu_scan,
-                    hadir=True, status=status_ketepatan, alasan=alasan,
-                    ket=f"Sesuai jadwal {jadwal_dinas.kategori_jadwal.kategori_jadwal}"
-                )
-                
-                slot_key = 'datang' if tipe_kegiatan_scan == self.TIPE_DATANG else 'pulang'
-                self.matched_schedule_slots[(user_id, jadwal_dinas.tanggal)][jadwal_dinas.id][slot_key] = True
-
-    def _get_available_schedules(self, user_id, scan_date, tipe_kegiatan_scan):
-        all_schedules = self.jadwal_cache.get((user_id, scan_date), [])
-        slot_key = 'datang' if tipe_kegiatan_scan == self.TIPE_DATANG else 'pulang'
-        return [j for j in all_schedules if not self.matched_schedule_slots.get((user_id, scan_date), {}).get(j.id, {}).get(slot_key)]
-
-    def _calculate_best_schedule_fit(self, jadwal_list, waktu_scan, tipe_kegiatan_scan):
-        jadwal_terbaik, selisih_terkecil = None, timedelta.max
-        ref_time_attr = 'waktu_datang' if tipe_kegiatan_scan == self.TIPE_DATANG else 'waktu_pulang'
-
-        for jadwal in jadwal_list:
-            ref_time = getattr(jadwal.kategori_jadwal, ref_time_attr, None)
-            if not ref_time: continue
-
-            ref_dt = datetime.combine(jadwal.tanggal, ref_time)
-            if tipe_kegiatan_scan == self.TIPE_PULANG:
-                datang_time = self._get_schedule_ref_time(jadwal, self.TIPE_DATANG)
-                if datang_time and ref_time < datang_time:
-                    ref_dt += timedelta(days=1)
-
-            selisih = abs(waktu_scan - ref_dt)
-            if selisih < selisih_terkecil:
-                selisih_terkecil, jadwal_terbaik = selisih, jadwal
-        
-        return jadwal_terbaik, selisih_terkecil
-
-    # --- TAHAP 3: FINALISASI & HELPER ---
-    def _mark_absent_employees(self):
-        alasan_tk, _ = AlasanTidakHadir.objects.get_or_create(alasan='Tanpa Keterangan')
-        
-        for (user_id, tanggal), daftar_jadwal in self.jadwal_cache.items():
-            for jadwal in daftar_jadwal:
-                if not self.matched_schedule_slots.get((user_id, tanggal), {}).get(jadwal.id, {}).get('datang'):
-                    waktu_datang_jadwal = self._get_schedule_ref_time(jadwal, self.TIPE_DATANG) or time(0, 0)
-                    tanggal_absen = datetime.combine(tanggal, waktu_datang_jadwal)
-                    
-                    nama_jadwal = "Tanpa Kategori"
-                    if jadwal.kategori_jadwal and hasattr(jadwal.kategori_jadwal, 'kategori_dinas'):
-                        nama_jadwal = jadwal.kategori_jadwal.kategori_dinas.kategori_dinas
-
-                    self._save_kehadiran(
-                        user_id, tanggal, self.TIPE_DATANG, tanggal_absen,
-                        hadir=False, status=None, alasan=alasan_tk,
-                        ket=f"Tidak ada scan masuk untuk jadwal {nama_jadwal}"
-                    )
-
-    def _cek_status_dan_alasan(self, jam_scan, jadwal, tipe):
-        alasan_hadir, _ = AlasanTidakHadir.objects.get_or_create(alasan='Hadir Sesuai Jadwal')
-        jam_referensi = self._get_schedule_ref_time(jadwal, tipe)
-        
-        if not jam_referensi:
-            return 'Tepat Waktu', alasan_hadir
-
-        if tipe == self.TIPE_DATANG:
-            selisih_menit = (datetime.combine(datetime.min, jam_scan) - datetime.combine(datetime.min, jam_referensi)).total_seconds() / 60
-            
-            if selisih_menit <= 0:
-                return 'Tepat Waktu', alasan_hadir
-            
-            for aturan in self.aturan_toleransi:
-                if selisih_menit <= aturan.batas_atas_menit:
-                    return aturan.status_yang_dihasilkan, alasan_hadir
-            
-            if self.aturan_toleransi:
-                return self.aturan_toleransi[-1].status_yang_dihasilkan, alasan_hadir
-            return 'Terlambat Berat', alasan_hadir
-            
-        elif tipe == self.TIPE_PULANG:
-            if jam_scan < jam_referensi:
-                return 'Cepat Pulang', alasan_hadir
-            return 'Tepat Waktu', alasan_hadir
-        
-        return 'Tepat Waktu', alasan_hadir
-
-    def _get_schedule_ref_time(self, jadwal, tipe_kegiatan):
-        if not jadwal or not jadwal.kategori_jadwal: return None
-        return getattr(jadwal.kategori_jadwal, 'waktu_datang' if tipe_kegiatan == self.TIPE_DATANG else 'waktu_pulang', None)
-
-    def _get_or_create_daftar_kegiatan(self, user_id, tipe_kegiatan, tanggal):
-        kegiatan, _ = JenisKegiatan.objects.get_or_create(jenis_kegiatan=tipe_kegiatan)
-        relasi = self.relasi_sdm_cache.get((user_id, tanggal.month, tanggal.year))
-        
-        defaults = {
-            'jenis_sdm': getattr(relasi, 'jenis_sdm', None), 'unor': getattr(relasi, 'unor', None),
-            'bidang': getattr(relasi, 'bidang', None), 'sub_bidang': getattr(relasi, 'sub_bidang', None),
-            'instalasi': getattr(relasi, 'instalasi', None)
-        }
-        
-        daftar, _ = DaftarKegiatanPegawai.objects.get_or_create(
-            pegawai_id=user_id, kegiatan=kegiatan, bulan=tanggal.month, tahun=tanggal.year,
-            defaults=defaults
-        )
-        return daftar
-
-    def _save_kehadiran(self, user_id, tanggal_jadwal, tipe_kegiatan, tanggal_scan, hadir, status=None, alasan=None, ket=''):
-        daftar_kegiatan = self._get_or_create_daftar_kegiatan(user_id, tipe_kegiatan, tanggal_jadwal)
-        
-        defaults = {
-            'hadir': hadir, 'status_ketepatan': status,
-            'alasan': alasan, 'ket': ket
-        }
-        
-        KehadiranKegiatan.objects.update_or_create(
-            pegawai=daftar_kegiatan, tanggal=tanggal_scan,
-            defaults=defaults
-        )
-                    
-
-class FingerprintAutoUploadView(LoginRequiredMixin, UserPassesTestMixin, FormView):
-    """
-    View untuk menangani halaman unggah file fingerprint,
-    memvalidasi izin pengguna, dan memicu prosesor.
-    """
-    template_name = 'kehadirankegiatan/form.html'
-    # Ganti UploadFingerprintForm dengan nama form Anda yang sebenarnya
-    form_class = UploadFingerprintForm
-    success_url = reverse_lazy('disiplinsdm_urls:kehadiran_list')
-
-    def test_func(self):
-        """Hanya superuser yang bisa mengakses halaman ini."""
-        return self.request.user.is_superuser
-
-    def handle_no_permission(self):
-        """
-        Jika pengguna tidak memiliki izin, kirim pesan error dan
-        kembalikan ke halaman sebelumnya.
-        """
-        messages.error(self.request, 'Anda tidak memiliki izin untuk upload data presensi.')
-        return redirect(self.success_url)
-
-    def get_context_data(self, **kwargs):
-        """Menambahkan data konteks ke template."""
-        context = super().get_context_data(**kwargs)
-        context.update({
-            'title': 'Upload Fingerprint',
-            'url': self.success_url,
-            'selected': 'disiplin',
-            'riwayat': 'active'
-        })
-        return context
-
-    @transaction.atomic
-    def form_valid(self, form):
-        """
-        Dipanggil jika form yang diunggah valid.
-        Memicu prosesor fingerprint di dalam sebuah transaksi database.
-        """
-        file = form.cleaned_data['file']
-        try:
-            # Membuat instance dari kelas processor dan menjalankannya
-            processor = FingerprintProcessor(file)
-            processor.run()
-            messages.success(self.request, "Fingerprint berhasil diproses. Data ketepatan hadir sudah ditentukan.")
-
-        except Exception as e:
-            # Jika terjadi error apapun, transaksi akan dibatalkan
-            # dan pesan error akan dicatat dan ditampilkan.
-            logger.error(f"Kesalahan saat memproses fingerprint: {e}", exc_info=True)
-            messages.error(self.request, f"Terjadi kesalahan fatal saat memproses file. Proses dibatalkan. Error: {str(e)}")
-            return redirect(self.success_url)
-
-        return super().form_valid(form)
-    
-
 class RekapPiketListView(generic.ListView):
     model = JadwalDinasSDM
     template_name = 'jadwal_piket/rekap_piket.html'
@@ -3516,12 +3207,12 @@ class RekapPiketListView(generic.ListView):
         if profil:
             if profil.instalasi.exists():
                 return profil.instalasi.first()
-            if profil.sub_bidang:
-                return profil.sub_bidang
-            if profil.bidang:
-                return profil.bidang
-            if profil.unor:
-                return profil.unor
+            if profil.sub_bidang.exists():
+                return profil.sub_bidang.first()
+            if profil.bidang.exists():
+                return profil.bidang.first()
+            if profil.unor.exists():
+                return profil.unor.first()
         
         # Pegawai biasa
         penempatan = user.riwayat_penempatan.filter(status=True).first()
@@ -3743,41 +3434,289 @@ class SinkronisasiResultView(TemplateView):
         return context
     
 # Dashboard pengecekan kehadiran pegawai berdasarkan data log kehadiran dari mesin baru
-class LogKehadiranListView(ListView):
-    model = LogKehadiran
-    template_name = 'kehadirankegiatan/log_kehadiran_list.html'
-    context_object_name = 'log_kehadiran_list'
-    paginate_by = 50
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        pegawai_params = self.request.GET.get('pegawai')
-        context['pegawai'] = int(pegawai_params) if pegawai_params and pegawai_params.isdigit() else None
-        devicename = LogKehadiran.objects.filter(devicename__isnull=False).values_list('devicename', flat=True).distinct()
-        context['devicenames'] = devicename
-        pegawai = MappingMesinAbsensi.objects.filter(pegawai__isnull=False).select_related('pegawai')
-        context['pegawai_list'] = pegawai
-        context['title'] = 'Log Kehadiran dari Mesin Absensi'
-        context['selected'] = 'disiplin'
-        context['riwayat'] = 'active'
-        return context
-    
-    def get_queryset(self):
-        devicename = self.request.GET.get('devicename')
-        pegawai = self.request.GET.get('pegawai')
-        queryset = super().get_queryset().select_related('mapping__pegawai')
+class LogKehadiranView(BridgeSyncService, View):
+    def set_default_date(self):
+        """Fungsi pembantu untuk menetapkan waktu default (Hari ini)"""
+        today = timezone.now().date()
+        self.hari = today.day
+        self.bulan = today.month
+        self.tahun = today.year
+        self.full_date_str = today.strftime('%Y-%m-%d') # '2026-06-11'
+        
+    def get(self, request, *args, **kwargs):
+        # 1. Ambil string tanggal dari input type="date" (Format: YYYY-MM-DD)
+        date_param = self.request.GET.get('tanggal_pilih')
+        
+        if date_param:
+            try:
+                # Konversi string 'YYYY-MM-DD' menjadi objek datetime
+                parsed_date = datetime.strptime(date_param, '%Y-%m-%d').date()
+                self.hari = parsed_date.day
+                self.bulan = parsed_date.month
+                self.tahun = parsed_date.year
+                self.full_date_str = date_param # Simpan untuk dioper ke template
+            except ValueError:
+                # Antisipasi jika format string tidak valid, fallback ke hari ini
+                self.set_default_date()
+        else:
+            # Jika form baru pertama dimuat (kosong), fallback ke hari ini
+            self.set_default_date()
+            
+        # Mapping nama bulan untuk judul file
+        nama_bulan = {
+            1: 'Januari', 2: 'Februari', 3: 'Maret', 4: 'April', 5: 'Mei', 6: 'Juni',
+            7: 'Juli', 8: 'Agustus', 9: 'September', 10: 'Oktober', 11: 'November', 12: 'Desember'
+        }.get(self.bulan, '')
+            
+        devicename = request.GET.get('devicename')
+        pegawai = request.GET.get('pegawai')
+        export_mode = request.GET.get('export') # Ambil parameter export
+        
+        # 1. Bangun QuerySet dasar (Berlaku untuk HTML maupun Excel)
+        # ==============================================================
+        # OPTIMASI QUERY DENGAN PREFETCH UNTUK PENEMPATAN AKTIF
+        # ==============================================================
+        # 1. Ambil hanya penempatan yang statusnya aktif, serta join level 1-4 nya
+        active_penempatan_qs = RiwayatPenempatan.objects.filter(
+            status=True
+        ).select_related(
+            'penempatan_level1', 'penempatan_level2', 
+            'penempatan_level3', 'penempatan_level4'
+        )
+
+        # 2. Subquery untuk status evaluasi
+        subquery_evaluasi = LogAktivitasAbsen.objects.filter(
+            absensi_harian__pegawai_id=OuterRef('mapping__pegawai_id'),
+            waktu=OuterRef('datetime')
+        )
+        
+        # 3. Bangun Queryset Utama
+        queryset = LogKehadiran.objects.select_related(
+            'mapping__pegawai'
+        ).prefetch_related(
+            # Gunakan Prefetch untuk menyimpan penempatan aktif ke atribut custom _active_penempatans
+            Prefetch('mapping__pegawai__riwayat_penempatan', queryset=active_penempatan_qs, to_attr='active_penempatans')
+        ).annotate(
+            is_evaluated=Exists(subquery_evaluasi)
+        ).order_by('-datetime')
+        
         if devicename:
             queryset = queryset.filter(devicename=devicename)
         if pegawai:
             queryset = queryset.filter(mapping__pegawai=pegawai)
-        return queryset.order_by('-datetime')
+        if self.hari:
+            queryset = queryset.filter(datetime__day=self.hari)
+        if self.bulan:
+            queryset = queryset.filter(datetime__month=self.bulan)
+        if self.tahun:
+            queryset = queryset.filter(datetime__year=self.tahun)
+            
+        # 2. LOGIKA EXPORT EXCEL (Jika ?export=excel ada di URL)
+        if export_mode == 'excel':
+            # Membuat workbook excel baru di memori
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Log Kehadiran"
+            
+            # Mengaktifkan gridlines agar garis tabel bawaan excel tetap terlihat
+            ws.views.sheetView[0].showGridLines = True
+
+            # Styles tambahan untuk status evaluasi (Opsional agar makin rapi)
+            font_sudah = Font(name='Arial', size=10, color='1E4620', bold=True) # Hijau Tua
+            fill_sudah = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid') # Hijau Lembut
+            
+            font_belum = Font(name='Arial', size=10, color='721C24') # Merah Tua
+            fill_belum = PatternFill(start_color='F8D7DA', end_color='F8D7DA', fill_type='solid') # Merah Lembut
+            
+            # Styles komponen tabel
+            font_judul = Font(name='Arial', size=14, bold=True)
+            font_header = Font(name='Arial', size=11, bold=True, color='FFFFFF')
+            font_data = Font(name='Arial', size=10)
+            
+            fill_header = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid') # Biru Navy Corporate
+            align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            align_left = Alignment(horizontal='left', vertical='center')
+            
+            border_tipis = Border(
+                left=Side(style='thin', color='D9D9D9'),
+                right=Side(style='thin', color='D9D9D9'),
+                top=Side(style='thin', color='D9D9D9'),
+                bottom=Side(style='thin', color='D9D9D9')
+            )
+            
+            # Menulis Judul Dokumen (Baris 1 & 2)
+            ws['A1'] = "LOG PRESENSI DARI MESIN ABSENSI"
+            ws['A1'].font = font_judul
+            ws['A2'] = f"Periode: {nama_bulan} {self.tahun}"
+            ws['A2'].font = Font(name='Arial', size=11, italic=True)
+            
+            # TAMBAHKAN KOLOM PENEMPATAN DI HEADER
+            headers = ['No', 'Nama Pegawai', 'Penempatan', 'Waktu/Datetime', 'Arah (IN/OUT)', 'Nama Perangkat', 'Status Evaluasi']
+            ws.append([]) 
+            ws.append(headers) 
+            
+            for cell in ws[4]:
+                cell.font = font_header
+                cell.fill = fill_header
+                cell.alignment = align_center
+            ws.row_dimensions[4].height = 25
+            
+            for index, log in enumerate(queryset, start=1):
+                dt_naive = timezone.make_naive(log.datetime) if timezone.is_aware(log.datetime) else log.datetime
+                dt_str = dt_naive.strftime('%Y-%m-%d %H:%M:%S')
+                status_bool = getattr(log, 'is_evaluated', False)
+                status_teks = "Sudah Dinilai" if status_bool else "Belum Dinilai"
+                
+                # MENGAMBIL PENEMPATAN UNTUK EXCEL
+                penempatan_str = "N/A"
+                if hasattr(log.mapping.pegawai, 'active_penempatans') and log.mapping.pegawai.active_penempatans:
+                    # Ambil property penempatan dari objek RiwayatPenempatan yang aktif
+                    penempatan_str = log.mapping.pegawai.active_penempatans[0].penempatan
+                
+                ws.append([
+                    index,
+                    log.personname,
+                    penempatan_str, # Sisipkan di sini
+                    dt_str,
+                    log.direction,
+                    log.devicename,
+                    status_teks
+                ])
+                
+                current_row = ws.max_row
+                ws.row_dimensions[current_row].height = 20
+                
+                for col_idx, cell in enumerate(ws[current_row], start=1):
+                    cell.font = font_data
+                    cell.border = border_tipis
+                    if col_idx in [1, 5]:
+                        cell.alignment = align_center
+                    else:
+                        cell.alignment = align_left
+                        
+                    if col_idx == 7: # Kolom status bergeser ke 7
+                        if status_bool:
+                            cell.font = font_sudah
+                            cell.fill = fill_sudah
+                        else:
+                            cell.font = font_belum
+                            cell.fill = fill_belum
+
+            for col in ws.columns:
+                max_len = 0
+                col_letter = get_column_letter(col[0].column)
+                for cell in col:
+                    if cell.row < 4: continue
+                    if cell.value:
+                        max_len = max(max_len, len(str(cell.value)))
+                ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+            response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            response['Content-Disposition'] = f'attachment; filename="Log_Kehadiran_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+            wb.save(response)
+            return response
+        
+        devicenames = queryset.filter(devicename__isnull=False).values_list('devicename', flat=True).order_by().distinct()
+        pegawais = queryset.filter(mapping__pegawai__isnull=False).values('mapping__pegawai__id', 'mapping__pegawai__first_name', 'mapping__pegawai__last_name').order_by().distinct()
+        
+        # =================================================================
+        # AMBIL DATA MASTER STRUKTUR ORGANISASI UNTUK TOMBOL LANGKAH 2
+        # =================================================================
+        master_instalasi = UnitInstalasi.objects.all().order_by('instalasi')
+        master_sub_bidang = SubBidang.objects.all().order_by('sub_bidang')
+        master_bidang = Bidang.objects.all().order_by('bidang')
+        master_unor = UnitOrganisasi.objects.all().order_by('unor') # jika ada tingkat Unor
+        
+        # 4. PAGINASI
+        items_per_page = 50  
+        paginator = Paginator(queryset, items_per_page)
+        page_number = request.GET.get('page', 1)
+        
+        try:
+            log_kehadiran_page = paginator.page(page_number)
+        except PageNotAnInteger:
+            log_kehadiran_page = paginator.page(1)
+        except EmptyPage:
+            log_kehadiran_page = paginator.page(paginator.num_pages)
+            
+        # 5. MASUKKAN KE CONTEXT TEMPLATE
+        context = {
+            'current_date_filter': self.full_date_str,
+            'form': ProsesKehadiranForm(),
+            'log_kehadiran_list': log_kehadiran_page, 
+            'title': 'Log Kehadiran dari Mesin Absensi',
+            'selected': 'disiplin',
+            'riwayat': 'active',
+            'devicenames': devicenames,
+            'pegawais': pegawais,
+            
+            # Variabel context baru yang dibaca oleh template loop {% for inst in master_instalasi %}
+            'master_instalasi': master_instalasi,
+            'master_sub_bidang': master_sub_bidang,
+            'master_bidang': master_bidang,
+            'master_unor': master_unor,
+            'title': 'Log Kehadiran Dari Mesin Absen',
+            'title_page':'Log Kehadiran'
+        }
+        return render(request, 'kehadirankegiatan/log_kehadiran_list.html', context)
     
     
-from django.http import JsonResponse
-from .services import BridgeSyncService
-from django.views.decorators.http import require_POST
-from django.contrib.auth.decorators import login_required
-import json
+    def post(self, request, *args, **kwargs):
+        form = ProsesKehadiranForm(request.POST)
+        action = request.POST.get('action')
+        
+        # =================================================================
+        # AKSI 1: TARIK DATA LOG DARI MESIN (Menggunakan form validasi tanggal default)
+        # =================================================================
+        if action == 'pull_bridge_logs' and form.is_valid():
+            target_date = form.cleaned_data['tanggal']
+            total_synced, total_ignored = self.run_daily_sync(target_date)
+            messages.success(request, f"Sukses menarik log mesin tanggal {target_date}. Total baru: {total_synced}.")
+            
+        # =================================================================
+        # AKSI 2: EVALUASI BERBASIS STRUKTUR & TANGGAL KHUSUS EVALUASI
+        # =================================================================
+        elif action == 'evaluate_attendance':
+            # Ambil tanggal khusus dari input Langkah 2
+            tanggal_eval_raw = request.POST.get('tanggal_evaluasi')
+            
+            if not tanggal_eval_raw:
+                messages.error(request, "Tanggal target evaluasi Langkah 2 wajib diisi.")
+                return redirect(reverse('disiplinsdm_urls:log-kehadiran'))
+                
+            target_date = datetime.strptime(tanggal_eval_raw, '%Y-%m-%d').date()
+            
+            # Tangkap parameter struktur organisasi
+            instalasi_id = request.POST.get('instalasi_id')
+            sub_bidang_id = request.POST.get('sub_bidang_id')
+            bidang_id = request.POST.get('bidang_id')
+            unor_id = request.POST.get('unor_id')
+            
+            instalasi_id = int(instalasi_id) if instalasi_id and instalasi_id.isdigit() else None
+            sub_bidang_id = int(sub_bidang_id) if sub_bidang_id and sub_bidang_id.isdigit() else None
+            bidang_id = int(bidang_id) if bidang_id and bidang_id.isdigit() else None
+            unor_id = int(unor_id) if unor_id and unor_id.isdigit() else None
+            
+            # Eksekusi orchestrator
+            success, batch_message = AttendanceOrchestrator.execute_by_structure(
+                target_date=target_date,
+                instalasi_id=instalasi_id,
+                sub_bidang_id=sub_bidang_id,
+                bidang_id=bidang_id,
+                unor_id=unor_id
+            )
+            
+            # print('hasil proses penilaian: ', success)
+            
+            if success:
+                messages.success(request, batch_message)
+            else:
+                messages.warning(request, batch_message)
+                
+        else:
+            messages.error(request, "Terjadi kesalahan pemrosesan form atau input tidak valid.")
+            
+        return redirect(reverse('disiplinsdm_urls:log-kehadiran'))
 
 def sync_dashboard(request):
     date_from = request.GET.get('date_from')
@@ -3897,50 +3836,668 @@ def process_single_sync(request):
             'success': False, 
             'message': f'Server Error: {str(e)}'
         }, status=500)
-        
-        
 
-class PenilaianKehadiranView(FormView):
-    template_name = 'kehadirankegiatan/form.html'
-    form_class = ProsesKehadiranForm
-    success_url = reverse_lazy('disiplinsdm_urls:kehadiran_list')
+
+class SyncAnalisisPresensiPerInstalasi(View):
+    def get(self, request, *args, **kwargs):
+        instalasi_id = kwargs.get('instalasi_id')
+        sub_bidang_id = kwargs.get('sub_bidang_id')
+        bidang_id = kwargs.get('bidang_id')
+        penempatan_id = None
+
+        target_date_str = request.GET.get('tanggal')
+        success_count = 0
+        ignored_count = 0
+        
+        try:
+            target_date = date.fromisoformat(target_date_str)
+        except (ValueError, TypeError):
+            messages.error(request, 'Format tanggal tidak valid. Gunakan YYYY-MM-DD.')
+            return redirect(reverse('disiplinsdm_urls:kehadiran_list'))
+        
+        # 1. Tentukan ID mana yang aktif (is not None)
+        if instalasi_id is not None:
+            penempatan_id = instalasi_id
+            filter_params = {'instalasi_id': instalasi_id}
+        elif sub_bidang_id is not None:
+            penempatan_id = sub_bidang_id
+            filter_params = {'sub_bidang_id': sub_bidang_id}
+        elif bidang_id is not None:
+            penempatan_id = bidang_id
+            filter_params = {'bidang_id': bidang_id}
+        else:
+            penempatan_id = None
+            filter_params = {}
+
+        # 2. Panggil fungsi cukup SATU KALI menggunakan **kwargs
+        if filter_params:
+            success_count, ignored_count = AttendanceOrchestrator.execute_by_structure(
+                target_date, **filter_params
+            )
+
+        messages.success(request, f'Sinkronisasi selesai untuk Instalasi ID {penempatan_id} pada {target_date}. Berhasil: {success_count}, Dilewati: {ignored_count}')
+        return redirect(reverse('disiplinsdm_urls:kehadiran_list') + f'?inst={penempatan_id}&tanggal={target_date_str}')
     
+    
+########################################### VIEW BARU UNTUK MODEL BARU ##############################
+from .models import AbsensiHarian, LogAktivitasAbsen
+
+class RekapPresensiBulananView(LoginRequiredMixin, generic.ListView):
+    login_url = reverse_lazy('myaccount_urls:login_view')
+    model = Users
+    template_name = 'kehadirankegiatan/rekap_kehadiran_bulanan.html'
+    context_object_name = 'daftar_pegawai'
+    paginate_by = 50 
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return Users.objects.none()
+
+        # 1. Base Queryset dengan filter awal (Pegawai Aktif & Bukan Superuser)
+        queryset = Users.objects.filter(is_active=True).exclude(is_superuser=True).select_related('profil_user')
+        
+        # 2. Ambil parameter bulan & tahun dari request URL (GET)
+        try:
+            bulan = int(self.request.GET.get('bulan', ''))
+            tahun = int(self.request.GET.get('tahun', ''))
+        except ValueError:
+            bulan = date.today().month
+            tahun = date.today().year
+        
+        hari_ini = date.today()
+        
+        # Tentukan Batas Awal dan Akhir Bulan untuk Filter Query
+        awal_bulan = date(tahun, bulan, 1)
+        akhir_bulan = (awal_bulan + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+
+        # 3. Tentukan batas hari yang akan dinilai di dalam bulan tersebut
+        if tahun == hari_ini.year and bulan == hari_ini.month:
+            batas_hari_penilaian = hari_ini.day
+        else:
+            batas_hari_penilaian = calendar.monthrange(tahun, bulan)[1]
+            if date(tahun, bulan, 1) > hari_ini:
+                batas_hari_penilaian = 0
+
+        # =========================================================================
+        # OPTIMASI TAMBAHAN: AMBIL HARI LIBUR NASIONAL BULAN TERPILIH
+        # =========================================================================
+        libur_nasional_set = set(
+            HariLibur.objects.filter(
+                tanggal__range=(awal_bulan, akhir_bulan)
+            ).values_list('tanggal', flat=True)
+        )
+                
+        # Subquery untuk memeriksa keberadaan plotting jadwal kerja pegawai
+        jadwal_exists_subquery = JadwalDinasSDM.objects.filter(
+            pegawai__pegawai_id=OuterRef('pk'),
+            tanggal__range=(awal_bulan, akhir_bulan),
+        )
+
+        # Prefetch data transaksional bulanan
+        queryset = queryset.annotate(
+            has_jadwal_bulan_ini=Exists(jadwal_exists_subquery)
+        ).prefetch_related(
+            Prefetch(
+                'riwayat_penempatan', 
+                queryset=RiwayatPenempatan.objects.filter(status=True).select_related(
+                    'penempatan_level1', 'penempatan_level2', 'penempatan_level3', 'penempatan_level4'
+                ), 
+                to_attr='sk_penempatan_aktif'
+            ),
+            Prefetch(
+                'absensiharian_set', 
+                # Ikut sertakan prefetch tabel ApprovedJadwalDinasSDM melalui nama relation-nya (contoh: 'approved_jadwal')
+                # jika Anda ingin menarik detail tipe dinas langsung per hari dari database.
+                queryset=AbsensiHarian.objects.filter(tanggal__range=(awal_bulan, akhir_bulan)).prefetch_related('logs'),
+                to_attr='transaksi_absen_bulan_ini'
+            )
+        ).distinct().order_by('first_name', 'last_name')
+
+        queryset_list = list(queryset)
+        
+        # 4. JALANKAN KALKULASI DI LEVEL PYTHON (SANGAT RINGAN & CEPAT)
+        for pegawai in queryset_list:
+            absen_db_dict = {absen.tanggal: absen for absen in pegawai.transaksi_absen_bulan_ini}
+
+            # Inisialisasi counter indikator kedisiplinan
+            total_hadir = 0
+            total_apel = 0
+            total_alpa = 0
+            total_izin = 0
+            total_terlambat = 0
+            total_pulang_cepat = 0
+            total_libur = 0
+
+            # Evaluasi kehadiran mundur dari hari penilaian sampai tanggal 1
+            for day in range(batas_hari_penilaian, 0, -1):
+                loop_date = date(tahun, bulan, day)
+                
+                # Deteksi aturan kalender global secara realtime
+                is_minggu = loop_date.weekday() == 6
+                is_libur_nasional = loop_date in libur_nasional_set
+                is_tanggal_merah = is_minggu or is_libur_nasional
+
+                if loop_date in absen_db_dict:
+                    absen_hari_ini = absen_db_dict[loop_date]
+                    status = str(absen_hari_ini.status_final).strip().upper()
+                    
+                    if status in ['HADIR', 'DINAS']:
+                        total_hadir += 1
+                        
+                        for log in absen_hari_ini.logs.all():
+                            tipe_log = log.tipe
+                            status_ketepatan = str(log.status_ketepatan).strip().upper() if log.status_ketepatan else ""
+
+                            if tipe_log == 'APEL':
+                                total_apel += 1
+
+                            if tipe_log in ['DATANG', 'APEL'] and 'TERLAMBAT' in status_ketepatan:
+                                total_terlambat += 1
+
+                            if tipe_log == 'PULANG' and 'CEPAT' in status_ketepatan:
+                                total_pulang_cepat += 1
+                                
+                    elif status == 'IZIN':
+                        total_izin += 1
+                    elif status == 'LIBUR':
+                        total_libur += 1 
+                    elif status == 'ALPA':
+                        total_alpa += 1
+                else:
+                    # =========================================================================
+                    # SOLUSI INTI: EVALUASI KONDISI RECORD ABSENSI KOSONG (TANPA TRANSAKSI)
+                    # =========================================================================
+                    # Jika hari tersebut adalah tanggal merah (Minggu/Nasional) dan pegawai tidak punya jadwal 
+                    # ATAU memiliki jadwal selain bertipe 'Piket', maka dianggap sebagai HARI LIBUR
+                    if is_tanggal_merah:
+                        # Perlindungan: Staf piket yang harusnya masuk tapi tidak dibuatkan record oleh unit tetap Alpa.
+                        # Di sini kita asumsikan jika tidak ada record transaksi, default-nya diarahkan sebagai Libur Kalender.
+                        total_libur += 1
+                    else:
+                        # Jika hari kerja efektif biasa tapi datanya bolong, mutlak divonis Mangkir (Alpa)
+                        total_alpa += 1
+
+            # Tempelkan atribut summary ke objek pegawai agar bisa langsung dirender oleh template
+            pegawai.summary_hadir = total_hadir
+            pegawai.summary_apel = total_apel
+            pegawai.summary_alpa = total_alpa
+            pegawai.summary_izin = total_izin
+            pegawai.summary_terlambat = total_terlambat
+            pegawai.summary_pulang_cepat = total_pulang_cepat
+            pegawai.summary_libur = total_libur
+
+        # =========================================================================
+        # 5. LOGIKA SORTING
+        # =========================================================================
+        def sorting_key(pegawai):
+            if pegawai.sk_penempatan_aktif:
+                sk = pegawai.sk_penempatan_aktif[0]
+                nama_instalasi = sk.penempatan_level4.instalasi if sk.penempatan_level4 else ""
+            else:
+                nama_instalasi = "ZZZZ" 
+
+            kehadiran = -pegawai.summary_hadir
+            return (nama_instalasi, kehadiran)
+
+        queryset_list.sort(key=sorting_key)
+        return queryset_list
+
     def get_context_data(self, **kwargs):
+        # Ambil konteks dasar dari ListView
         context = super().get_context_data(**kwargs)
-        context.update({
-            'title': 'Proses Penilaian Kehadiran Manual',
-            'selected': 'disiplin',
-            'url': self.success_url,
-        })
+        
+        # Ambil kembali parameter bulan dan tahun dari request URL (atau set default hari ini)
+        try:
+            bulan = int(self.request.GET.get('bulan', ''))
+            tahun = int(self.request.GET.get('tahun', ''))
+        except ValueError:
+            bulan = date.today().month
+            tahun = date.today().year
+        
+        # Sediakan data pilihan bulan untuk filter select form di HTML
+        nama_bulan = {
+            1: 'Januari', 2: 'Februari', 3: 'Maret', 4: 'April', 5: 'Mei', 6: 'Juni',
+            7: 'Juli', 8: 'Agustus', 9: 'September', 10: 'Oktober', 11: 'November', 12: 'Desember'
+        }
+        
+        # Kirim parameter ke context template
+        context['selected_bulan'] = bulan
+        context['selected_tahun'] = tahun
+        context['daftar_bulan'] = nama_bulan
+        context['title_page'] = 'Rekap Presensi Bulanan'
+        context['label_periode'] = f"{nama_bulan.get(bulan)} {tahun}"
+        
         return context
 
-    def form_valid(self, form):
-        tanggal = form.cleaned_data['tanggal']
-        # Panggil Service
-        jumlah = KehadiranService.proses_kehadiran_massal(tanggal)
-        
-        messages.success(self.request, f"Berhasil memproses {jumlah} pegawai yang memiliki jadwal pada {tanggal}.")
-        return super().form_valid(form)
-    
-    
-class PenilaianKehadiranApelPagi(FormView):
-    template_name = "kehadirankegiatan/form.html"
-    form_class = ProsesKehadiranForm
-    success_url = reverse_lazy('disiplinsdm_urls:kehadiran_list')
-    
+    def post(self, request, *args, **kwargs):
+        """
+        Menangani Aksi Trigger Tombol Sinkronisasi & Penilaian Otomatis (Orchestrator)
+        Menerapkan teknik Rolling Window untuk menjamin keamanan data Shift Malam.
+        """
+        action = request.POST.get('action')
+        target_date_str = request.POST.get('target_date') # Format dari input HTML5: YYYY-MM-DD
+
+        if action == 'trigger_orchestrator' and target_date_str:
+            try:
+                # 1. Parsing tanggal dasar yang dipilih oleh admin
+                chosen_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+                
+                # 2. Tentukan window penanganan (Tanggal Awal dan Tanggal Akhir)
+                # Jika admin memproses 'hari ini', window-nya adalah [Kemarin, Hari Ini]
+                if chosen_date == timezone.now().date():
+                    date_awal = chosen_date - timedelta(days=1)
+                    date_akhir = chosen_date
+                else:
+                    # Jika admin memproses tanggal masa lalu, window-nya adalah [Tanggal Terpilih, Esoknya]
+                    # Ini memastikan log pulang shift malam di keesokan harinya ikut ditarik dan dievaluasi
+                    date_awal = chosen_date
+                    date_akhir = chosen_date + timedelta(days=1)
+
+                # 3. Jalankan Eksekusi Beruntun (Rolling Window)
+                # Tahap 1: Jalankan tanggal awal (untuk mengunci/mengawinkan sisa log shift malam)
+                success_1, msg_1 = NewAttendanceOrchestrator.execute_by_structure(target_date=date_awal, is_final_stage = True)
+            
+                # Tahap 2: Jalankan tanggal akhir (untuk membuka/memperbarui draft status berjalan)
+                success_2, msg_2 = NewAttendanceOrchestrator.execute_by_structure(target_date=date_akhir, is_final_stage = False)
+
+                # 4. Berikan feedback yang informatif kepada Admin di UI
+                if success_1 and success_2:
+                    messages.success(
+                        request, 
+                        f"Sukses menjalankan sinkronisasi berantai! "
+                        f"Fase 1 ({date_awal.strftime('%d-%m-%Y')}): {msg_1} | "
+                        f"Fase 2 ({date_akhir.strftime('%d-%m-%Y')}): {msg_2}"
+                    )
+                elif not success_1:
+                    messages.error(request, f"Gagal pada Sinkronisasi Fase 1 ({date_awal.strftime('%d-%m-%Y')}): {msg_1}")
+                else:
+                    messages.error(request, f"Gagal pada Sinkronisasi Fase 2 ({date_akhir.strftime('%d-%m-%Y')}): {msg_2}")
+                    
+            except Exception as e:
+                messages.error(request, f"Terjadi kesalahan sistem saat pemrosesan batch: {str(e)}")
+        else:
+            messages.warning(request, "Aksi atau tanggal target tidak valid.")
+
+        # Redirect kembali ke halaman rekap membawa parameter filter aktif agar halaman tidak blank
+        current_month = timezone.now().month
+        current_year = timezone.now().year
+        return redirect(
+            f"{request.path}?bulan={request.GET.get('bulan', current_month)}&tahun={request.GET.get('tahun', current_year)}"
+        )
+
+
+class DetailPresensiPegawaiView(LoginRequiredMixin, generic.DetailView):
+    login_url = reverse_lazy('myaccount_urls:login_view')
+    model = Users
+    template_name = 'kehadirankegiatan/detail_kehadiran_pegawai.html'
+    context_object_name = 'pegawai'
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context.update({
-            'title': 'Proses Penilaian Kehadiran Apel Pagi',
-            'selected': 'disiplin',
-            'url': self.success_url,
-        })
+        pegawai = self.get_object()
+
+        # 1. Ambil parameter filter bulan & tahun
+        try:
+            bulan = int(self.request.GET.get('bulan', ''))
+            tahun = int(self.request.GET.get('tahun', ''))
+        except ValueError:
+            bulan = date.today().month
+            tahun = date.today().year
+        
+        hari_ini = date.today()
+        
+        # Tentukan Batas Awal dan Akhir Bulan untuk Filter Kalender Libur Nasional
+        awal_bulan = date(tahun, bulan, 1)
+        akhir_bulan = (awal_bulan + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+
+        # =========================================================================
+        # OPTIMASI DAFTAR TANGGAL MERAH NASIONAL (BULAN TERPILIH)
+        # =========================================================================
+        libur_nasional_dict = {
+            hl.tanggal: hl.keterangan 
+            for hl in HariLibur.objects.filter(tanggal__range=(awal_bulan, akhir_bulan))
+        }
+
+        # 2. Tarik rekap absensi harian beserta seluruh log aktivitasnya (Prefetched)
+        absensi_bulan_ini = AbsensiHarian.objects.filter(
+            pegawai=pegawai,
+            tanggal__month=bulan,
+            tanggal__year=tahun
+        ).prefetch_related('logs').order_by('-tanggal')
+
+        # Map ke dictionary berbasis tanggal agar pencarian data instan
+        absen_dict = {absen.tanggal: absen for absen in absensi_bulan_ini}
+
+        # 3. Rentang tanggal penilaian (Mundur dari hari ini/akhir bulan)
+        if tahun == hari_ini.year and bulan == hari_ini.month:
+            total_hari = hari_ini.day
+        else:
+            total_hari = calendar.monthrange(tahun, bulan)[1]
+            if date(tahun, bulan, 1) > hari_ini:
+                total_hari = 0
+
+        riwayat_harian = []
+
+        # 4. Konstruksi baris tanggal per hari
+        for day in range(total_hari, 0, -1):
+            loop_date = date(tahun, bulan, day)
+            
+            # Deteksi status kalender harian di level Python
+            is_minggu = loop_date.weekday() == 6
+            is_libur_nasional = loop_date in libur_nasional_dict
+            
+            # Kerangka default untuk mengantisipasi pegawai yang tidak punya data/jadwal
+            data_hari = {
+                'id': '',
+                'tanggal': loop_date,
+                'status_final': 'Belum Presensi',
+                'status_css': 'secondary',
+                'keterangan_tambahan': '',
+                'list_detak_log': [], 
+                'has_logs': False
+            }
+
+            if loop_date in absen_dict:
+                absen_hari_ini = absen_dict[loop_date]
+                status_raw = str(absen_hari_ini.status_final).strip().upper() if absen_hari_ini.status_final else ""
+                data_hari['id'] = absen_hari_ini.pk
+                
+                if status_raw == 'HADIR':
+                    data_hari['status_final'] = 'HADIR'
+                    data_hari['status_css'] = 'success'
+                elif status_raw == 'ALPA':
+                    data_hari['status_final'] = 'MANGKIR'
+                    data_hari['status_css'] = 'danger'
+                    data_hari['keterangan_tambahan'] = 'Teridentifikasi TK karena tidak ada log presensi sampai batas evaluasi dilakukan'
+                elif status_raw == 'IZIN':
+                    data_hari['status_final'] = 'IZIN / CUTI'
+                    data_hari['status_css'] = 'info'
+                elif status_raw == 'DINAS':
+                    data_hari['status_final'] = 'DINAS LUAR'
+                    data_hari['status_css'] = 'primary'
+                elif status_raw == 'LIBUR':
+                    data_hari['status_final'] = 'HARI LIBUR'
+                    data_hari['status_css'] = 'dark' 
+                    data_hari['keterangan_tambahan'] = absen_hari_ini.keterangan or 'Libur sesuai dengan jadwal dinas terdaftar'
+                else:
+                    # =========================================================================
+                    # INTERVENSI VIEW: JIKA STATUS KOSONG DI DATABASE TAPI KALENDER ADALAH LIBUR
+                    # =========================================================================
+                    if is_libur_nasional:
+                        nama_libur = libur_nasional_dict.get(loop_date)
+                        data_hari['status_final'] = 'HARI LIBUR'
+                        data_hari['status_css'] = 'dark'
+                        data_hari['keterangan_tambahan'] = f'Libur Otomatis: {nama_libur} (Terdapat log presensi)'
+                    elif is_minggu:
+                        data_hari['status_final'] = 'HARI LIBUR'
+                        data_hari['status_css'] = 'dark'
+                        data_hari['keterangan_tambahan'] = 'Libur Otomatis: Hari Ahad / Minggu (Terdapat log presensi)'
+                    else:
+                        # Benar-benar hari kerja aktif yang belum diputuskan
+                        data_hari['status_final'] = absen_hari_ini.status_final or 'Belum Presensi'
+                        data_hari['status_css'] = 'secondary'
+                        data_hari['keterangan_tambahan'] = 'Sudah terevaluasi dan belum diputuskan status kehadirannya'
+
+                # Ambil detak transaksi log (Child)
+                logs_child = absen_hari_ini.logs.all()
+                if logs_child: 
+                    data_hari['has_logs'] = True
+                    for log in logs_child:
+                        ketepatan_raw = str(log.status_ketepatan).strip().upper() if log.status_ketepatan else ""
+                        
+                        if 'TEPAT WAKTU' in ketepatan_raw or 'LUAR JADWAL' in ketepatan_raw:
+                            bg_box = 'success text-white'
+                        elif 'TERLAMBAT' in ketepatan_raw:
+                            bg_box = 'warning text-dark'
+                        elif 'CEPAT PULANG' in ketepatan_raw or 'CEPAT' in ketepatan_raw:
+                            bg_box = 'danger text-white'
+                        else:
+                            bg_box = 'light text-muted'
+
+                        data_hari['list_detak_log'].append({
+                            'label_tipe': log.get_tipe_display() if hasattr(log, 'get_tipe_display') else log.tipe,
+                            'jam': log.waktu.time() if hasattr(log.waktu, 'time') else log.waktu,
+                            'ketepatan': log.status_ketepatan,
+                            'bg_box': bg_box,
+                        })
+            else:
+                # =========================================================================
+                # PENYELAMATAN DATA KOSONG TANPA RECORD ABSENSI SAMA SEKALI
+                # =========================================================================
+                if is_libur_nasional:
+                    nama_libur = libur_nasional_dict.get(loop_date)
+                    data_hari['status_final'] = 'HARI LIBUR'
+                    data_hari['status_css'] = 'dark'
+                    data_hari['keterangan_tambahan'] = f'Libur Otomatis: {nama_libur}'
+                elif is_minggu:
+                    data_hari['status_final'] = 'HARI LIBUR'
+                    data_hari['status_css'] = 'dark'
+                    data_hari['keterangan_tambahan'] = 'Libur Otomatis: Hari Ahad / Minggu'
+                else:
+                    data_hari['status_final'] = 'MANGKIR'
+                    data_hari['status_css'] = 'danger'
+                    data_hari['keterangan_tambahan'] = 'Teridentifikasi TK karena tidak ada data jadwal atau data log absensi bolong di hari kerja'
+
+            riwayat_harian.append(data_hari)
+
+        # 5. Siapkan parameter nama bulan untuk label header
+        nama_bulan = {
+            1: 'Januari', 2: 'Februari', 3: 'Maret', 4: 'April', 5: 'Mei', 6: 'Juni',
+            7: 'Juli', 8: 'Agustus', 9: 'September', 10: 'Oktober', 11: 'November', 12: 'Desember'
+        }
+
+        context['riwayat_harian'] = riwayat_harian
+        context['selected_bulan'] = bulan
+        context['selected_tahun'] = tahun
+        context['label_periode'] = f"{nama_bulan.get(bulan)} {tahun}"
+        context['title_page'] = f"Jurnal Aktivitas Presensi - {pegawai.first_name} {pegawai.last_name}"
+
         return context
+    
+    
 
+class UpdatePresensiPegawaiView(LoginRequiredMixin, UserPassesTestMixin,  generic.UpdateView):
+    login_url = reverse_lazy('myaccount_urls:login_view')
+    model = AbsensiHarian
+    template_name = 'kehadirankegiatan/kehadiran_formset.html'
+    fields = ('status_final', 'keterangan')
+    
+    def test_func(self):   
+        return self.request.user.is_superuser
+    
+    def handle_no_permission(self):
+        messages.error(
+            self.request,
+            "Anda tidak memiliki akses ke halaman ini."
+        )
+        return redirect(reverse('disiplinsdm_urls:rekap_kehadiran_bulanan'))
+    
+    def get_success_url(self):
+        bulan = self.request.GET.get('bulan', '')
+        tahun = self.request.GET.get('tahun', '')
+        id_pegawai = self.object.pegawai_id
+        jenissdmperinstalasi = JenisSDMPerinstalasi.objects.filter(pegawai_id=id_pegawai, bulan=bulan, tahun=tahun).first()
+        if jenissdmperinstalasi is not None:
+            pk = jenissdmperinstalasi.pk
+        else:
+            pk = id_pegawai
+        url = reverse('disiplinsdm_urls:detail_presensi_pegawai', kwargs={'pk':pk})
+        if bulan and tahun:
+            return f"{url}?bulan={bulan}&tahun={tahun}"
+        return url
+    
+    def get_context_data(self, *args, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Update Status Presensi Pegawai'
+        context['url'] = self.get_success_url()
+        
+        # MASUKKAN FORMSET KE CONTEXT
+        # Jika ada error validation (POST), kirim data POST-an tadi ke formset agar inputan tidak hilang
+        if self.request.POST:
+            context['log_formset'] = LogAktivitasFormSet(self.request.POST, instance=self.object)
+        else:
+            context['log_formset'] = LogAktivitasFormSet(instance=self.object)
+            
+        return context
+    
     def form_valid(self, form):
-        tanggal = form.cleaned_data['tanggal']
-        # Panggil Service
-        jumlah = ApelPagiService.proses_penilaian_apel_massal(tanggal)
+        context = self.get_context_data()
+        log_formset = context['log_formset']
+        
+        # Validasi ganda: Cek form utama DAN formset anak wajib valid
+        if form.is_valid() and log_formset.is_valid():
+            self.object = form.save()          # Simpan data AbsensiHarian (Parent)
+            log_formset.instance = self.object
+            log_formset.save()                 # Simpan data rincian LogAktivitasAbsen (Child)
+            
+            messages.success(self.request, "Status presensi harian dan rincian log berhasil diperbarui.")
+            return redirect(self.get_success_url())
+        else:
+            return self.render_to_response(self.get_context_data(form=form))
+    
 
-        messages.success(self.request, f"Berhasil memproses {jumlah} pegawai yang apel pagi pada {tanggal}.")
-        return super().form_valid(form)
+class DownloadRekapPresensiExcelView(LoginRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        # 1. Ambil Parameter Filter Periode
+        bulan = int(request.GET.get('bulan', timezone.now().month))
+        tahun = int(request.GET.get('tahun', timezone.now().year))
+        
+        nama_bulan = {
+            1: 'Januari', 2: 'Februari', 3: 'Maret', 4: 'April', 5: 'Mei', 6: 'Juni',
+            7: 'Juli', 8: 'Agustus', 9: 'September', 10: 'Oktober', 11: 'November', 12: 'Desember'
+        }.get(bulan, '')
+
+        # 2. Ambil Queryset dengan Filter Keamanan Struktur
+        queryset = JenisSDMPerinstalasi.objects.filter(bulan=bulan, tahun=tahun).select_related(
+            'pegawai', 'unor', 'bidang', 'sub_bidang', 'instalasi'
+        )
+        
+        user = request.user
+        profil = getattr(user, 'profil_admin', None)
+        
+        if user.is_superuser:
+            queryset = queryset
+        elif profil and profil.is_pejabat:
+            if profil.instalasi.exists():
+                queryset = queryset.filter(instalasi__in=profil.instalasi.all())
+            elif profil.sub_bidang.exists():
+                queryset = queryset.filter(sub_bidang__in=profil.sub_bidang.all())
+            elif profil.bidang.exists():
+                queryset = queryset.filter(sub_bidang__bidang__in=profil.bidang.all())
+            elif profil.unor.exists():
+                queryset = queryset.filter(unor__in=profil.unor.all())
+        else:
+            riwayat = user.riwayat_penempatan.filter(status=True).values('penempatan_level4_id').first()
+            if riwayat and riwayat['penempatan_level4_id']:
+                queryset = queryset.filter(instalasi_id=riwayat['penempatan_level4_id'])
+            else:
+                queryset = queryset.none()
+
+        # PERUBAHAN DI SINI: Tambahkan anotasi total_libur
+        queryset = queryset.annotate(
+            total_hadir=Count('pegawai__absensiharian__id', distinct=True, filter=Q(
+                pegawai__absensiharian__tanggal__month=bulan, pegawai__absensiharian__tanggal__year=tahun, pegawai__absensiharian__status_final='HADIR'
+            )),
+            total_tk=Count('pegawai__absensiharian__id', distinct=True, filter=Q(
+                pegawai__absensiharian__tanggal__month=bulan, pegawai__absensiharian__tanggal__year=tahun, pegawai__absensiharian__status_final='ALPA'
+            )),
+            total_izin=Count('pegawai__absensiharian__id', distinct=True, filter=Q(
+                pegawai__absensiharian__tanggal__month=bulan, pegawai__absensiharian__tanggal__year=tahun, pegawai__absensiharian__status_final='IZIN'
+            )),
+            total_libur=Count('pegawai__absensiharian__id', distinct=True, filter=Q(
+                pegawai__absensiharian__tanggal__month=bulan, pegawai__absensiharian__tanggal__year=tahun, pegawai__absensiharian__status_final='LIBUR'
+            )),
+            total_terlambat=Count('pegawai__absensiharian__logs__id', distinct=True, filter=Q(
+                pegawai__absensiharian__tanggal__month=bulan, pegawai__absensiharian__tanggal__year=tahun, pegawai__absensiharian__logs__tipe='DATANG', pegawai__absensiharian__logs__status_ketepatan__in=['Terlambat Ringan', 'Terlambat Sedang', 'Terlambat Berat']
+            )),
+            total_cepat_pulang=Count('pegawai__absensiharian__logs__id', distinct=True, filter=Q(
+                pegawai__absensiharian__tanggal__month=bulan, pegawai__absensiharian__tanggal__year=tahun, pegawai__absensiharian__logs__tipe='PULANG', pegawai__absensiharian__logs__status_ketepatan='Cepat Pulang'
+            )),
+        ).order_by('pegawai__first_name', 'pegawai__last_name')
+
+        # 3. Proses Pembuatan File Excel (openpyxl)
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Rekap Presensi"
+        ws.views.sheetView[0].showGridLines = True
+
+        # Styles komponen tabel
+        font_judul = Font(name='Arial', size=14, bold=True)
+        font_header = Font(name='Arial', size=11, bold=True, color='FFFFFF')
+        font_data = Font(name='Arial', size=10)
+        
+        fill_header = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
+        align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        align_left = Alignment(horizontal='left', vertical='center')
+        
+        border_tipis = Border(
+            left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'),
+            top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9')
+        )
+
+        ws['A1'] = "REKAPITULASI PRESENSI BULANAN PEGAWAI"
+        ws['A1'].font = font_judul
+        ws['A2'] = f"Periode: {nama_bulan} {tahun}"
+        ws['A2'].font = Font(name='Arial', size=11, italic=True)
+        
+        # PERUBAHAN DI SINI: Tambah 'Libur' ke daftar header (index baru kolom ke-5)
+        headers = ['No', 'Nama Pegawai', 'Instalasi/Unit', 'Hadir', 'Izin', 'Libur', 'Alpa (TK)', 'Terlambat', 'Cepat Pulang']
+        ws.append([]) 
+        ws.append(headers) 
+        
+        for cell in ws[4]:
+            cell.font = font_header
+            cell.fill = fill_header
+            cell.alignment = align_center
+        ws.row_dimensions[4].height = 25
+
+        # 4. Memasukkan Data Kinerja Pegawai ke Tabel
+        for idx, row_data in enumerate(queryset, start=1):
+            nama_lengkap = f"{row_data.pegawai.first_name} {row_data.pegawai.last_name}".strip()
+            nama_instalasi = row_data.instalasi.instalasi if row_data.instalasi else "-"
+            
+            # PERUBAHAN DI SINI: Menyisipkan row_data.total_libur ke posisi kolom yang pas
+            row_values = [
+                idx,
+                nama_lengkap,
+                nama_instalasi,
+                row_data.total_hadir,
+                row_data.total_izin,
+                row_data.total_libur,
+                row_data.total_tk,
+                row_data.total_terlambat,
+                row_data.total_cepat_pulang
+            ]
+            ws.append(row_values)
+            
+            current_row = ws.max_row
+            ws.row_dimensions[current_row].height = 20
+            
+            for col_idx, cell in enumerate(ws[current_row], start=1):
+                cell.font = font_data
+                cell.border = border_tipis
+                # PERUBAHAN DI SINI: Menambahkan index kolom 9 karena jumlah total kolom bertambah menjadi 9
+                if col_idx in [1, 4, 5, 6, 7, 8, 9]:
+                    cell.alignment = align_center
+                else:
+                    cell.alignment = align_left
+
+        # 5. Auto-Fit Lebar Kolom
+        for col in ws.columns:
+            max_len = 0
+            col_letter = get_column_letter(col[0].column)
+            for cell in col:
+                if cell.row < 4: 
+                    continue
+                if cell.value:
+                    max_len = max(max_len, len(str(cell.value)))
+            ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+        # 6. Setup Response HTTP Browser
+        filename = f"Rekap_Presensi_{bulan}_{tahun}.xlsx"
+        response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        wb.save(response)
+        return response

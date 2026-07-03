@@ -303,6 +303,21 @@ APP_VISUAL = {
         "bg_class": "bg-gradient-to-br from-emerald-500 to-teal-600",
         "category": "Keuangan",
     },
+    "simrs": {
+        "icon": "fas fa-hospital",
+        "bg_class": "bg-gradient-to-br from-blue-500 to-teal-600",
+        "category": "Rekam Medis",
+    },
+    "admin_epasien": {
+        "icon": "fas fa-user-injured", 
+        "bg_class": "bg-gradient-to-br from-cyan-500 to-blue-600",
+        "category": "Admin Epasien",
+    },
+    "koperasi": {
+        "icon": "fas fa-balance-scale", # Diambil dari simbol timbangan pada logo Koperasi
+        "bg_class": "bg-gradient-to-br from-amber-500 to-orange-600",
+        "category": "Koperasi & Syariah",
+    },
     # tambahkan aplikasi lain di sini
 }
 
@@ -311,7 +326,9 @@ SSO_CLIENTS = {
         "label": "SIMADU",
         "type": "local",  # login internal SIMADU
         "dashboard": "/",
+        "client_id": None,  # tidak perlu client_id untuk aplikasi lokal
         "dashboard_absensi": "/dashboard-absensi/",
+        "login_url":None,
     },
     "remun": {
         "label": "REMUNERASI",
@@ -319,7 +336,33 @@ SSO_CLIENTS = {
         # ini DIDAPAT dari DOT Application untuk REMUN (client_id + redirect_uri)
         "client_id": config("CLIENT_ID_REMUN"),
         "redirect_uri": "http://127.0.0.1:8001/callback/",
-        "scopes": "read",
+        "login_url":None,
+        "scopes": "read:pegawai",
+    },
+    "simrs": {
+        "label": "SIMRS",
+        "type": "oauth_client",
+        # ini DIDAPAT dari DOT Application untuk SIMRS (client_id + redirect_uri)
+        "client_id": config("SIMRS_CLIENT_ID"),
+        "redirect_uri": "http://127.0.0.1:8002/callback/",
+        "login_url":None,
+        "scopes": "read:rm_read write:rm_write",
+    },
+    "admin_epasien": {
+        "label": "EPASIEN",
+        "type": "oauth_client",
+        "client_id": config("EPASIEN_CLIENT_ID"),
+        "redirect_uri": "http://127.0.0.1:8003/callback/",
+        "login_url": "http://127.0.0.1:8005/admin-web/sso/login/",
+        "scopes": "read:pasien",
+    },
+    "koperasi": {
+        "label": "KOPERASI",
+        "type": "oauth_client",
+        "client_id": config("KOPERASI_CLIENT_ID"),
+        "redirect_uri": "http://127.0.0.1:3000/api/auth/callback/django-oauth2",
+        "login_url":None,
+        "scopes": "read:koperasi",
     },
     # tambah aplikasi lain tinggal copy ini
 }
@@ -330,6 +373,8 @@ OAUTH2_PROVIDER = {
     "ACCESS_TOKEN_EXPIRE_SECONDS": 3600,
     "REFRESH_TOKEN_EXPIRE_SECONDS": 7 * 24 * 3600,
     "SCOPES": Scopes.as_choices(),
+    # 'OIDC_ENABLED': True,
+    # 'INTROSPECTION_REQUIRE_CLIENT_CREDENTIALS': True,
 }
 
 # "SCOPES": {

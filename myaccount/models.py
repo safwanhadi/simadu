@@ -186,10 +186,11 @@ class ProfilAdmin(models.Model):
     # primary_id = models.BigIntegerField(null=True)
     user = models.OneToOneField(
         Users, primary_key=True, related_name="profil_admin", on_delete=models.CASCADE)
-    unor = models.ForeignKey('strukturorg.UnitOrganisasi', on_delete=models.SET_NULL, null=True, blank=True)
-    bidang = models.ForeignKey('strukturorg.Bidang', on_delete=models.SET_NULL, null=True, blank=True)
-    sub_bidang = models.ForeignKey('strukturorg.SubBidang', on_delete=models.SET_NULL, null=True, blank=True)
+    unor = models.ManyToManyField('strukturorg.UnitOrganisasi', blank=True)
+    bidang = models.ManyToManyField('strukturorg.Bidang', blank=True)
+    sub_bidang = models.ManyToManyField('strukturorg.SubBidang', blank=True)
     instalasi = models.ManyToManyField('strukturorg.UnitInstalasi', blank=True)
+    is_pejabat = models.BooleanField(default=False, verbose_name='Menjabat?')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -197,12 +198,12 @@ class ProfilAdmin(models.Model):
         data = None
         if self.instalasi.exists():
             data = self.instalasi.all()
-        elif self.sub_bidang is not None:
-            data = self.sub_bidang.sub_bidang
-        elif self.bidang is not None:
-            data = self.bidang.bidang
-        elif self.unor is not None:
-            data = self.unor.unor
+        elif self.sub_bidang.exists():
+            data = self.sub_bidang.all()
+        elif self.bidang.exists():
+            data = self.bidang.all()
+        elif self.unor.exists():
+            data = self.unor.all()
         return f'{self.user}-{data}'
     
     @property
@@ -210,10 +211,10 @@ class ProfilAdmin(models.Model):
         data = None
         if self.instalasi.exists():
             data = self.instalasi.all()
-        elif self.sub_bidang is not None:
-            data = self.sub_bidang.sub_bidang
-        elif self.bidang is not None:
-            data = self.bidang.bidang
-        elif self.unor is not None:
-            data = self.unor.unor
+        elif self.sub_bidang.exists():
+            data = self.sub_bidang.all()
+        elif self.bidang.exists():
+            data = self.bidang.all()
+        elif self.unor.exists():
+            data = self.unor.all()
         return str(data)

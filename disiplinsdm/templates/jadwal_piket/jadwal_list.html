@@ -28,7 +28,7 @@
             <div>
             {% if request.user.is_superuser %}
                 <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:harilibur_list' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Libur</a>
-                <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:kehadiran_list' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Kehadiran</a>
+                <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:rekap_kehadiran_bulanan' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Kehadiran</a>
                 <a href="{% url 'disiplinsdm_urls:salin_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-secondary">Copy jadwal</a>
                 <a href="{% url 'disiplinsdm_urls:salin_jadwal_instalasi' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-warning">Copy instalasi</a>
                 <a href="{% url 'disiplinsdm_urls:evaluasi_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-success">Cek Status Jadwal</a>
@@ -37,10 +37,10 @@
                 <a href="{% url 'disiplinsdm_urls:salin_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-secondary">Copy jadwal</a>
                 <a href="{% url 'disiplinsdm_urls:salin_jadwal_instalasi' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-warning">Copy jadwal instalasi</a>
                 <a href="{% url 'disiplinsdm_urls:evaluasi_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-success">Cek Status Jadwal</a>
-                <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:kehadiran_list' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Kehadiran</a>
+                <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:rekap_kehadiran_bulanan' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Kehadiran</a>
                 <a href="{% url 'disiplinsdm_urls:rekap_piket' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-info">Rekap Piket</a>
             {% else %}
-            <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:kehadiran_list' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Kehadiran</a>
+            <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:rekap_kehadiran_bulanan' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Kehadiran</a>
             {% endif %}
             </div>
         </div>
@@ -152,7 +152,7 @@
                                 <select name="inst" class="form-control ml-2 mr-2">
                                     <option value="">--- Instalasi ---</option>
                                     {% for item in instalasi_list %}
-                                        <option value="{{item.id}}" {% if request.GET.inst == item.id|stringformat:"s" %}selected{% endif %}>{{item.instalasi}}</option>
+                                        <option value="{{item.id}}" {% if request.GET.inst == item.id|stringformat:"s" %}selected{% endif %}>{{item.instalasi}} ({{item.sub_bidang}})</option>
                                     {% endfor %}
                                 </select>
                                 <select name="bulan" class="form-control ml-2 mr-2">

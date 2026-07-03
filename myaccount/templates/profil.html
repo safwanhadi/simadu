@@ -48,6 +48,7 @@
                                                 <th>No Telp</th>
                                                 <th>Email</th>
                                                 <th>Alamat</th>
+                                                <!-- <th>E-KTP</th> -->
                                                 <th>Aksi</th>
                                             </tr>
                                         </thead>
@@ -73,6 +74,13 @@
                                                 <td>{{item.profil_user.no_hp}}</td>
                                                 <td>{{item.profil_user.email_pribadi}}</td>
                                                 <td>{{item.profil_user.alamat}}</td>
+                                                <!-- <td>
+                                                    {% if item.profil_user.file_ktp %}
+                                                        <a href="{{ item.profil_user.file_ktp.url }}" target="_blank"><i class="fas fa-file-pdf"></i></a>
+                                                    {% else %}
+                                                        <i class="fas fa-times text-danger"></i>
+                                                    {% endif %}
+                                                </td> -->
                                                 <td>
                                                     <a class="btn btn-outline-info" href="{% url 'myaccount_urls:profil_update_view' pk=item.pk %}"><i class="fas fa-edit"></i></a>
                                                 </td>

@@ -63,9 +63,11 @@ class RiwayatPendidikan(models.Model):
     gelar_belakang = models.CharField(max_length=15, blank=True)
     #Penyetaraan, apabila ijazah yang dimiliki adalah ijazah luar negeri
     no_srt_penyetaraan_ijazah = models.CharField(max_length=50, blank=True)
+    is_verifikasi = models.BooleanField(default=False)
     file_srt_penyetaraan = models.FileField(verbose_name='File Penyetaraan', upload_to="pendidikan/penyetaraan/", blank=True, validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
     file_ijazah = models.FileField(verbose_name="Ijazah", upload_to="pendidikan/ijazah/", blank=True, validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
     file_transkrip = models.FileField(verbose_name="Transkrip", upload_to="pendidikan/transkrip/", blank=True, validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
+    file_verifikasi = models.FileField(verbose_name="File Hasil Verifikasi", upload_to="pendidikan/verifikasi/", blank=True, validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

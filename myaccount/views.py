@@ -30,6 +30,9 @@ from .models import ProfilSDM
 
 from .models import ProfilSDM, Users
 from .forms import ProfilForm, UserAdminChangeForm
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class SimaduLoginView(LoginView):
@@ -51,6 +54,10 @@ class SimaduLoginView(LoginView):
 def logout_view(request):
     logout(request)
     return redirect(reverse('myaccount_urls:login_view'))
+
+
+def back_view(request):
+    return redirect(reverse('myaccount_urls:sso_portal'))
 
 
 class ChangePassword(PasswordChangeView):
@@ -232,16 +239,42 @@ def sso_portal(request):
     if request.user.is_authenticated:
         clients = settings.SSO_CLIENTS
         Visuals = settings.APP_VISUAL
+        # identifikasi IP user untuk development: kalau IP localhost sembunyikan icon aplikasi kecuali untuk Tim IT
+        # atau ambil di setting client SSO yang sudah ditentukan
+        user_ip = get_client_ip(request)
+        # Ganti dengan IP Publik/Lokal resmi Rumah Sakit Anda
+        RS_IP_RANGE = "192.168."  # Contoh jika server mendeteksi IP lokal langsung
+        # Atau IP publik statis RS: "112.x.x.x"
+        # is_dev_ip = user_ip.startswith(RS_IP_RANGE) or user_ip == "127.0.0.1"
+        is_dev_ip = user_ip == "127.0.0.1"
+        
+        
+        # Ambil satu data riwayat terakhir berdasarkan tanggal SK terbaru
+        riwayat_terakhir = request.user.riwayatjabatan_set.order_by('-tmt_jabatan').first()
+
+        if riwayat_terakhir:
+            user_jabatan = getattr(riwayat_terakhir, 'nama_jabatan', '')
+            user_jabatan = user_jabatan.slug if user_jabatan else ''
+        else:
+            user_jabatan = ''
+        
         apps = []
         for key, client in clients.items():
             visual = Visuals.get(key, {})
+            # untuk filter url apakah local url atau tidak
+            actual_url = client.get("redirect_uri", "")
+            is_dev = True if (actual_url.startswith("http://localhost") or actual_url.startswith("http://127.0.0.1")) and user_jabatan == "it" else False
             app_data = {
+                "id": client.get("client_id", ""),
                 "key": key,
                 "name": client.get("label", key),
+                "url": actual_url,
+                "login_url": client.get("login_url"),
                 "type": client.get("type"),
                 "icon": visual.get("icon", "fas fa-th-large"),
                 "bg_class": visual.get("bg_class", "bg-gradient-to-br from-blue-500 to-blue-600"),
                 "category": visual.get("category", "Umum"),
+                "is_dev": is_dev,
             }
             apps.append(app_data)
 
@@ -294,6 +327,129 @@ def sso_go(request, client_key):
         params["state"] = state
 
     return redirect(f"{authorize_url}?{urlencode(params)}")
+
+
+# CEK APAKAH JARINGAN LOCAL ATAU TIDAK
+from urllib.parse import urlparse
+import requests
+
+def cek_jaringan_lokal(request):
+    target_url = request.GET.get('target', '').strip()
+    
+    # 1. Validasi kecocokan target (tetap menggunakan url asli)
+    allowed_identifiers = ["172.16.16.", "12.12.12.", "192.168.3.", "dash.rsmandalika.com", "simrs.rsmandalika.com"]
+    if not any(id in target_url for id in allowed_identifiers):
+        return JsonResponse({'terhubung': False, 'error': 'Target tidak diizinkan'})
+    
+    # 2. Bersihkan URL untuk pengecekan jaringan
+    if not target_url.startswith(('http://', 'https://')):
+        target_url = f"https://{target_url}"
+        
+    try:
+        # Ekstrak hanya protokol + domain (misal: https://dash.rsmandalika.com)
+        # Ini menghindari error 401/403/404 dari halaman /callback/
+        parsed_url = urlparse(target_url)
+        base_check_url = f"{parsed_url.scheme}://{parsed_url.netloc}/"
+        
+        # print('Melakukan HEAD request ke base domain:', base_check_url)
+        
+        # Lakukan HEAD request ke base domain
+        response = requests.head(
+            base_check_url,
+            timeout=2,
+            allow_redirects=False,
+            verify=False,
+        )
+        
+        # Jika server merespon (apapun statusnya, bahkan 404/403 pada base domain, asalkan servernya hidup/merespon)
+        # Berarti server tersebut berada di jaringan yang sama/bisa diakses
+        if response.status_code:
+            return JsonResponse({'terhubung': True})
+            
+    except requests.RequestException as e:
+        print(f"Gagal menjangkau server target karena kendala jaringan: {e}")
+        # Jangan hanya pass, pastikan return eksplisit jika terjadi timeout/gagal koneksi
+        return JsonResponse({'terhubung': False, 'reason': 'network_unreachable'})
+
+    return JsonResponse({'terhubung': False})
+
+
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
+
+# Nonaktifkan warning log SSL insecure karena kita menggunakan verify=False di jaringan internal
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+def app_gateway(request):
+    """
+    Gateway Backend untuk memeriksa jaringan lokal sebelum mengalihkan user ke aplikasi private.
+    Menerima parameter 'sso' (URL tujuan login) dan 'target' (URL endpoint aplikasi untuk cek ping).
+    """
+    logger.error('tahap 0')
+    sso_url = request.GET.get('sso', '').strip()
+    target_url = request.GET.get('target', '').strip()
+    
+    # JALUR APLIKASI PUBLIC
+    # Jika aplikasi tidak memiliki target endpoint khusus, langsung loloskan ke SSO
+    if not target_url:
+        logger.error('tahap 1')
+        return redirect(sso_url)
+    
+    # 1. Validasi kecocokan target untuk mencegah SSRF
+    allowed_identifiers = ["172.16.16.", "12.12.12.", "192.168.3.", "dash.rsmandalika.com", "simrs.rsmandalika.com"]
+    is_private_app = any(id in target_url for id in allowed_identifiers)
+    
+    if is_private_app:
+        logger.error('tahap 2')
+        # 2. Standarkan skema URL ke HTTPS demi kecepatan (menghindari redirect HTTP -> HTTPS internal)
+        if not target_url.startswith(('http://', 'https://')):
+            target_url = f"https://{target_url}"
+            
+        try:
+            logger.error('tahap 3')
+            # Ekstrak hanya protokol + domain (misal: https://dash.rsmandalika.com)
+            parsed_url = urlparse(target_url)
+            base_check_url = f"{parsed_url.scheme}://{parsed_url.netloc}/"
+            
+            # Lakukan HEAD request ke base domain dengan timeout ketat
+            response = requests.head(
+                base_check_url,
+                timeout=1.5,       # Batas waktu tunggu server merespon
+                allow_redirects=False,
+                verify=False,      # Abaikan verifikasi SSL self-signed lokal
+            )
+            
+            # Jika server merespon dengan status code apa saja (artinya server hidup & berada di LAN)
+            if response.status_code:
+                logger.error('tahap 4')
+                return redirect(sso_url)
+                
+        except requests.RequestException as e:
+            logger.error('tahap 5')
+            print(f"Gateway gagal menjangkau server target lokal: {e}")
+            # Jika timeout atau error jaringan, biarkan eksekusi lolos ke halaman blokir di bawah
+            pass
+            
+        # JALUR EKSTERNAL (BLOKIR)
+        # Jika blok 'try' gagal atau tidak terhubung, alihkan langsung ke halaman blokir lokal Anda
+        return redirect(reverse('myaccount_urls:local_only_blocked'))
+
+    # Fallback default jika tidak lolos validasi privat, alihkan langsung ke SSO aman
+    return redirect(sso_url)
+
+
+def access_denied_view(request):
+    # Halaman statis jika diakses dari luar RS tanpa VPN
+    return render(request, 'sso/access_denied.html')
+
+# Saya akan membuat fungsi untuk mengidentifikasi IP dev sehingga proses development
+# icon aplikasi bisa disembunyikan dari user.
+def get_client_ip(request):
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[0]
+    else:
+        ip = request.META.get('REMOTE_ADDR')
+    return ip
 
 
 class PegawaiAutocompleteView(View):

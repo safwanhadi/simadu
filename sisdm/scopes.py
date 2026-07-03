@@ -14,10 +14,20 @@ class Scopes:
     # Pasien (Epasien)
     READ_RESUME = 'read:resume_read'
     WRITE_BOOKING = 'write:booking_write'
+    
+    # Dashboard
+    READ_DASH = 'read:dash'
+    
+    # OpenID Connect
+    OPENID = 'openid'
+    PROFILE = 'profile'
 
     @classmethod
     def as_choices(cls):
         return {
+            cls.OPENID: 'OpenID Connect Hub',
+            cls.PROFILE: 'Akses informasi profil dasar',
+            
             cls.READ_PEGAWAI: 'Membaca data profil pegawai',
             cls.READ_ATTLOG: 'Membaca log kehadiran presensi',
             cls.SYNC_ATTLOG: 'Menandai data sudah sinkron',
@@ -28,4 +38,6 @@ class Scopes:
             
             cls.READ_RESUME: 'Membaca resume medis pasien',
             cls.WRITE_BOOKING: 'Menulis booking pemeriksaan',
+            
+            cls.READ_DASH: 'Membaca data untuk dashboard',
         }

@@ -51,7 +51,7 @@ class RiwayatPendidikanForm(forms.ModelForm):
     class Meta:
         model = RiwayatPendidikan
         fields = ('pegawai', 'dokumen', 'level_pend', 'pendidikan', 
-                  'nama_sek', 'tgl_lulus', 'no_ijazah', 'gelar_depan', 'gelar_belakang', 'file_ijazah', 'file_transkrip')
+                  'nama_sek', 'tgl_lulus', 'no_ijazah', 'gelar_depan', 'gelar_belakang', 'is_verifikasi', 'file_verifikasi','file_ijazah', 'file_transkrip')
         
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop("request", None)
@@ -60,6 +60,9 @@ class RiwayatPendidikanForm(forms.ModelForm):
         self.fields['level_pend'].label = "Level Pendidikan"
         self.fields['tgl_lulus'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['nama_sek'].label = "Nama Sekolah/Universitas"
+        self.fields['no_ijazah'].label = "Nomor Ijazah"
+        self.fields['is_verifikasi'].label = "Apakah ijazah sudah terverifikasi?"
+        self.fields['file_verifikasi'].label = "Upload File Hasil Verifikasi Ijazah (jika sudah terverifikasi)"
         if self.request and not self.request.user.is_superuser:
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
@@ -416,7 +419,7 @@ class RiwayatJabatanAdminForm(forms.ModelForm):
         model = RiwayatJabatan
         fields = '__all__'
 
-    kompetensi = forms.ModelMultipleChoiceField(queryset=Kompetensi.objects.all())
+    kompetensi = forms.ModelMultipleChoiceField(queryset=Kompetensi.objects.all(), required=False)
 
 
 class RiwayatGajiBerkalaForm(forms.ModelForm):
