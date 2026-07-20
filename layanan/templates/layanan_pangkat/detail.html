@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="card card-solid">
+    <div class="card-header d-flex align-items-center">
+        <h5 class="mb-0">{{ card_title }}</h5>
+        {% if request.user.is_pangkat_admin %}
+        <a href="{% url 'layanan_urls:layanan_pangkat_process' pk=usulan.pk %}" class="btn btn-primary btn-sm ml-auto">Proses Usulan</a>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Pegawai</div><div class="col-md-9">{{ usulan.pegawai.full_name }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Status</div><div class="col-md-9">{{ usulan.get_status_display }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">SK Pangkat Terakhir</div><div class="col-md-9">{{ usulan.sk_kp_terakhir|default:'-' }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Pendidikan</div><div class="col-md-9">{{ usulan.pendidikan|default:'-' }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Pengangkatan</div><div class="col-md-9">{{ usulan.pengangkatan|default:'-' }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">SK Jabatan Fungsional</div><div class="col-md-9">{{ usulan.sk_jabfung|default:'-' }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Mutasi</div><div class="col-md-9">{{ usulan.mutasi|default:'-' }}</div></div>
+        <div class="row mb-2">
+            <div class="col-md-3 font-weight-bold">Kinerja Dua Tahun</div>
+            <div class="col-md-9">{% for item in usulan.kinerja_dua_thn.all %}<div>{{ item }}</div>{% empty %}-{% endfor %}</div>
+        </div>
+        <div class="row mb-2">
+            <div class="col-md-3 font-weight-bold">PAK</div>
+            <div class="col-md-9">{% for item in usulan.pak.all %}<div>{{ item }}</div>{% empty %}-{% endfor %}</div>
+        </div>
+
+        {% if hasil_pangkat %}
+        <hr>
+        <h5>Hasil Kenaikan Pangkat</h5>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Pangkat/Golongan</div><div class="col-md-9">{{ hasil_pangkat.panggol }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Masa Kerja</div><div class="col-md-9">{{ hasil_pangkat.masa_kerja_tahun }} tahun {{ hasil_pangkat.masa_kerja_bulan }} bulan</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">TMT Golongan</div><div class="col-md-9">{{ hasil_pangkat.tmt_gol|date:'d-m-Y' }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Nomor SK</div><div class="col-md-9">{{ hasil_pangkat.no_sk }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Nomor Pertek BKN</div><div class="col-md-9">{{ hasil_pangkat.no_pertek_bkn|default:'-' }}</div></div>
+        {% if hasil_pangkat.file %}
+        <a href="{{ hasil_pangkat.file.url }}" class="btn btn-success btn-sm" target="_blank"><i class="fas fa-download"></i> Unduh SK</a>
+        {% endif %}
+        {% endif %}
+    </div>
+    <div class="card-footer">
+        <a href="{% url 'layanan_urls:layanan_pangkat_list' %}" class="btn btn-secondary">Kembali</a>
+        {% if not request.user.is_pangkat_admin and usulan.status == 'pengajuan' %}
+        <a href="{% url 'layanan_urls:layanan_pangkat_update' pk=usulan.pk %}" class="btn btn-warning">Ubah Usulan</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

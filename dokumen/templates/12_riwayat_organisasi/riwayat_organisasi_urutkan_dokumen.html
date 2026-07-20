@@ -12,14 +12,14 @@ Urutkan Dokumen
             <div class="card-header">
                 <div class="d-flex flex-row justify-content-between">
                     <div class="d-flex flex-row mb-1">
-                        <a href="{% url 'riwayat_urls:riwayat_organisasi' %}" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
+                        <a href="{{ document_menu_url }}" class="text-dark mr-2" title="Kembali ke menu riwayat"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
                         <h5>Urutkan Dokumen Riwayat Organisasi</h5>
                     </div>
                 </div>
             </div>
             <div class="card-body">
                 <div class="row" id="form_data">
-                    {% if not request.user.is_superuser %}
+                    {% if not request.user.is_dokumen_admin %}
                     <div class="col-md-12 mb-3">
                         <div class="row mb-2">
                             <div class="col-md-3">Nama</div>

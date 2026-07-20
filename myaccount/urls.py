@@ -16,17 +16,55 @@ from .views import (
     access_denied_view,
     cek_jaringan_lokal,
     app_gateway,
-    back_view
+    back_view,
+    AccountManagementListView,
+    AccountResetPasswordView,
+    AccountToggleActiveView,
+    AccountToggleStaffView,
+    AccountToggleDocumentAdminView,
+    EmployeeRegistrationSuccessView,
+    EmployeeRegistrationView,
+    AccountRegistrationApproveView,
+    AccountRegistrationRejectView,
+    AccountRegistrationReviewListView,
 )
 from .views_api import api_me, PegawaiAPIView, DokterSpesialisAPIView, DetailMeAPIView
+from .telegram_views import (
+    TelegramPasswordResetCompleteView,
+    TelegramPasswordResetConfirmView,
+    TelegramResetHelpView,
+    TelegramWebhookView,
+)
 
 
 urlpatterns=[
     path('login/', SimaduLoginView.as_view(), name='login_view'),
+    path('registrasi/', EmployeeRegistrationView.as_view(), name='account_registration'),
+    path('registrasi/berhasil/', EmployeeRegistrationSuccessView.as_view(), name='account_registration_success'),
     path('logout/', logout_view, name='logout_view'),
     path('to-sso/', back_view, name='back_view'),
     path('ganti-password/', ChangePassword.as_view(), name='ganti_password_view'),
     path('ganti-password/done/', ChangePasswordDone.as_view(), name='ganti_password_done_view'),
+    path('reset-password/', TelegramResetHelpView.as_view(), name='telegram_reset_help'),
+    path('telegram/webhook/', TelegramWebhookView.as_view(), name='telegram_webhook'),
+    path(
+        'telegram/reset/<uidb64>/<token>/',
+        TelegramPasswordResetConfirmView.as_view(),
+        name='telegram_password_reset_confirm',
+    ),
+    path(
+        'telegram/reset/selesai/',
+        TelegramPasswordResetCompleteView.as_view(),
+        name='telegram_password_reset_complete',
+    ),
+    path('pengelolaan-akun/', AccountManagementListView.as_view(), name='account_management_list'),
+    path('pengelolaan-akun/registrasi/', AccountRegistrationReviewListView.as_view(), name='account_registration_review_list'),
+    path('pengelolaan-akun/registrasi/<int:pk>/setujui/', AccountRegistrationApproveView.as_view(), name='account_registration_approve'),
+    path('pengelolaan-akun/registrasi/<int:pk>/tolak/', AccountRegistrationRejectView.as_view(), name='account_registration_reject'),
+    path('pengelolaan-akun/<int:pk>/reset-password/', AccountResetPasswordView.as_view(), name='account_reset_password'),
+    path('pengelolaan-akun/<int:pk>/toggle-active/', AccountToggleActiveView.as_view(), name='account_toggle_active'),
+    path('pengelolaan-akun/<int:pk>/toggle-staff/', AccountToggleStaffView.as_view(), name='account_toggle_staff'),
+    path('pengelolaan-akun/<int:pk>/toggle-admin-dokumen/', AccountToggleDocumentAdminView.as_view(), name='account_toggle_document_admin'),
     path('profil/', ProfilListView.as_view(), name='profil_view'),
     path('profil/add/', ProfilCreateView.as_view(), name='profil_create_view'),
     path('profil/detail/<int:pk>/', ProfilDetailView.as_view(), name='profil_detail_view'),

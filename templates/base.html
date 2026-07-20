@@ -158,13 +158,13 @@
       <li class="nav-item dropdown">
         <a class="nav-link" data-toggle="dropdown" href="#">
           <i class="far fa-bell"></i>
-          {% if notifikasi_layanan|length != 0 %}
-          <span class="badge badge-warning navbar-badge">{{notifikasi_layanan|length}}</span>
+          {% if notification_total %}
+          <span class="badge badge-warning navbar-badge">{{ notification_total }}</span>
           {% endif %}
         </a>
-        {% if notifikasi_layanan|length != 0 %}
+        {% if notification_total %}
         <div class="dropdown-menu dropdown-menu-lg dropdown-menu-right">
-          <span class="dropdown-item dropdown-header">{{notifikasi_layanan|length}} Notifikasi</span>
+          <span class="dropdown-item dropdown-header">{{ notification_total }} Notifikasi</span>
           
           {% if notif_cuti|length != 0 %}
           <div class="dropdown-divider"></div>
@@ -206,6 +206,44 @@
           <a href="{% url 'layanan_urls:notifikasi_view' %}?layanan=yaninovasi" class="dropdown-item">
             <i class="fas fa-user-astronaut"></i>&nbsp;&nbsp; {{notif_inovasi|length}} Usulan inovasi baru
             <!-- <span class="float-right text-muted text-sm">2 days</span> -->
+          </a>
+          {% endif %}
+          {% if notif_sip|length != 0 %}
+          <div class="dropdown-divider"></div>
+          <a href="{% url 'layanan_urls:notifikasi_view' %}?layanan=yansip" class="dropdown-item">
+            <i class="fas fa-file-medical"></i>&nbsp;&nbsp; {{notif_sip|length}} Usulan SIP baru
+          </a>
+          {% endif %}
+          {% if sip_expiry_notifications %}
+            {% for sip in sip_expiry_notifications %}
+            <div class="dropdown-divider"></div>
+            <a href="{% url 'riwayat_urls:riwayat_sipprofesi' id=sip.riwayat_profesi_id %}"
+               class="dropdown-item py-2">
+              <div class="d-flex align-items-start">
+                <span class="mr-2 mt-1 {% if sip.is_expired %}text-danger{% else %}text-warning{% endif %}">
+                  <i class="fas {% if sip.is_expired %}fa-exclamation-circle{% else %}fa-clock{% endif %}"></i>
+                </span>
+                <span class="text-wrap" style="line-height:1.2;">
+                  <strong class="d-block text-sm">SIP {{ sip.no_sip|default:'-' }}</strong>
+                  <small class="d-block text-muted">
+                    {{ sip.riwayat_profesi.profesi|default:'Profesi' }} · {{ sip.expiry_message }}
+                  </small>
+                  <small class="text-muted">Berlaku s.d. {{ sip.berlaku_sd|date:'d M Y' }}</small>
+                </span>
+              </div>
+            </a>
+            {% endfor %}
+          {% endif %}
+          {% if notif_pangkat|length != 0 %}
+          <div class="dropdown-divider"></div>
+          <a href="{% url 'layanan_urls:notifikasi_view' %}?layanan=yanpangkat" class="dropdown-item">
+            <i class="fas fa-level-up-alt"></i>&nbsp;&nbsp; {{notif_pangkat|length}} Usulan kenaikan pangkat
+          </a>
+          {% endif %}
+          {% if notif_jabatan|length != 0 %}
+          <div class="dropdown-divider"></div>
+          <a href="{% url 'layanan_urls:notifikasi_view' %}?layanan=yanjabatan" class="dropdown-item">
+            <i class="fas fa-user-tie"></i>&nbsp;&nbsp; {{notif_jabatan|length}} Usulan kenaikan jabatan
           </a>
           {% endif %}
           <div class="dropdown-divider"></div>
@@ -264,7 +302,7 @@
         <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu" data-accordion="false">
           <!-- Add icons to the links using the .nav-icon class
                with font-awesome or any other icon font library -->
-            {% if request.user.is_superuser or request.user.is_staff %}
+            {% if request.user.is_dashboard_admin or request.user.is_staff %}
             <li class="nav-item">
             <a href="{% url 'dashboard_urls:dashboard_view' %}" class="nav-link {% if dash == 'active' %} active {% endif %} ">
                 <i class="nav-icon fas fa-tachometer-alt"></i>
@@ -274,12 +312,37 @@
             </a>
           </li>
             {% endif %}
+            {% if request.user.is_akun_admin %}
+            <li class="nav-item">
+              <a href="{% url 'myaccount_urls:account_registration_review_list' %}" class="nav-link {% if account_registration_review == 'active' %} active {% endif %}">
+                <i class="nav-icon fas fa-user-check"></i>
+                <p>Verifikasi Registrasi</p>
+              </a>
+            </li>
+            <li class="nav-item">
+              <a href="{% url 'myaccount_urls:account_management_list' %}" class="nav-link {% if account_management == 'active' %} active {% endif %}">
+                <i class="nav-icon fas fa-users-cog"></i>
+                <p>Pengelolaan Akun</p>
+              </a>
+            </li>
+            {% endif %}
             <li class="nav-item">
             <a href="{% url 'dashboard_urls:dashboard_absensi_view' %}" class="nav-link {% if dash2 == 'active' %} active {% endif %} ">
                 <i class="nav-icon fas fa-tachometer-alt"></i>
               <p>
                 Dashboard Absensi
-                <span class="right badge badge-danger">New</span>
+              </p>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a href="{% url 'layanan_urls:notifikasi_view' %}?layanan=sip-expiry"
+               class="nav-link {% if notification_menu == 'active' %} active {% endif %}">
+              <i class="nav-icon fas fa-file-medical-alt"></i>
+              <p>
+                Pengingat SIP
+                {% if sip_expiry_notifications %}
+                  <span class="right badge badge-warning">{{ sip_expiry_notifications|length }}</span>
+                {% endif %}
               </p>
             </a>
           </li>
@@ -304,21 +367,30 @@
                   </a>
                 </li>
               </ul>
-            </li>
+          </li>
           <li class="nav-item">
-            <a href="{% url 'riwayat_urls:riwayat_view' %}" class="nav-link {% if riwayat == 'active' %} active {% endif %}">
+            <a href="{% if request.user.is_dokumen_admin %}{% url 'riwayat_urls:document_admin_dashboard' %}{% else %}{% url 'riwayat_urls:riwayat_view' %}{% endif %}" class="nav-link {% if riwayat == 'active' %} active {% endif %}">
               <i class="nav-icon fas fa-th"></i>
               <p>
                 Riwayat SDM
               </p>
             </a>
             <ul class="nav nav-treeview">
+              {% if request.user.is_dokumen_admin %}
+              <li class="nav-item">
+                <a href="{% url 'riwayat_urls:document_admin_dashboard' %}" class="nav-link {% if document_admin == 'active' %} active {% endif %}">
+                  <i class="fas fa-clipboard-check nav-icon"></i>
+                  <p>Dashboard Admin Dokumen</p>
+                </a>
+              </li>
+              {% else %}
               <li class="nav-item">
                 <a href="{% url 'riwayat_urls:riwayat_view' %}" class="nav-link {% if selected == 'riwayat' %} active {% endif %}" >
                   <i class="far fa-circle nav-icon"></i>
                   <p>Riwayat SDM</p>
                 </a>
               </li>
+              {% endif %}
               {% for data in data_dokumen %}
               {% if data.url == 'disiplin' %}
               <li class="nav-item">
@@ -330,14 +402,14 @@
               {% elif data.url == 'jabatan' %}
               {% if request.user.is_superuser %}
                 <li class="nav-item">
-                  <a href="{% url 'riwayat_urls:riwayat_view' %}{{data.url}}?jabatan=struktural" class="nav-link {% if data.url == selected %} active {% endif %}">
+                  <a href="{% url 'riwayat_urls:riwayat_view' %}{{data.url}}?jabatan=struktural{% if nip %}&amp;nip={{ nip|urlencode }}{% endif %}" class="nav-link {% if data.url == selected %} active {% endif %}">
                     <i class="far fa-circle nav-icon"></i>
                     <p>{{data.nama}}</p>
                   </a>
                 </li>
               {% else %}
                 <li class="nav-item">
-                  <a href="{% url 'riwayat_urls:riwayat_view' %}{{data.url}}" class="nav-link {% if data.url == selected %} active {% endif %}">
+                  <a href="{% url 'riwayat_urls:riwayat_view' %}{{data.url}}{% if request.user.is_dokumen_admin and nip %}?nip={{ nip|urlencode }}{% endif %}" class="nav-link {% if data.url == selected %} active {% endif %}">
                     <i class="far fa-circle nav-icon"></i>
                     <p>{{data.nama}}</p>
                   </a>
@@ -345,7 +417,7 @@
               {% endif %}
               {% else %}
               <li class="nav-item">
-                <a href="{% url 'riwayat_urls:riwayat_view' %}{{data.url}}" class="nav-link {% if data.url == selected %} active {% endif %}">
+                <a href="{% url 'riwayat_urls:riwayat_view' %}{{data.url}}{% if request.user.is_dokumen_admin and nip %}?nip={{ nip|urlencode }}{% endif %}" class="nav-link {% if data.url == selected %} active {% endif %}">
                   <i class="far fa-circle nav-icon"></i>
                   <p>{{data.nama}}</p>
                 </a>
@@ -441,6 +513,8 @@
 
         {% endblock content1 %}
       <div class="container-fluid">
+        {% include 'admin_dokumen/selected_employee.html' %}
+        {% include 'includes/document_quick_navigation.html' %}
         <!-- Main row -->
            
         <div class="row">
@@ -448,6 +522,7 @@
                 {% block content %}
 
                 {% endblock content %}
+                {% include 'includes/document_pagination.html' %}
           </div>
         </div>
 
@@ -495,7 +570,6 @@
 <!-- <script src="{% static 'plugins/sparklines/sparkline.js' %}"></script> -->
 <!-- JQVMap -->
 <script src="{% static 'plugins/jqvmap/jquery.vmap.min.js' %}"></script>
-<script src="{% static 'plugins/bootstrap/js/bootstrap.min.js' %}"></script>
 <script src="{% static 'plugins/jqvmap/maps/jquery.vmap.usa.js' %}"></script>
 <!-- jQuery Knob Chart -->
 <script src="{% static 'plugins/jquery-knob/jquery.knob.min.js' %}"></script>
@@ -533,6 +607,20 @@
       }
   }, 4000)
 </script>
+
+{% if server_side_document_pagination %}
+<style>
+  .dt-buttons { display: none !important; }
+</style>
+<script>
+  $.extend(true, $.fn.dataTable.defaults, {
+    paging: false,
+    searching: false,
+    info: false,
+    ordering: false
+  });
+</script>
+{% endif %}
 
 {% block script %}
   

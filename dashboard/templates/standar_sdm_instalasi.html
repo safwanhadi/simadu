@@ -50,47 +50,39 @@
                             </div>
                         </div>
                         {% if slug %}
+                        <p class="text-muted">
+                            {{ selected_installation }} · Status keseluruhan:
+                            <strong>{{ installation_status }}</strong>
+                        </p>
                         <div class="table table-responsive">
                             <table class="display table table-striped table-bordered" id="">
                                 <thead>
                                     <tr>
                                         <th>No</th>
                                         <th>Nama</th>
-                                        <th>Jabatan</th>
-                                        <th>Kompetensi</th>
+                                        <th>Profesi</th>
+                                        <th>Kompetensi Berlaku</th>
+                                        <th>Status</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {% for user in users %}
+                                    <tr class="{% if user.status_kompetensi == 'Tidak Memenuhi Standar' %}bg-danger{% elif user.status_kompetensi == 'Sesuai Standar' %}bg-success{% elif user.status_kompetensi == 'Diatas Standar' %}bg-primary{% else %}bg-secondary{% endif %}">
+                                        <td>{{forloop.counter}}</td>
+                                        <td>{{user.full_name}}</td>
+                                        <td>{{user.profesi_display|default:'-'}}</td>
+                                        <td>
+                                            {% for item in user.kompetensi_display %}
+                                                <div>{{item.kompetensi.kompetensi}}</div>
+                                            {% empty %}
+                                                <span>-</span>
+                                            {% endfor %}
+                                        </td>
+                                        <td>{{user.status_kompetensi}}</td>
+                                    </tr>
+                                    {% empty %}
                                     <tr>
-                                        {% if user.status_kompetensi == 'Tidak Memenuhi Standar' %}
-                                        <td class="bg-danger">{{forloop.counter}}</td>
-                                        <td class="bg-danger">{{user.full_name}}</td>
-                                        <td class="bg-danger">{{user.riwayatjabatan_set.last.nama_jabatan}}</td>
-                                        <td class="bg-danger">
-                                            {% for item in user.pegawai_old.all %}
-                                                <p>{{item.kompetensi.kompetensi}}</p>
-                                            {% endfor %}
-                                        </td>
-                                        {% elif user.status_kompetensi == 'Sesuai Standar' %}
-                                        <td class="bg-success">{{forloop.counter}}</td>
-                                        <td class="bg-success">{{user.full_name}}</td>
-                                        <td class="bg-success">{{user.riwayatjabatan_set.last.nama_jabatan}}</td>
-                                        <td class="bg-success">
-                                            {% for item in user.pegawai_old.all %}
-                                                <p>{{item.kompetensi.kompetensi}}</p>
-                                            {% endfor %}
-                                        </td>
-                                        {% elif user.status_kompetensi == 'Diatas Standar' %}
-                                        <td class="bg-primary">{{forloop.counter}}</td>
-                                        <td class="bg-primary">{{user.full_name}}</td>
-                                        <td class="bg-primary">{{user.riwayatjabatan_set.last.nama_jabatan}}</td>
-                                        <td class="bg-primary">
-                                            {% for item in user.pegawai_old.all %}
-                                                <p>{{item.kompetensi.kompetensi}}</p>
-                                            {% endfor %}
-                                        </td>
-                                        {% endif %}    
+                                        <td colspan="5" class="text-center text-muted">Tidak ada pegawai aktif dengan penempatan aktif dan profesi terisi.</td>
                                     </tr>
                                     {% endfor %}
                                 </tbody>
@@ -117,6 +109,9 @@
                                         {% elif item.status == 'Tidak Memenuhi Standar' %}
                                             <td class="bg-danger"><a href="{% url 'dashboard_urls:dashboard_view' %}?instalasi={{item.slug}}" class="btn btn-block text-left">{{forloop.counter}}</a></td>
                                             <td class="bg-danger"><a href="{% url 'dashboard_urls:dashboard_view' %}?instalasi={{item.slug}}" class="btn btn-block text-left">{{item.instalasi}}</a></td>
+                                        {% else %}
+                                            <td class="bg-secondary"><a href="{% url 'dashboard_urls:dashboard_view' %}?instalasi={{item.slug}}" class="btn btn-block text-left">{{forloop.counter}}</a></td>
+                                            <td class="bg-secondary"><a href="{% url 'dashboard_urls:dashboard_view' %}?instalasi={{item.slug}}" class="btn btn-block text-left">{{item.instalasi}}</a></td>
                                         {% endif %}
                                         
                                     </tr>
@@ -131,63 +126,71 @@
             <div class="col-md-6">
                 <div class="card card-solid">
                     <div class="card-body">
-                        <div class="d-flex flex-row mb-1">
-                            {% if nip %}
-                            <a href="{% url 'dashboard_urls:dashboard_view' %}" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
-                            {% endif %}
-                            <h4>TAKAH PEGAWAI</h4>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h4 class="mb-0">KOMPOSISI SDM PER JABATAN TERAKHIR</h4>
+                            <a href="{% url 'dashboard_urls:export_workforce_profession' %}"
+                               class="btn btn-success btn-sm">
+                                <i class="fas fa-file-excel mr-1"></i>Download Excel
+                            </a>
                         </div>
-                        {% if nip %}
-                        <div class="table-responsive">
-                            <table class="display table table-striped table-bordered", id="">
-                                <thead>
-                                    <tr>
-                                        <th>Nama File Kepegawaian</th>
-                                        <th>Download</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% include 'link_file_pegawai_dash.html' %}
-                                </tbody>
-                            </table>
+
+                        <div class="row no-gutters mb-3">
+                            <div class="col-md-4 pr-md-1 mb-2 mb-md-0">
+                                <div class="border rounded bg-light p-2 h-100">
+                                    <small class="text-muted d-block">Total SDM Aktif</small>
+                                    <strong class="h4 text-primary mb-0">{{ workforce_summary.total_active }}</strong>
+                                </div>
+                            </div>
+                            <div class="col-md-4 px-md-1 mb-2 mb-md-0">
+                                <div class="border border-warning rounded p-2 h-100">
+                                    <small class="text-muted d-block">Tanpa Penempatan Aktif</small>
+                                    <strong class="h4 text-warning mb-0">{{ workforce_summary.without_active_placement }}</strong>
+                                </div>
+                            </div>
+                            <div class="col-md-4 pl-md-1">
+                                <div class="border border-danger rounded p-2 h-100">
+                                    <small class="text-muted d-block">Jabatan Belum Terisi</small>
+                                    <strong class="h4 text-danger mb-0">{{ workforce_summary.without_jabatan }}</strong>
+                                </div>
+                            </div>
                         </div>
-                        {% else %}
+
                         <div class="table-responsive">
                             <table class="display table table-striped table-bordered" id="">
                                 <thead>
                                     <tr>
                                         <th>No</th>
-                                        <th>Nama Pegawai</th>
+                                        <th>Jabatan</th>
+                                        <th>Kategori</th>
+                                        <th>Jumlah</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {% for item in takah %}
-                                        {% if request.user.is_superuser %}
-                                            <tr>
-                                                <td>{{forloop.counter}}</td>
-                                                <td><a href="{% url 'dashboard_urls:dashboard_view' %}?nip={{item.profil_user.nip}}" class="btn btn-block text-left">{{item.full_name}}</a></td>                                            
-                                            </tr>
-                                        {% elif item.nip %}
-                                            <tr>
-                                                <td>{{forloop.counter}}</td>
-                                                <td><a href="{% url 'dashboard_urls:dashboard_view' %}?nip={{item.profil_user.nip}}" class="btn btn-block text-left">{{item.full_name}}</a></td>                                            
-                                            </tr>
-                                        {% endif %}
+                                    {% for item in jenissdm %}
+                                    <tr>
+                                        <td>{{forloop.counter}}</td>
+                                        <td>
+                                            <a href="{% url 'dashboard_urls:dashboard_sdm_view' sdm=item.pk %}">
+                                                {{item.jenis_sdm}}
+                                            </a>
+                                        </td>
+                                        <td>{{item.get_kategori_sdm_display|default:'-'}}</td>
+                                        <td class="text-center font-weight-bold">{{item.jumlah}}</td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr>
+                                        <td colspan="4" class="text-center text-muted">Data jabatan belum tersedia.</td>
+                                    </tr>
                                     {% endfor %}
                                 </tbody>
+                                <tfoot>
+                                    <tr class="bg-light font-weight-bold">
+                                        <td colspan="3" class="text-right">Total Terhitung</td>
+                                        <td class="text-center">{{ jabatan_total }}</td>
+                                    </tr>
+                                </tfoot>
                             </table>
-                            <center>
-                                {%if takah.has_previous %} {# whether the previous page exists #}
-                                    <a href="?page={{takah.previous_page_number}}" style="text-decoration: none;"><i class="fas fa-chevron-left"  style="margin-right: 2em;"></i></a> {# link to the prev page #}
-                                {% endif %}
-                                <span>{{takah.number}}</span> {# the current page number #}
-                               
-                                {%if takah.has_next %} {# whether the next page exists #}
-                                    <a href="?page={{takah.next_page_number}}"><i class="fas fa-chevron-right" style="margin-left: 2em;"></i></a> {# link to the next page #}
-                                {% endif %}
-                            </center>
                         </div>
-                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -374,21 +377,24 @@
     const btnup = document.getElementById('btn_up');
     const btndown = document.getElementById('btn_down');
     const card = document.getElementById('card-nakes');
-    btn.addEventListener('click', () => {
-        
-        if (window.matchMedia("(max-width: 1800px)").matches) {
-            if (card.style.height === 'auto' && btnup.style.display === 'block'){
-                card.style.height = '9.4rem';
-                btnup.style.display = 'none';
-                btndown.style.display = 'block';
-            }else{
-                card.style.height = 'auto';
-                btnup.style.display = 'block';
-                btndown.style.display = 'none';
-            }
-        }
-    })
-    
+
+    if (btn && btnup && btndown && card) {
+        btn.addEventListener('click', () => {
+            const expanded = card.classList.toggle('cards-expanded');
+            // Gunakan inline style agar tetap bekerja walaupun CSS statis masih
+            // tersimpan di cache browser atau belum selesai di-collectstatic.
+            card.style.height = expanded ? 'auto' : '';
+            card.style.maxHeight = expanded ? 'none' : '';
+            card.style.overflow = expanded ? 'visible' : '';
+            btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            btn.setAttribute(
+                'title',
+                expanded ? 'Sembunyikan sebagian card pegawai' : 'Tampilkan seluruh card pegawai'
+            );
+            btnup.style.display = expanded ? 'block' : 'none';
+            btndown.style.display = expanded ? 'none' : 'block';
+        });
+    }
 </script>
 
     

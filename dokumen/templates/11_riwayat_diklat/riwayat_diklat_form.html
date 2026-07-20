@@ -2,10 +2,10 @@
 {% load crispy_forms_tags %}
 
 {% block button %}
-    {% if request.user.is_staff and not request.user.is_superuser%}
+    {% if request.user.is_staff and not request.user.is_dokumen_admin%}
     <a href="{% url 'riwayat_urls:riwayat_diklat_detail' pk=request.user.id %}" class="btn btn-outline-info">Diklatku</a>
     <a href="{% url 'riwayat_urls:riwayat_diklat' %}" class="btn btn-outline-success">Diklat Pegawai</a>
-    {% elif request.user.is_superuser %}
+    {% elif request.user.is_dokumen_admin %}
     <a href="{% url 'riwayat_urls:riwayat_diklat' %}" class="btn btn-outline-success">Diklat Pegawai</a>
     {% else %}
     <a href="{% url 'riwayat_urls:riwayat_diklat_detail' pk=request.user.id %}" class="btn btn-outline-info">Diklatku</a>

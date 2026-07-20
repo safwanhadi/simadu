@@ -31,12 +31,40 @@ from .models import (
     Anak,
     PredikatKinerja,
     RiwayatInovasi,
-    BidangInovasi
+    BidangInovasi,
+    KewajibanDokumen,
 )
 
 # Register your models here.
 class RiwayatJabatanAdmin(admin.ModelAdmin):
     form = RiwayatJabatanAdminForm
+
+
+class KewajibanDokumenInline(admin.TabularInline):
+    model = KewajibanDokumen
+    extra = 0
+    fields = ('status_pegawai', 'wajib')
+
+
+class DokumenSDMAdmin(admin.ModelAdmin):
+    list_display = ('nama', 'url', 'daftar_status_wajib')
+    search_fields = ('nama', 'url')
+    inlines = (KewajibanDokumenInline,)
+
+    @admin.display(description='Wajib untuk status')
+    def daftar_status_wajib(self, obj):
+        return ', '.join(
+            obj.kewajiban_status.filter(wajib=True).values_list(
+                'status_pegawai', flat=True,
+            )
+        ) or '-'
+
+
+@admin.register(KewajibanDokumen)
+class KewajibanDokumenAdmin(admin.ModelAdmin):
+    list_display = ('dokumen', 'status_pegawai', 'wajib')
+    list_filter = ('status_pegawai', 'wajib')
+    search_fields = ('dokumen__nama', 'dokumen__url')
     
 class KompetensiAdmin(admin.ModelAdmin):
     list_display = ('pegawai', 'get_kompetensi', 'berlaku_sd')
@@ -59,7 +87,7 @@ class KompetensiAdmin(admin.ModelAdmin):
   
 
 admin.site.register(PangkatGolongan)
-admin.site.register(DokumenSDM)
+admin.site.register(DokumenSDM, DokumenSDMAdmin)
 admin.site.register(JenjangStruktural)
 admin.site.register(JenjangJafung)
 admin.site.register(RiwayatPendidikan)

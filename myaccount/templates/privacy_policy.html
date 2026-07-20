@@ -1,0 +1,192 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Kebijakan Privasi SIMADU BERDANSA - Rumah Sakit Mandalika">
+    <title>Kebijakan Privasi | SIMADU BERDANSA</title>
+    <link rel="icon" type="image/png" href="{% static 'dist/img/favicon_rsmandalika.png' %}">
+    <style>
+        :root {
+            --primary: #0d7c7c;
+            --primary-dark: #095e5e;
+            --surface: #ffffff;
+            --background: #f2f9f9;
+            --text: #243434;
+            --muted: #607272;
+            --border: #d9e8e8;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            color: var(--text);
+            background: var(--background);
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            line-height: 1.7;
+        }
+        header {
+            color: white;
+            background: linear-gradient(135deg, var(--primary-dark), var(--primary));
+            padding: 52px 20px 70px;
+        }
+        header .inner, main, footer .inner { max-width: 900px; margin: 0 auto; }
+        header h1 { margin: 0 0 8px; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.2; }
+        header p { margin: 0; color: #d8f4f4; }
+        main {
+            position: relative;
+            margin-top: -34px;
+            margin-bottom: 40px;
+            padding: 34px clamp(22px, 5vw, 54px);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            box-shadow: 0 14px 40px rgba(9, 94, 94, .09);
+        }
+        h2 { margin: 34px 0 10px; color: var(--primary-dark); font-size: 1.3rem; }
+        h2:first-of-type { margin-top: 12px; }
+        p, ul { margin-top: 8px; }
+        ul { padding-left: 23px; }
+        li { margin-bottom: 7px; }
+        a { color: var(--primary-dark); }
+        .updated {
+            display: inline-block;
+            margin-bottom: 14px;
+            padding: 5px 11px;
+            color: var(--primary-dark);
+            background: #e6f6f6;
+            border-radius: 999px;
+            font-size: .88rem;
+            font-weight: 600;
+        }
+        .note {
+            padding: 16px 18px;
+            background: #f3fafa;
+            border-left: 4px solid var(--primary);
+            border-radius: 8px;
+        }
+        footer { padding: 0 20px 35px; color: var(--muted); text-align: center; font-size: .9rem; }
+        .back-link { display: inline-block; margin-top: 22px; font-weight: 600; }
+        @media (max-width: 940px) {
+            main { margin-left: 14px; margin-right: 14px; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="inner">
+            <h1>Kebijakan Privasi</h1>
+            <p>SIMADU BERDANSA — Sistem Manajemen Terpadu Sumber Daya Manusia Rumah Sakit Mandalika</p>
+        </div>
+    </header>
+
+    <main>
+        <span class="updated">Berlaku sejak 17 Juli 2026</span>
+        <p>
+            Rumah Sakit Mandalika (selanjutnya disebut “kami”) menghormati privasi pengguna SIMADU BERDANSA.
+            Kebijakan ini menjelaskan informasi yang diproses, tujuan penggunaannya, serta pilihan
+            yang tersedia bagi pengguna ketika mengakses SIMADU BERDANSA, termasuk melalui Login dengan Google.
+        </p>
+
+        <h2>1. Ruang lingkup</h2>
+        <p>
+            Kebijakan ini berlaku untuk penggunaan situs dan layanan SIMADU BERDANSA oleh pegawai, tenaga kesehatan,
+            administrator, serta pihak lain yang diberi hak akses oleh Rumah Sakit Mandalika.
+        </p>
+
+        <h2>2. Informasi yang kami proses</h2>
+        <p>Informasi yang dapat diproses melalui SIMADU BERDANSA meliputi:</p>
+        <ul>
+            <li>identitas akun, seperti nama, alamat email, dan pengenal akun;</li>
+            <li>informasi profil kepegawaian yang diberikan pengguna atau dikelola oleh petugas berwenang;</li>
+            <li>data administrasi SDM, layanan kepegawaian, riwayat dokumen, disiplin, dan kehadiran sesuai kewenangan pengguna;</li>
+            <li>informasi teknis dan keamanan, seperti waktu akses, alamat IP, sesi login, dan catatan aktivitas yang diperlukan untuk menjaga layanan.</li>
+        </ul>
+
+        <h2>3. Data dari Google</h2>
+        <p>
+            Apabila pengguna memilih <strong>Login dengan Google</strong>, SIMADU BERDANSA meminta akses terbatas
+            ke informasi profil dasar dan alamat email akun Google. Bergantung pada informasi yang diberikan
+            Google, data tersebut dapat mencakup nama, email, foto profil, dan pengenal unik akun Google.
+        </p>
+        <div class="note">
+            Data Google digunakan untuk memverifikasi identitas, mencocokkan pengguna dengan akun SIMADU BERDANSA
+            yang telah terdaftar, dan memudahkan proses login. SIMADU BERDANSA tidak meminta akses ke Gmail,
+            Google Drive, Google Calendar, kontak, maupun kata sandi Google pengguna.
+        </div>
+
+        <h2>3.1. Data dari Telegram</h2>
+        <p>
+            Apabila pengguna memilih pemulihan password melalui Telegram, SIMADU memproses nomor telepon
+            yang secara sadar dibagikan pengguna, pengenal pengguna Telegram, chat ID, dan username Telegram
+            apabila tersedia. Informasi tersebut digunakan untuk mencocokkan akun, mengirim tautan reset
+            sekali pakai, mencegah penyalahgunaan, dan mencatat waktu permintaan terakhir. Password tidak
+            pernah diminta atau dikirim melalui percakapan Telegram.
+        </p>
+
+        <h2>4. Tujuan penggunaan informasi</h2>
+        <p>Kami menggunakan informasi untuk:</p>
+        <ul>
+            <li>mengautentikasi pengguna dan mengelola hak akses;</li>
+            <li>menyelenggarakan administrasi dan layanan sumber daya manusia;</li>
+            <li>memberikan fungsi aplikasi sesuai peran pengguna;</li>
+            <li>menjaga keamanan, mencegah penyalahgunaan, dan menangani gangguan;</li>
+            <li>memenuhi kewajiban administratif dan ketentuan yang berlaku bagi Rumah Sakit Mandalika.</li>
+        </ul>
+
+        <h2>5. Pembagian informasi</h2>
+        <p>Kami tidak menjual data pribadi pengguna. Informasi hanya dapat diakses atau dibagikan:</p>
+        <ul>
+            <li>kepada petugas dan unit kerja yang berwenang sesuai tugasnya;</li>
+            <li>kepada penyedia layanan teknis yang membantu pengoperasian sistem dengan kewajiban menjaga kerahasiaan;</li>
+            <li>apabila diwajibkan oleh hukum, perintah otoritas yang sah, atau untuk melindungi keamanan dan hak pengguna maupun organisasi.</li>
+        </ul>
+
+        <h2>6. Penyimpanan dan pengamanan</h2>
+        <p>
+            Informasi disimpan selama diperlukan untuk menyediakan layanan, menjalankan administrasi SDM,
+            memenuhi masa retensi dokumen, dan mematuhi ketentuan yang berlaku. Kami menerapkan pengendalian
+            akses, autentikasi, pencatatan aktivitas, serta langkah teknis dan organisasi yang wajar untuk
+            melindungi informasi. Tidak ada metode penyimpanan atau transmisi elektronik yang sepenuhnya bebas risiko.
+        </p>
+
+        <h2>7. Cookie dan sesi</h2>
+        <p>
+            SIMADU BERDANSA menggunakan cookie sesi yang diperlukan untuk mempertahankan status login, melindungi
+            permintaan dari pemalsuan, dan menjalankan fungsi keamanan. Menonaktifkan cookie yang diperlukan
+            dapat menyebabkan pengguna tidak dapat masuk atau menggunakan sebagian layanan.
+        </p>
+
+        <h2>8. Pilihan dan hak pengguna</h2>
+        <p>
+            Pengguna dapat meminta akses, koreksi, atau penghapusan informasi sesuai kewenangan dan ketentuan
+            retensi yang berlaku dengan menghubungi pengelola. Pengguna juga dapat mencabut akses Google untuk
+            SIMADU BERDANSA melalui halaman keamanan akun Google. Pencabutan tersebut menghentikan penggunaan login Google,
+            tetapi tidak otomatis menghapus catatan kepegawaian yang wajib disimpan.
+        </p>
+
+        <h2>9. Perubahan kebijakan</h2>
+        <p>
+            Kebijakan ini dapat diperbarui untuk menyesuaikan perubahan layanan, keamanan, atau ketentuan yang berlaku.
+            Tanggal berlaku terbaru akan dicantumkan pada halaman ini.
+        </p>
+
+        <h2>10. Kontak</h2>
+        <p>
+            Pertanyaan atau permintaan terkait privasi dapat disampaikan kepada Tim Teknologi Informasi
+            Rumah Sakit Mandalika{% if privacy_contact_email %} melalui
+            <a href="mailto:{{ privacy_contact_email }}">{{ privacy_contact_email }}</a>{% endif %} atau melalui
+            kanal kontak resmi pada
+            <a href="https://mandalikahospital.ntbprov.go.id" rel="noopener noreferrer">situs Rumah Sakit Mandalika</a>.
+        </p>
+
+        <a class="back-link" href="{% url 'about_simadu' %}">&larr; Tentang SIMADU BERDANSA</a>
+        &nbsp;&middot;&nbsp;
+        <a class="back-link" href="{% url 'myaccount_urls:login_view' %}">Halaman masuk</a>
+    </main>
+
+    <footer>
+        <div class="inner">&copy; {% now 'Y' %} Rumah Sakit Mandalika. Seluruh hak dilindungi.</div>
+    </footer>
+</body>
+</html>

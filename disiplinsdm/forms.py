@@ -153,7 +153,7 @@ def pegawai_list(tanggal):
     return data_user
 
 def instalasi(pegawai):
-    instalasi = pegawai.riwayatpenempatan_set.filter(status=True).first()
+    instalasi = pegawai.riwayat_penempatan.filter(status=True).first()
     return instalasi
     
 class SalinJadwalForm(forms.Form):
@@ -253,7 +253,7 @@ class DaftarKegiatanPegawaiForm(forms.ModelForm):
         self.request = kwargs.pop('request', None)
         self.tanggal = kwargs.pop('tanggal', None)
         super(DaftarKegiatanPegawaiForm, self).__init__(*args, **kwargs)
-        if self.request and self.request.user.is_superuser:
+        if self.request and self.request.user.is_disiplin_admin:
             self.fields['pegawai'].queryset = pegawai_list(self.tanggal)
         else:
             self.fields['pegawai'].initial = Users.objects.filter(pk=self.request.user.pk)
@@ -317,7 +317,7 @@ class FormCopyJadwalSDM(forms.ModelForm):
         self.sub_bidang = kwargs.pop('sub_bidang', None)
         self.instalasi = kwargs.pop('instalasi', None)
         super(FormCopyJadwalSDM, self).__init__(*args, **kwargs)
-        if self.request and self.request.user.is_superuser:
+        if self.request and self.request.user.is_disiplin_admin:
             self.fields['jadwaldinassdm'] = forms.ModelMultipleChoiceField(queryset=JenisSDMPerinstalasi.objects.filter(jadwaldinassdm__isnull=True, bulan=self.bulan, tahun=self.tahun))
         elif self.request and self.request.user.is_staff and self.instalasi:
             self.fields['jadwaldinassdm'] = forms.ModelMultipleChoiceField(queryset=JenisSDMPerinstalasi.objects.filter(jadwaldinassdm__isnull=True, bulan=self.bulan, tahun=self.tahun, instalasi=self.instalasi))

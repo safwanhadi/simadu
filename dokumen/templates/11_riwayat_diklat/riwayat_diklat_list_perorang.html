@@ -10,16 +10,6 @@
 {% block child_content %}
 <div class="row">
     <div class="col-md-12">
-        <div class="form-group row">
-            <label class="col-2">Nama</label>
-            <div class="col-10">{{data.full_name}}</div>
-        </div>
-        <div class="form-group row">
-            <label class="col-2">NIP/NRK</label>
-            <div class="col-10">{{data.profil_user.nip}}</div>
-        </div>
-    </div>
-    <div class="col-md-12">
         <div class="table table-responsive">
             <table class="table" id="data_table">
                 <thead>
@@ -53,7 +43,9 @@
                             {% endif %}
                         </td>
                         <td>
-                            <a href="?nip={{item.pegawai.profil_user.nip}}" class="btn btn-primary"><i class="fas fa-user"></i></a>
+                            {% if request.user.is_dokumen_admin %}
+                            <a href="{% url 'riwayat_urls:riwayat_diklat' %}?nip={{data.profil_user.nip}}" class="btn btn-primary"><i class="fas fa-user"></i></a>
+                            {% endif %}
                             <a href="{% url 'riwayat_urls:riwayat_update_diklat' id=item.id %}" class="btn btn-primary"><i class="fas fa-edit"></i></a>
                             <a href="{% url 'riwayat_urls:riwayat_delete_diklat' pk=item.id %}#deletedata" class="btn btn-outline-danger"><i class="fas fa-trash"></i></a>
                         </td>

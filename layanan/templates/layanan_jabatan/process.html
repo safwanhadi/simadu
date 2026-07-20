@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-4">
+        <div class="card card-solid">
+            <div class="card-header"><h5 class="mb-0">Ringkasan Usulan</h5></div>
+            <div class="card-body">
+                <p><strong>Pegawai</strong><br>{{ usulan.pegawai.full_name }}</p>
+                <p><strong>Status</strong><br>{{ usulan.get_status_display }}</p>
+                <p><strong>PAK Terakhir</strong><br>{{ usulan.pak|default:'-' }}</p>
+                <a href="{% url 'layanan_urls:layanan_jabatan_detail' pk=usulan.pk %}" class="btn btn-info btn-sm">Lihat Persyaratan</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-8">
+        <div class="card card-solid">
+            <div class="card-header"><h5 class="mb-0">{{ card_title }}</h5></div>
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="card-body">
+                    {% if hasil_jabatan and hasil_jabatan.file %}
+                    <div class="alert alert-success">Hasil sudah tersedia. Form ini dapat digunakan untuk memperbarui data atau mengganti SK.</div>
+                    {% endif %}
+                    <div class="alert alert-info">Isi lokasi organisasi yang relevan saja: unit organisasi, bidang, subbidang, atau instalasi.</div>
+                    {{ form|crispy }}
+                </div>
+                <div class="card-footer d-flex justify-content-between">
+                    <a href="{% url 'layanan_urls:layanan_jabatan_list' %}" class="btn btn-secondary">Kembali</a>
+                    <button type="submit" class="btn btn-success">Simpan Hasil ke Riwayat Jabatan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+    $(function () {
+        $('.select2').select2({
+            theme: 'bootstrap4',
+            width: '100%',
+            placeholder: 'Pilih data',
+            allowClear: true
+        });
+    });
+</script>
+{% endblock script %}

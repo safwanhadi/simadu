@@ -1,0 +1,101 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Login Google Tidak Berhasil | SIMADU</title>
+    <link rel="icon" type="image/png" href="{% static 'dist/img/favicon_rsmandalika.png' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Plus Jakarta Sans', 'system-ui', 'sans-serif'] },
+                    colors: {
+                        brand: { 50: '#eefafa', 100: '#d6f2f2', 200: '#b1e5e5', 500: '#159494', 600: '#0d7c7c', 700: '#0a6666', 800: '#095252', 900: '#073f3f' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .page-grid {
+            background-image: linear-gradient(rgba(13,124,124,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(13,124,124,.045) 1px, transparent 1px);
+            background-size: 32px 32px;
+        }
+    </style>
+</head>
+<body class="page-grid min-h-screen bg-gradient-to-br from-brand-50 via-white to-brand-100 font-sans text-slate-700 antialiased">
+    <div class="pointer-events-none fixed -right-32 -top-32 h-96 w-96 rounded-full bg-teal-300/20 blur-3xl"></div>
+    <div class="pointer-events-none fixed -bottom-36 -left-24 h-96 w-96 rounded-full bg-cyan-300/15 blur-3xl"></div>
+
+    <main class="relative flex min-h-screen items-center justify-center px-4 py-10 sm:px-6">
+        <section class="w-full max-w-2xl overflow-hidden rounded-3xl border border-brand-100 bg-white shadow-[0_28px_80px_rgba(9,82,82,.16)]">
+            <div class="bg-gradient-to-br from-brand-800 to-brand-600 px-7 py-7 text-white sm:px-10">
+                <a href="{% url 'about_simadu' %}" class="inline-flex items-center gap-3" aria-label="Tentang SIMADU">
+                    <span class="flex h-11 w-11 items-center justify-center rounded-xl bg-white/15 ring-1 ring-white/20">
+                        <img src="{% static 'dist/img/logo_rsmandalika.png' %}" alt="Logo Rumah Sakit Mandalika" class="h-8 w-8 object-contain">
+                    </span>
+                    <span>
+                        <strong class="block text-lg leading-tight">SIMADU</strong>
+                        <span class="block text-xs text-brand-100">Rumah Sakit Mandalika</span>
+                    </span>
+                </a>
+            </div>
+
+            <div class="px-7 py-9 text-center sm:px-12 sm:py-12">
+                <span class="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-red-50 text-red-500 ring-8 ring-red-50/60">
+                    <i class="ph ph-cloud-x text-4xl"></i>
+                </span>
+                <p class="mt-8 text-xs font-bold uppercase tracking-[.18em] text-brand-600">Koneksi autentikasi terputus</p>
+                <h1 class="mt-3 text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">Login Google tidak berhasil</h1>
+                <p class="mx-auto mt-5 max-w-xl text-sm leading-7 text-slate-600 sm:text-base">
+                    SIMADU tidak dapat menyelesaikan proses autentikasi dengan Google. Hal ini biasanya terjadi
+                    karena sesi login telah berakhir, halaman callback dibuka ulang, atau proses login terputus.
+                </p>
+
+                <div class="mx-auto mt-8 max-w-xl rounded-2xl border border-brand-100 bg-brand-50 p-5 text-left">
+                    <div class="flex gap-4">
+                        <span class="mt-0.5 flex h-9 w-9 flex-none items-center justify-center rounded-xl bg-white text-brand-700 shadow-sm">
+                            <i class="ph ph-arrow-clockwise text-xl"></i>
+                        </span>
+                        <div>
+                            <h2 class="font-bold text-slate-900">Coba login kembali dari awal</h2>
+                            <ol class="mt-2 space-y-2 text-sm leading-6 text-slate-600">
+                                <li class="flex gap-3"><span class="font-bold text-brand-700">1.</span><span>Kembali ke halaman masuk SIMADU—jangan refresh atau membuka ulang URL callback ini.</span></li>
+                                <li class="flex gap-3"><span class="font-bold text-brand-700">2.</span><span>Tekan tombol Google dan selesaikan proses dalam tab browser yang sama.</span></li>
+                                <li class="flex gap-3"><span class="font-bold text-brand-700">3.</span><span>Jika tetap gagal, hapus cookie SIMADU atau gunakan jendela incognito, lalu hubungi Tim IT.</span></li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-9 flex flex-col justify-center gap-3 sm:flex-row">
+                    <a href="{% url 'myaccount_urls:login_view' %}" class="inline-flex items-center justify-center gap-2 rounded-full bg-brand-600 px-7 py-3.5 text-sm font-bold text-white shadow-lg shadow-brand-600/20 transition hover:-translate-y-0.5 hover:bg-brand-700">
+                        <i class="ph ph-arrow-clockwise text-lg"></i> Coba login kembali
+                    </a>
+                    <a href="{% url 'about_simadu' %}" class="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-7 py-3.5 text-sm font-bold text-slate-700 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700">
+                        Tentang SIMADU
+                    </a>
+                </div>
+
+                <p class="mt-8 text-xs leading-5 text-slate-400">
+                    Jangan membagikan URL callback, authorization code, atau state autentikasi kepada siapa pun.
+                </p>
+            </div>
+
+            <footer class="flex flex-col items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-7 py-5 text-xs text-slate-500 sm:flex-row sm:px-10">
+                <span>&copy; {% now 'Y' %} Rumah Sakit Mandalika</span>
+                <div class="flex items-center gap-4">
+                    <a href="{% url 'privacy_policy' %}" class="transition hover:text-brand-700">Kebijakan Privasi</a>
+                    <a href="https://mandalikahospital.ntbprov.go.id" rel="noopener noreferrer" class="transition hover:text-brand-700">Situs Rumah Sakit</a>
+                </div>
+            </footer>
+        </section>
+    </main>
+</body>
+</html>

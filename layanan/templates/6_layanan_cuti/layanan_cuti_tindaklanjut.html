@@ -28,7 +28,7 @@
             </div>
             <div class="row mt-2">
                 <div class="col-md-4 text-bold">Instalasi</div>
-                <div class="col-md-8">: {{data_detail.pegawai.riwayatpenempatan_set.last.penempatan}}</div>
+                <div class="col-md-8">: {{data_detail.pegawai.riwayat_penempatan.last.penempatan}}</div>
             </div>
             <div class="row mt-2">
                 <div class="col-md-4 text-bold">Sisa Cuti</div>
@@ -169,7 +169,7 @@
                 </tbody>
             </table>
         </div> 
-        {% if request.user.is_superuser %}
+        {% if request.user.is_cuti_admin %}
         <div class="col-md-12 text-center pt-5">
             <form method="post">
                 <div class="d-flex justify-content-center">

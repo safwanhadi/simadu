@@ -8,7 +8,7 @@
 {% block content %}
 <div class="card">
     <div class="card-header">
-        {% if request.user.is_superuser %}
+        {% if request.user.is_dokumen_admin %}
         <h3>Daftar Pegawai Yang Belum Lengkap Mengisi Data</h3>
         {% else %}
         <h3>Kelengkapan Pengisian Data SIMADU BERDANSA</h3>
@@ -17,7 +17,7 @@
     <div class="card-body">
         <div class="tab-content m-3 mt-2" id="myTabContent">
             <div class="table table-responsive">
-                {% if not request.user.is_superuser or nip %}
+                {% if not request.user.is_dokumen_admin or nip %}
                 {% for item in kelengkapan %}
                     {% if forloop.first %}
                     <div class="row mb-3">

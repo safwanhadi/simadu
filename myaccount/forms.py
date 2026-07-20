@@ -1,10 +1,10 @@
 from django import forms
-from django.contrib.auth.forms import AuthenticationForm, UsernameField
+from django.contrib.auth.forms import AuthenticationForm, SetPasswordForm, UsernameField
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from django.contrib.auth.forms import UserCreationForm
 from django.forms import inlineformset_factory
 from django.db import transaction
-from .models import Users, ProfilSDM
+from .models import AccountRegistration, Users, ProfilSDM
 
 
 class UpdateUser(forms.ModelForm):
@@ -13,6 +13,92 @@ class UpdateUser(forms.ModelForm):
     class Meta:
         model = Users
         fields = ['email', 'first_name', 'last_name']
+
+
+class AdminResetPasswordForm(SetPasswordForm):
+    """Form reset kata sandi oleh Admin Akun dengan validator Django."""
+
+    new_password1 = forms.CharField(
+        label='Kata sandi baru',
+        strip=False,
+        widget=forms.PasswordInput(attrs={
+            'class': 'form-control',
+            'autocomplete': 'new-password',
+        }),
+    )
+    new_password2 = forms.CharField(
+        label='Konfirmasi kata sandi baru',
+        strip=False,
+        widget=forms.PasswordInput(attrs={
+            'class': 'form-control',
+            'autocomplete': 'new-password',
+        }),
+    )
+
+
+class EmployeeRegistrationForm(UserCreationForm):
+    """Registrasi mandiri pegawai; akun selalu dibuat dalam keadaan nonaktif."""
+
+    first_name = forms.CharField(label='Nama depan', max_length=30)
+    last_name = forms.CharField(label='Nama belakang', max_length=150, required=False)
+    email = forms.EmailField(label='Email')
+    nip = forms.CharField(label='NIP/NIK pegawai', max_length=18)
+    no_hp = forms.CharField(
+        label='Nomor HP',
+        max_length=20,
+        help_text='Gunakan nomor aktif yang juga digunakan pada Telegram.',
+    )
+    agree_privacy = forms.BooleanField(
+        label='Saya menyetujui Kebijakan Privasi SIMADU.',
+    )
+
+    class Meta(UserCreationForm.Meta):
+        model = Users
+        fields = ('first_name', 'last_name', 'email')
+
+    def clean_email(self):
+        email = Users.objects.normalize_email(self.cleaned_data['email']).lower()
+        if Users.objects.filter(email__iexact=email).exists():
+            raise forms.ValidationError('Email sudah digunakan oleh akun lain.')
+        return email
+
+    def clean_nip(self):
+        nip = ''.join(char for char in self.cleaned_data['nip'] if char.isdigit())
+        if not nip:
+            raise forms.ValidationError('NIP/NIK pegawai wajib diisi dengan angka.')
+        if len(nip) > 18:
+            raise forms.ValidationError('NIP/NIK pegawai maksimal 18 angka.')
+        if ProfilSDM.objects.filter(nip=nip).exists():
+            raise forms.ValidationError('NIP/NIK pegawai sudah terdaftar.')
+        return nip
+
+    def clean_no_hp(self):
+        value = self.cleaned_data['no_hp'].strip()
+        digits = ''.join(char for char in value if char.isdigit())
+        if digits.startswith('62'):
+            digits = f'0{digits[2:]}'
+        elif digits.startswith('8'):
+            digits = f'0{digits}'
+        if len(digits) < 10 or len(digits) > 15 or not digits.startswith('0'):
+            raise forms.ValidationError('Masukkan nomor HP Indonesia yang valid.')
+        return digits
+
+    @transaction.atomic
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user.is_active = False
+        user.is_staff = False
+        user.is_superuser = False
+        if commit:
+            user.save()
+            ProfilSDM.objects.create(
+                user=user,
+                nip=self.cleaned_data['nip'],
+                no_hp=self.cleaned_data['no_hp'],
+                email_pribadi=user.email,
+            )
+            AccountRegistration.objects.create(user=user)
+        return user
 
 
 class RegisterForm(forms.ModelForm):

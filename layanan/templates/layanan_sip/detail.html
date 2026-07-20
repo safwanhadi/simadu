@@ -1,0 +1,159 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+<!-- {% load humanize %} -->
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block content %}
+<div class="d-flex flex-row justify-content-between">
+    <div class="d-flex flex-row mb-1">
+        <a href="{% url 'layanan_urls:layanan_sip_list' %}" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
+        <h5 id="card_title">{{card_title}}</h5>
+    </div>
+</div>
+<h4></h4>
+
+<table class="table table-bordered">
+    <tr>
+        <th>Pegawai</th>
+        <td>{{ layanan_sip.pegawai.full_name }}</td>
+    </tr>
+    <tr>
+        <th>Layanan</th>
+        <td>{{ layanan_sip.layanan }}</td>
+    </tr>
+    <tr>
+        <th>KTP</th>
+        <td>
+            {% if layanan_sip.pegawai.profil_user.file_ktp %}
+                <a href="{{ layanan_sip.pegawai.profil_user.file_ktp.url }}" download class="btn btn-sm btn-outline-primary"><i class="fas fa-download"></i> Download KTP</a>
+            {% else %}
+                <span class="badge badge-warning">Belum tersedia</span>
+                {% if not request.user.is_sip_admin %}
+                    <a href="{% url 'layanan_urls:layanan_sip_upload_persyaratan' pk=layanan_sip.pk %}" class="btn btn-sm btn-warning ml-2"><i class="fas fa-upload"></i> Upload KTP</a>
+                {% endif %}
+            {% endif %}
+        </td>
+    </tr>
+    <tr>
+        <th>Foto</th>
+        <td>
+            {% if layanan_sip.pegawai.profil_user.foto %}
+                <a href="{{ layanan_sip.pegawai.profil_user.foto.url }}" download class="btn btn-sm btn-outline-primary"><i class="fas fa-download"></i> Download Foto</a>
+            {% else %}
+                <span class="badge badge-warning">Belum tersedia</span>
+                {% if not request.user.is_sip_admin %}
+                    <a href="{% url 'layanan_urls:layanan_sip_upload_persyaratan' pk=layanan_sip.pk %}" class="btn btn-sm btn-warning ml-2"><i class="fas fa-upload"></i> Upload Foto</a>
+                {% endif %}
+            {% endif %}
+        </td>
+    </tr>
+    <tr>
+        <th>Ijazah</th>
+        <td>
+            {% if layanan_sip.ijazah.file_ijazah %}
+            <a href="{{ layanan_sip.ijazah.file_ijazah.url }}" download class="btn btn-sm btn-outline-primary ml-2"><i class="fas fa-download"></i> Download Ijazah</a>
+            {% else %}
+            <span class="badge badge-warning"> Belum ada</span>
+            {% if not request.user.is_sip_admin %}
+                <a href="{% url 'layanan_urls:layanan_sip_upload_persyaratan' pk=layanan_sip.pk %}" class="btn btn-sm btn-warning ml-2"><i class="fas fa-upload"></i> Upload Ijazah</a>
+            {% endif %}
+            {% endif %}
+        </td>
+    </tr>
+    <tr>
+        <th>STR Profesi</th>
+        <td>
+            {% if layanan_sip.str_profesi.file_str %}
+                <a href="{{ layanan_sip.str_profesi.file_str.url }}" download class="btn btn-sm btn-outline-primary"><i class="fas fa-download"></i> Download STR</a>
+            {% else %}
+                <span class="badge badge-warning"> Belum ada</span>
+            {% endif %}
+        </td>
+    </tr>
+    <tr>
+        <th>Surat Pernyataan Kecukupan SKP</th>
+        <td>
+            {% if layanan_sip.kecukupan_skp %}
+                <a href="{{ layanan_sip.kecukupan_skp.url }}" download class="btn btn-sm btn-outline-success"><i class="fas fa-download"></i> Download Surat Pernyataan Kecukupan SKP</a>
+            {% else %}
+                <span class="badge badge-warning"> Belum ada</span>
+            {% endif %}
+            {% if request.user.is_sip_admin %}
+                <br/>(<span class="help-block text-muted text-sm">Akan diupload oleh pegawai -- tombol upload hanya bisa diakses pegawai</span>)
+            {% else %}
+                <a href="{% url 'layanan_urls:layanan_sip_upload_rekomendasi' pk=layanan_sip.pk %}" class="btn btn-sm btn-warning ml-2"><i class="fas fa-upload"></i> Upload/Ganti</a>
+            {% endif %}
+        </td>
+    </tr>
+    <tr>
+        <th>Surat Permohonan Rekomendasi SIP</th>
+        <td>
+            {% if layanan_sip.surat_permohonan_rekomendasi %}
+                <a href="{{ layanan_sip.surat_permohonan_rekomendasi.url }}" download class="btn btn-sm btn-outline-success"><i class="fas fa-download"></i> Download Surat Permohonan Rekomendasi SIP</a>
+            {% else %}
+                <span class="badge badge-warning"> Belum ada</span>
+            {% endif %}
+        </td>
+    </tr>
+    <tr>
+        <th>Surat Rekomendasi SIP</th>
+        <td>
+            {% if request.user.is_sip_admin %}
+                {% if layanan_sip.surat_rekomendasi_sip %}
+                    <a href="{{ layanan_sip.surat_rekomendasi_sip.url }}" download class="btn btn-sm btn-outline-success"><i class="fas fa-download"></i> Download Surat Rekomendasi SIP</a>
+                {% else %}
+                    <span class="badge badge-warning"> Belum ada</span>
+                {% endif %}
+                    <a href="{% url 'layanan_urls:layanan_sip_upload_rekomendasi' pk=layanan_sip.pk %}" class="btn btn-sm btn-warning">
+                        <i class="fas fa-upload"></i> Upload/Ganti
+                    </a>
+            {% else %}
+                {% if layanan_sip.surat_rekomendasi_sip %}
+                    <a href="{{ layanan_sip.surat_rekomendasi_sip.url }}" download class="btn btn-sm btn-outline-success"><i class="fas fa-download"></i> Download Surat Rekomendasi SIP</a>
+                {% else %}
+                    <span class="badge badge-warning"> Belum ada</span> (<span class="help-block text-muted text-sm">Akan diupload oleh bagian SDM</span>)
+                {% endif %}
+            {% endif %}
+        </td>
+    </tr>
+    <tr>
+        <th>Status</th>
+        <td>
+            {% if layanan_sip.status == 'sudah' %}
+                <span class="badge badge-success">{{ layanan_sip.get_status_display }}</span>
+            {% else %}
+                <span class="badge badge-secondary">Belum diproses</span>
+            {% endif %}
+        </td>
+    </tr>
+</table>
+
+<div class="d-flex flex-row justify-content-start">
+    <a href="{% url 'file_urls:generate_permohonan_rekomendasi_sip' pk=layanan_sip.pk %}" class="btn btn-sm btn-success mr-2">
+        <i class="fas fa-download"></i> Draft Permohonan Rekomendasi SIP
+    </a>
+
+        <a href="{% url 'file_urls:generate_surat_kecukupan_skp' pk=layanan_sip.pk %}" class="btn btn-sm btn-primary mr-2">
+            <i class="fas fa-download"></i> Draft Pernyataan Kecukupan SKP
+        </a>
+    {% if request.user.is_sip_admin %}
+        <a href="{% url 'file_urls:generate_rekomendasi_sip' pk=layanan_sip.pk %}" class="btn btn-sm btn-info mr-2">
+            <i class="fas fa-download"></i> Draft Rekomendasi SIP
+        </a>
+    {% endif %}
+</div>
+
+{% endblock %}
+
+{% block script %}
+
+{% endblock script %}

@@ -10,7 +10,7 @@
         <a href="{% url 'cuti:layanan_cuti_create' %}" class="btn btn-primary">
             <i class="fas fa-plus"></i> Ajukan Cuti Baru
         </a>
-        {% if check_cuti.can_manage_cuti_tunda user %}
+        {% if request.user.is_cuti_admin %}
         <a href="{% url 'cuti:cuti_tunda_create' %}" class="btn btn-warning">
             <i class="fas fa-pause"></i> Ajukan Cuti Tertunda
         </a>
@@ -50,7 +50,7 @@
                     {{ filter_form.tanggal_akhir }}
                 </div>
             </div>
-            {% if request.user.is_superuser %}
+            {% if request.user.is_cuti_admin %}
             <div class="row mt-3">
                 <div class="col-md-3">
                     {{ filter_form.pegawai.label_tag }}
@@ -86,7 +86,7 @@
                 <thead>
                     <tr>
                         <th>No</th>
-                        {% if request.user.is_superuser %}
+                        {% if request.user.is_cuti_admin %}
                         <th>Pegawai</th>
                         {% endif %}
                         <th>Jenis Cuti</th>
@@ -102,7 +102,7 @@
                     {% for cuti in cuti_list %}
                     <tr>
                         <td>{{ forloop.counter0|add:page_obj.start_index }}</td>
-                        {% if request.user.is_superuser %}
+                        {% if request.user.is_cuti_admin %}
                         <td>{{ cuti.pegawai.full_name }}</td>
                         {% endif %}
                         <td>{{ cuti.jenis_cuti }}</td>

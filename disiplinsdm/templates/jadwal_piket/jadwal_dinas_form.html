@@ -43,7 +43,7 @@
       </div>
     </div>
     <hr>
-    <form method="post">
+    <form method="post" id="main-jadwal-form">
       {% csrf_token %}
       {{ formset.management_form }}
 
@@ -66,9 +66,16 @@
               <div class="card-body">
 
                 {% for hari in minggu.data_harian %}
-                  <h6 class="d-flex justify-content-between">
+                  <h6 class="d-flex justify-content-between align-items-center">
                     {{ hari.tanggal|date:"l, d M Y" }}
-                    <a href="?shift_tanggal={{ hari.tanggal|date:'Y-m-d' }}" class="btn btn-sm btn-success">+ Shift</a>
+                    
+                    <button type="submit" 
+                            formaction="?shift_tanggal={{ hari.tanggal|date:'Y-m-d' }}" 
+                            name="action" 
+                            value="tambah_shift" 
+                            class="btn btn-sm btn-success">
+                      + Shift
+                    </button>
                   </h6>
 
                   <table class="table table-sm table-bordered">
@@ -82,26 +89,26 @@
                     </thead>
                     <tbody>
                       {% for f in hari.forms %}
-                      {{ f.id }}  {# penting! supaya formset tahu ini instance existing #}
-                      {{ f.tanggal.as_hidden }}  {# tanggal juga harus dikirim walau hidden #}
-                      <tr>
-                        <td>{{ f.kategori_jadwal }}</td>
-                        <td>
-                          {% if f.instance.kategori_jadwal %}
-                            {% if f.instance.kategori_jadwal.waktu_datang %}
-                              {{ f.instance.kategori_jadwal.waktu_datang }}
-                            {% else %}
-                              N/A
-                            {% endif %} - {% if f.instance.kategori_jadwal.waktu_pulang %}
-                              {{ f.instance.kategori_jadwal.waktu_pulang }}
-                            {% else %}
-                              N/A
-                            {% endif %}
-                          {% else %}-{% endif %}
-                        </td>
-                        <td>{{ f.catatan }}</td>
-                        <td>{{ f.DELETE }}</td>
-                      </tr>
+                        {{ f.id }}  {# penting! supaya formset tahu ini instance existing #}
+                        {{ f.tanggal.as_hidden }}  {# tanggal juga harus dikirim walau hidden #}
+                        <tr>
+                          <td>{{ f.kategori_jadwal }}</td>
+                          <td>
+                            {% if f.instance.kategori_jadwal %}
+                              {% if f.instance.kategori_jadwal.waktu_datang %}
+                                {{ f.instance.kategori_jadwal.waktu_datang }}
+                              {% else %}
+                                N/A
+                              {%   endif %} - {% if f.instance.kategori_jadwal.waktu_pulang %}
+                                {{ f.instance.kategori_jadwal.waktu_pulang }}
+                              {% else %}
+                                N/A
+                              {% endif %}
+                            {% else %}-{% endif %}
+                          </td>
+                          <td>{{ f.catatan }}</td>
+                          <td>{{ f.DELETE }}</td>
+                        </tr>
                       {% endfor %}
                     </tbody>
                   </table>
@@ -136,7 +143,7 @@
           <strong>Alasan Penolakan:</strong><br>
           {{ object.alasan_penolakan }}
         </div>
-    {% endif %}
+      {% endif %}
 
       <button type="submit" name="simpan_draft" class="btn btn-primary mt-3">Simpan sebagai draft</button>
       <button type="submit" name="ajukan" class="btn btn-success mt-3">Ajukan</button>

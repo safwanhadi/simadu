@@ -10,6 +10,9 @@ from .views import (
     LayananDiklatSPTDocxView,
     LayananDiklatSPTDocxView2,
     TextSPTDiklatView,
+    GeneratePermohonanRekomendasiSIPView,
+    GenerateSuratKecukupanSKPView,
+    GenerateRekomendasiSIPView,
 )
 
 
@@ -24,4 +27,21 @@ urlpatterns=[
     path('spt-diklat-multi/<int:diklat_id>/', LayananDiklatSPTDocxView2.as_view(), name='spt_diklat_multi_view'),
     path('text-spt/<int:diklat_id>/', TextSPTDiklatView.as_view(), name='text_spt_view'),
     path('text-spt/<int:diklat_id>/<int:id>/', TextSPTDiklatView.as_view(), name='text_spt_update_view'),
+    
+    # docxtpl = docxtpl.DocxTemplate("path/to/template.docx")
+    path(
+        "sip/<int:pk>/generate/permohonan-rekomendasi/",
+        GeneratePermohonanRekomendasiSIPView.as_view(),
+        name="generate_permohonan_rekomendasi_sip",
+    ),
+    path(
+        "sip/<int:pk>/generate/kecukupan-skp/",
+        GenerateSuratKecukupanSKPView.as_view(),
+        name="generate_surat_kecukupan_skp",
+    ),
+    path(
+        "sip/<int:pk>/generate/rekomendasi-skp/",
+        GenerateRekomendasiSIPView.as_view(),
+        name="generate_rekomendasi_sip",
+    ),
 ]

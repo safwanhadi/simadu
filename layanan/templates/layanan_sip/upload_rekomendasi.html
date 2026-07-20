@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}{{ title_page }}{% endblock title_page %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">{{ card_title }}</h5>
+    </div>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="card-body">
+            <p>Permohonan: <strong>{{ object.pegawai.full_name }}</strong></p>
+
+            <div class="mb-4">
+                <h6>Dokumen saat ini</h6>
+                <div class="list-group">
+                    {% for document in current_documents %}
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>{{ document.label }}</span>
+                            {% if document.file %}
+                                <span>
+                                    <span class="badge badge-success mr-2">Sudah diupload</span>
+                                    <a href="{{ document.file.url }}" target="_blank" rel="noopener">
+                                        <i class="fas fa-eye"></i> Lihat file
+                                    </a>
+                                </span>
+                            {% else %}
+                                <span class="badge badge-warning">Belum diupload</span>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="alert alert-info">
+                Pilih file hanya pada dokumen yang ingin diupload atau diganti.
+                Jika diganti, file lama akan dihapus dari server setelah file baru berhasil disimpan.
+            </div>
+
+            {{ form|crispy }}
+            {% if is_admin_upload %}
+                <small class="text-muted">Status otomatis menjadi selesai setelah surat rekomendasi final tersedia.</small>
+            {% else %}
+                <small class="text-muted">Unggah surat pernyataan kecukupan SKP yang telah Anda buat. Dokumen ini akan digunakan admin sebagai bahan pertimbangan penerbitan rekomendasi.</small>
+            {% endif %}
+        </div>
+        <div class="card-footer">
+            <button type="submit" class="btn btn-primary"><i class="fas fa-upload"></i> Simpan Dokumen</button>
+            <a href="{% url 'layanan_urls:layanan_sip_detail' pk=object.pk %}" class="btn btn-secondary">Kembali</a>
+        </div>
+    </form>
+</div>
+{% endblock content %}

@@ -21,6 +21,7 @@ from .models import (
     Kompetensi,
     RiwayatGajiBerkala,
     RiwayatKinerja,
+    RiwayatPAK,
     RiwayatOrganisasi,
     RiwayatDiklat,
     RiwayatCuti,
@@ -47,7 +48,29 @@ def get_date_from_string(tanggal):
 
 bootstrap_col = 'form-control col-md-12'
 
-class RiwayatPendidikanForm(forms.ModelForm):
+
+class SecureEmployeeModelForm(forms.ModelForm):
+    """Cegah pegawai biasa memindahkan dokumen ke akun pegawai lain."""
+
+    def clean(self):
+        cleaned_data = super().clean()
+        request = getattr(self, 'request', None)
+        actor = request.user if request is not None else getattr(self, 'document_user', None)
+        if (
+            actor is not None
+            and actor.is_authenticated
+            and not actor.is_dokumen_admin
+            and 'pegawai' in self.fields
+        ):
+            employee_field = self._meta.model._meta.get_field('pegawai')
+            if employee_field.many_to_many:
+                cleaned_data['pegawai'] = Users.objects.filter(pk=actor.pk)
+            else:
+                cleaned_data['pegawai'] = actor
+        return cleaned_data
+
+
+class RiwayatPendidikanForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatPendidikan
         fields = ('pegawai', 'dokumen', 'level_pend', 'pendidikan', 
@@ -63,12 +86,14 @@ class RiwayatPendidikanForm(forms.ModelForm):
         self.fields['no_ijazah'].label = "Nomor Ijazah"
         self.fields['is_verifikasi'].label = "Apakah ijazah sudah terverifikasi?"
         self.fields['file_verifikasi'].label = "Upload File Hasil Verifikasi Ijazah (jika sudah terverifikasi)"
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
+            self.fields.pop('is_verifikasi', None)
+            self.fields.pop('file_verifikasi', None)
 
 
-class UrutkanDokumenSDMForm(forms.ModelForm):
+class UrutkanDokumenSDMForm(SecureEmployeeModelForm):
     class Meta:
         model = DokumenSDM
         fields = ('nama', )
@@ -77,9 +102,10 @@ class UrutkanDokumenSDMForm(forms.ModelForm):
         self.request = kwargs.pop("request", None)
         super(UrutkanDokumenSDMForm, self).__init__(*args, **kwargs)
         self.fields['nama'].widget=forms.HiddenInput()
+        self.fields['nama'].disabled = True
 
 
-class UrutkanRiwayatPendidikanForm(forms.ModelForm):
+class UrutkanRiwayatPendidikanForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatPendidikan
         fields = ('no_urut_dokumen', 'level_pend', 'pendidikan')
@@ -93,7 +119,7 @@ class UrutkanRiwayatPendidikanForm(forms.ModelForm):
 
 urutkan_dokumen_pendidikan = inlineformset_factory(DokumenSDM, RiwayatPendidikan, UrutkanRiwayatPendidikanForm, extra=0, can_delete=False)
 
-class RiwayatPengangkatanForm(forms.ModelForm):
+class RiwayatPengangkatanForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatPengangkatan
         fields = ('pegawai', 'dokumen', 'status_pegawai', 'no_srt_putusan', 'tgl_srt_putusan', 'tmt_pegawai', 'pejabat_pelantik',
@@ -102,7 +128,7 @@ class RiwayatPengangkatanForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop("request", None)
         super(RiwayatPengangkatanForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
         self.fields['tgl_srt_putusan'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
@@ -111,7 +137,7 @@ class RiwayatPengangkatanForm(forms.ModelForm):
         self.fields['tgl_srt_latsar'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         
 
-class UrutkanRiwayaPengangkatanForm(forms.ModelForm):
+class UrutkanRiwayaPengangkatanForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatPengangkatan
         fields = ('no_urut_dokumen', 'status_pegawai', 'tgl_srt_putusan')
@@ -125,7 +151,7 @@ class UrutkanRiwayaPengangkatanForm(forms.ModelForm):
 urutkan_dokumen_pengangkatan = inlineformset_factory(DokumenSDM, RiwayatPengangkatan, UrutkanRiwayaPengangkatanForm, extra=0, can_delete=False)
 
 
-class RiwayatBekerjaForm(forms.ModelForm):
+class RiwayatBekerjaForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatBekerja
         fields = ('pegawai', 'dokumen', 'nama_instansi', 'jabatan', 'no_sk', 'tgl_sk', 'tgl_mulai', 'tgl_selesai', 'file')
@@ -133,14 +159,14 @@ class RiwayatBekerjaForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatBekerjaForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
         self.fields['tgl_sk'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['tgl_mulai'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['tgl_selesai'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         
-class UrutkanRiwayatBekerjaForm(forms.ModelForm):
+class UrutkanRiwayatBekerjaForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatBekerja
         fields = ('no_urut_dokumen', 'nama_instansi', 'jabatan')
@@ -154,7 +180,7 @@ class UrutkanRiwayatBekerjaForm(forms.ModelForm):
 urutkan_dokumen_bekerja = inlineformset_factory(DokumenSDM, RiwayatBekerja, UrutkanRiwayatBekerjaForm, extra=0, can_delete=False)
 
 
-class RiwayatPenempatanForm(forms.ModelForm):
+class RiwayatPenempatanForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatPenempatan
         fields = ('pegawai', 'dokumen', 'penempatan_level1', 'penempatan_level2', 'penempatan_level3', 'penempatan_level4', 'no_sk', 'tgl_sk', 'status', 'file')
@@ -162,7 +188,7 @@ class RiwayatPenempatanForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatPenempatanForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget.attrs['hidden'] = 'hidden'
             self.fields['dokumen'].widget.attrs['hidden'] = 'hidden'
             self.fields['pegawai'].label = ''
@@ -188,7 +214,7 @@ class RiwayatPenempatanForm(forms.ModelForm):
             )
         return cleaned_data
 
-class UrutkanRiwayatPenempatanForm(forms.ModelForm):
+class UrutkanRiwayatPenempatanForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatPenempatan
         fields = ('no_urut_dokumen', 'penempatan_level4', 'penempatan_level3')
@@ -201,15 +227,19 @@ class UrutkanRiwayatPenempatanForm(forms.ModelForm):
 
 urutkan_dokumen_penempatan = inlineformset_factory(DokumenSDM, RiwayatPenempatan, UrutkanRiwayatPenempatanForm, extra=0, can_delete=False)
 
-class RiwayatPenempatanLainnyaForm(forms.ModelForm):
+class RiwayatPenempatanLainnyaForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatPenempatan
         fields = ('pegawai', 'dokumen', 'instansi_sebelumnya', 'bidang_sebelumnya', 'seksi_sebelumnya', 'unit_sebelumnya', 'no_sk', 'tgl_sk', 'status', 'file')
 
     def __init__(self, *args, **kwargs):
-        self.pegawai=kwargs.pop("pegawai", None)
+        self.request = kwargs.pop('request', None)
+        self.pegawai = kwargs.pop('pegawai', None)
+        if self.pegawai is None and self.request is not None:
+            self.pegawai = self.request.user
+        self.document_user = self.pegawai
         super(RiwayatPenempatanLainnyaForm, self).__init__(*args, **kwargs)
-        if self.pegawai and not self.pegawai.is_superuser:
+        if self.pegawai and not self.pegawai.is_dokumen_admin:
             self.fields['pegawai'].widget.attrs['hidden'] = 'hidden'
             self.fields['dokumen'].widget.attrs['hidden'] = 'hidden'
             self.fields['pegawai'].label = ''
@@ -217,7 +247,7 @@ class RiwayatPenempatanLainnyaForm(forms.ModelForm):
             self.fields['status'].widget = forms.HiddenInput()
         self.fields['tgl_sk'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
 
-class UrutkanRiwayatPenempatanLainnyaForm(forms.ModelForm):
+class UrutkanRiwayatPenempatanLainnyaForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatPenempatan
         fields = ('no_urut_dokumen', 'seksi_sebelumnya', 'bidang_sebelumnya')
@@ -230,7 +260,7 @@ class UrutkanRiwayatPenempatanLainnyaForm(forms.ModelForm):
 
 urutkan_dokumen_penempatan_lainnya = inlineformset_factory(DokumenSDM, RiwayatPenempatan, UrutkanRiwayatPenempatanLainnyaForm, extra=0, can_delete=False)
 
-class RiwayatProfesiForm(forms.ModelForm):
+class RiwayatProfesiForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatProfesi
         fields = ('pegawai', 'dokumen', 'profesi', 'no_str', 'tgl_str', 'file_str')
@@ -238,12 +268,12 @@ class RiwayatProfesiForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatProfesiForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['dokumen'].widget = forms.HiddenInput()
         self.fields['tgl_str'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
 
-class UrutkanRiwayatProfesiForm(forms.ModelForm):
+class UrutkanRiwayatProfesiForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatProfesi
         fields = ('no_urut_dokumen', 'profesi', 'tgl_str')
@@ -257,7 +287,7 @@ class UrutkanRiwayatProfesiForm(forms.ModelForm):
 urutkan_dokumen_profesi = inlineformset_factory(DokumenSDM, RiwayatProfesi, UrutkanRiwayatProfesiForm, extra=0, can_delete=False)
 
 
-class RiwayatSIPProfesiForm(forms.ModelForm):
+class RiwayatSIPProfesiForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatSIPProfesi
         fields = ('riwayat_profesi', 'no_sip', 'tgl_sip', 'berlaku_sd', 'file_sip')
@@ -274,7 +304,7 @@ profesi_formset = inlineformset_factory(RiwayatProfesi, RiwayatSIPProfesi, Riway
 profesi_update_formset = inlineformset_factory(RiwayatProfesi, RiwayatSIPProfesi, RiwayatSIPProfesiForm, fields='__all__', extra=0)
 
 
-class UrutkanRiwayatProfesiForm(forms.ModelForm):
+class UrutkanRiwayatProfesiForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatProfesi
         fields = ('no_str', )
@@ -285,7 +315,7 @@ class UrutkanRiwayatProfesiForm(forms.ModelForm):
         self.fields['no_str'].widget=forms.HiddenInput()
 
 
-class UrutkanRiwayatSIPProfesiForm(forms.ModelForm):
+class UrutkanRiwayatSIPProfesiForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatSIPProfesi
         fields = ('no_urut_dokumen', 'no_sip', 'tgl_sip')
@@ -299,7 +329,7 @@ class UrutkanRiwayatSIPProfesiForm(forms.ModelForm):
 urutkan_dokumen_sip = inlineformset_factory(RiwayatProfesi, RiwayatSIPProfesi, UrutkanRiwayatSIPProfesiForm, extra=0, can_delete=False)
 
 
-class RiwayatPanggolForm(forms.ModelForm):
+class RiwayatPanggolForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatPanggol
         fields = ('pegawai', 'dokumen', 'panggol', 'masa_kerja_tahun', 'masa_kerja_bulan', 'tmt_gol', 'no_sk', 'tgl_sk', 
@@ -308,7 +338,7 @@ class RiwayatPanggolForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop("request", None)
         super(RiwayatPanggolForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget.attrs['hidden'] = 'hidden'
             self.fields['dokumen'].widget.attrs['hidden'] = 'hidden'
             self.fields['pegawai'].label = ''
@@ -317,7 +347,7 @@ class RiwayatPanggolForm(forms.ModelForm):
         self.fields['tgl_sk'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['tgl_pertek_bkn'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
 
-class UrutkanRiwayatPanggolForm(forms.ModelForm):
+class UrutkanRiwayatPanggolForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatPanggol
         fields = ('no_urut_dokumen', 'panggol', 'tmt_gol')
@@ -331,19 +361,33 @@ class UrutkanRiwayatPanggolForm(forms.ModelForm):
 urutkan_dokumen_panggol = inlineformset_factory(DokumenSDM, RiwayatPanggol, UrutkanRiwayatPanggolForm, extra=0, can_delete=False)
 
 
-class UjiKompetensiForm(forms.ModelForm):
+class UjiKompetensiForm(SecureEmployeeModelForm):
     class Meta:
         model = UjiKompetensi
-        fields = '__all__'
+        fields = (
+            'pegawai', 'kompetensi', 'no_sert_ujikomp',
+            'tgl_sert_ujikomp', 'masa_berlaku',
+            'kategori_kompetensi', 'file_sert',
+        )
+        widgets = {
+            'pegawai': forms.Select(attrs={'class': f'{bootstrap_col} select2'}),
+            'kompetensi': forms.Select(attrs={'class': f'{bootstrap_col} select2'}),
+            'no_sert_ujikomp': forms.TextInput(attrs={'class': bootstrap_col}),
+            'tgl_sert_ujikomp': forms.DateInput(attrs={'class': bootstrap_col, 'type': 'date'}),
+            'masa_berlaku': forms.NumberInput(attrs={'class': bootstrap_col, 'min': 0}),
+            'file_sert': forms.FileInput(attrs={'class': 'form-control'}),
+        }
 
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(UjiKompetensiForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        self.fields['masa_berlaku'].required = False
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget = forms.HiddenInput()
+            self.fields['pegawai'].required = False
 
 
-class KompetensiForm(forms.ModelForm):
+class KompetensiForm(SecureEmployeeModelForm):
     class Meta:
         model = Kompetensi
         fields = '__all__'
@@ -353,11 +397,11 @@ class KompetensiForm(forms.ModelForm):
         super(KompetensiForm, self).__init__(*args, **kwargs)
         self.fields['tgl_sert_komp'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['berlaku_sd'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
-        if not self.request.user.is_superuser:
+        if not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['dokumen'].widget = forms.HiddenInput()
 
-class UrutkanKompetensiForm(forms.ModelForm):
+class UrutkanKompetensiForm(SecureEmployeeModelForm):
     class Meta:
         model = Kompetensi
         fields = ('no_urut_dokumen', 'kompetensi', 'tgl_sert_komp')
@@ -371,7 +415,7 @@ class UrutkanKompetensiForm(forms.ModelForm):
 urutkan_dokumen_kompetensi = inlineformset_factory(DokumenSDM, Kompetensi, UrutkanKompetensiForm, extra=0, can_delete=False)
 
 
-class RiwayatJabatanForm(forms.ModelForm):
+class RiwayatJabatanForm(SecureEmployeeModelForm):
     kompetensi = forms.ModelMultipleChoiceField(queryset=Kompetensi.objects.all())
     class Meta:
         model = RiwayatJabatan
@@ -386,21 +430,14 @@ class RiwayatJabatanForm(forms.ModelForm):
         self.fields['tmt_pelantikan'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['tgl_srt_pemberhentian'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['tgl_sk'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['dokumen'].widget = forms.HiddenInput()
             self.fields['kompetensi'] = forms.ModelMultipleChoiceField(queryset=Kompetensi.objects.filter(pegawai=self.request.user))
             self.fields['kompetensi'].widget.attrs['class'] = 'jabatan'
             self.fields['kompetensi'].required = False
 
-    def save(self, commit=True):
-        jafung = super().save(commit=False)
-        if self.cleaned_data['kompetensi']:
-            jafung.kompetensi.set(self.cleaned_data['kompetensi'])
-        jafung.save()
-        return jafung
-
-class UrutkanRiwayatJabatanForm(forms.ModelForm):
+class UrutkanRiwayatJabatanForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatJabatan
         fields = ('no_urut_dokumen', 'nama_jabatan', 'detail_nama_jabatan')
@@ -414,7 +451,7 @@ class UrutkanRiwayatJabatanForm(forms.ModelForm):
 urutkan_dokumen_jabatan = inlineformset_factory(DokumenSDM, RiwayatJabatan, UrutkanRiwayatJabatanForm, extra=0, can_delete=False)
 
 
-class RiwayatJabatanAdminForm(forms.ModelForm):
+class RiwayatJabatanAdminForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatJabatan
         fields = '__all__'
@@ -422,7 +459,7 @@ class RiwayatJabatanAdminForm(forms.ModelForm):
     kompetensi = forms.ModelMultipleChoiceField(queryset=Kompetensi.objects.all(), required=False)
 
 
-class RiwayatGajiBerkalaForm(forms.ModelForm):
+class RiwayatGajiBerkalaForm(SecureEmployeeModelForm):
     no_srt_gaji = forms.CharField(required=True)
     tgl_srt_gaji = forms.CharField(required=True)
     class Meta:
@@ -434,7 +471,7 @@ class RiwayatGajiBerkalaForm(forms.ModelForm):
         self.request=kwargs.pop("request", None)
         self.action = kwargs.pop("action", None)
         super(RiwayatGajiBerkalaForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['dokumen'].widget = forms.HiddenInput()
             self.fields['pangkat'] = forms.ModelChoiceField(queryset=RiwayatPanggol.objects.filter(pegawai=self.request.user))
@@ -443,7 +480,7 @@ class RiwayatGajiBerkalaForm(forms.ModelForm):
         self.fields['tmt_gaji'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
 
 
-class UrutkanRiwayatGajiBerkalaForm(forms.ModelForm):
+class UrutkanRiwayatGajiBerkalaForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatGajiBerkala
         fields = ('no_urut_dokumen', 'gaji_pkk', 'tmt_gaji')
@@ -457,22 +494,63 @@ class UrutkanRiwayatGajiBerkalaForm(forms.ModelForm):
 urutkan_dokumen_berkala = inlineformset_factory(DokumenSDM, RiwayatGajiBerkala, UrutkanRiwayatGajiBerkalaForm, extra=0, can_delete=False)
 
 
-class RiwayatKinerjaForm(forms.ModelForm):
+class RiwayatKinerjaForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatKinerja
-        fields = '__all__'
+        fields = (
+            'pegawai', 'hasil_kinerja', 'prilaku_kinerja', 'kuadran_kinerja',
+            'periode_kinerja_awal', 'periode_kinerja_akhir',
+            'nama_penilai', 'file',
+        )
+        widgets = {
+            'pegawai': forms.Select(attrs={'class': f'{bootstrap_col} select2'}),
+            'hasil_kinerja': forms.Select(attrs={'class': bootstrap_col}),
+            'prilaku_kinerja': forms.Select(attrs={'class': bootstrap_col}),
+            'kuadran_kinerja': forms.Select(attrs={'class': f'{bootstrap_col} select2'}),
+            'periode_kinerja_awal': forms.DateInput(attrs={'type': 'date', 'class': bootstrap_col}),
+            'periode_kinerja_akhir': forms.DateInput(attrs={'type': 'date', 'class': bootstrap_col}),
+            'nama_penilai': forms.Select(attrs={'class': f'{bootstrap_col} select2'}),
+            'file': forms.FileInput(attrs={'class': 'form-control'}),
+        }
 
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatKinerjaForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget = forms.HiddenInput()
-            self.fields['dokumen'].widget = forms.HiddenInput()
-        self.fields['periode_kinerja_awal'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
-        self.fields['periode_kinerja_akhir'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
+            self.fields['pegawai'].required = False
+
+    def clean(self):
+        cleaned_data = super().clean()
+        awal = cleaned_data.get('periode_kinerja_awal')
+        akhir = cleaned_data.get('periode_kinerja_akhir')
+        if awal and akhir and akhir < awal:
+            self.add_error('periode_kinerja_akhir', 'Periode akhir tidak boleh sebelum periode awal.')
+        return cleaned_data
 
 
-class UrutkanRiwayatKinerjaForm(forms.ModelForm):
+class RiwayatPAKForm(SecureEmployeeModelForm):
+    class Meta:
+        model = RiwayatPAK
+        fields = ('pegawai', 'no_srt', 'tgl_srt', 'ak', 'file')
+        widgets = {
+            'pegawai': forms.Select(attrs={'class': f'{bootstrap_col} select2'}),
+            'no_srt': forms.TextInput(attrs={'class': bootstrap_col}),
+            'tgl_srt': forms.DateInput(attrs={'type': 'date', 'class': bootstrap_col}),
+            'ak': forms.NumberInput(attrs={'class': bootstrap_col, 'min': 0}),
+            'file': forms.FileInput(attrs={'class': 'form-control'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.request = kwargs.pop('request', None)
+        super().__init__(*args, **kwargs)
+        self.fields['tgl_srt'].required = True
+        if self.request and not self.request.user.is_dokumen_admin:
+            self.fields['pegawai'].widget = forms.HiddenInput()
+            self.fields['pegawai'].required = False
+
+
+class UrutkanRiwayatKinerjaForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatKinerja
         fields = ('no_urut_dokumen', 'hasil_kinerja', 'prilaku_kinerja')
@@ -486,7 +564,7 @@ class UrutkanRiwayatKinerjaForm(forms.ModelForm):
 urutkan_dokumen_kinerja = inlineformset_factory(DokumenSDM, RiwayatKinerja, UrutkanRiwayatKinerjaForm, extra=0, can_delete=False)
 
 
-class RiwayatOrganisasiForm(forms.ModelForm):
+class RiwayatOrganisasiForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatOrganisasi
         fields = ('pegawai', 'dokumen', 'nama_org', 'jabatan', 'no_anggota', 'tgl_gabung', 'tgl_keluar', 'file')
@@ -494,14 +572,14 @@ class RiwayatOrganisasiForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatOrganisasiForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
         self.fields['tgl_gabung'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['tgl_keluar'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
 
 
-class UrutkanRiwayatOrganisasiForm(forms.ModelForm):
+class UrutkanRiwayatOrganisasiForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatOrganisasi
         fields = ('no_urut_dokumen', 'nama_org', 'jabatan')
@@ -515,7 +593,7 @@ class UrutkanRiwayatOrganisasiForm(forms.ModelForm):
 urutkan_dokumen_organisasi = inlineformset_factory(DokumenSDM, RiwayatOrganisasi, UrutkanRiwayatOrganisasiForm, extra=0, can_delete=False)
 
 
-class FormUsulanRiwayatDiklat(forms.ModelForm):
+class FormUsulanRiwayatDiklat(SecureEmployeeModelForm):
     pegawai = forms.ModelMultipleChoiceField(
         queryset=Users.objects.filter(is_active=True), 
         widget=forms.SelectMultiple(attrs={'class': 'pegawai'}),
@@ -532,14 +610,14 @@ class FormUsulanRiwayatDiklat(forms.ModelForm):
         self.fields['tgl_mulai'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['tgl_selesai'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['usulan'].widget=forms.HiddenInput()
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].label = ''#form disembunyikan menggunakan jquery di template
             self.fields['dokumen'].widget=forms.HiddenInput()
-        elif self.request and self.request.user.is_superuser:
+        elif self.request and self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget.attrs['class'] = 'select2'
             
             
-class FormPenugasanDiklat(forms.ModelForm):
+class FormPenugasanDiklat(SecureEmployeeModelForm):
     pegawai = forms.ModelMultipleChoiceField(
         queryset=Users.objects.filter(is_active=True), 
         widget=forms.SelectMultiple(attrs={'class': 'select2'})
@@ -551,16 +629,16 @@ class FormPenugasanDiklat(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         request = kwargs.pop('request', None)
         super(FormPenugasanDiklat, self).__init__(*args, **kwargs)
-        if request.user.is_superuser:
-            self.fields['pegawai'].queryset = Users.objects.filter(riwayatpenempatan__status=True
+        if request.user.is_dokumen_admin:
+            self.fields['pegawai'].queryset = Users.objects.filter(riwayat_penempatan__status=True
             ).distinct()
         elif request is not None and request.user.is_staff:
-            penempatan_admin = request.user.riwayatpenempatan_set.filter(status=True).last()
+            penempatan_admin = request.user.riwayat_penempatan.filter(status=True).last()
             penempatan = penempatan_admin.penempatan if hasattr(penempatan_admin, 'penempatan') else None
             self.fields['pegawai'].queryset = Users.objects.filter(
-                riwayatpenempatan__penempatan_level3__sub_bidang=penempatan, riwayatpenempatan__status=True
+                riwayat_penempatan__penempatan_level3__sub_bidang=penempatan, riwayat_penempatan__status=True
             ).distinct()|Users.objects.filter(
-                riwayatpenempatan__penempatan_level2__bidang=penempatan, riwayatpenempatan__status=True
+                riwayat_penempatan__penempatan_level2__bidang=penempatan, riwayat_penempatan__status=True
             ).distinct()
         self.fields['jenis_diklat'].help_text = 'jenis diklat: Seminar/Workshop/Pelatihan/Pertemuan Ilmiah/FGD, dll.'
         self.fields['tgl_mulai'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
@@ -568,7 +646,7 @@ class FormPenugasanDiklat(forms.ModelForm):
         self.fields['dokumen'].widget=forms.HiddenInput()
 
 
-class FormAlihanRiwayatDiklat(forms.ModelForm):
+class FormAlihanRiwayatDiklat(SecureEmployeeModelForm):
     pegawai = forms.ModelMultipleChoiceField(queryset=Users.objects.filter(is_active=True), widget=forms.SelectMultiple(attrs={'class': 'select2'}))
     class Meta:
         model = RiwayatDiklat
@@ -577,14 +655,14 @@ class FormAlihanRiwayatDiklat(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         request = kwargs.pop('request', None)
         super(FormAlihanRiwayatDiklat, self).__init__(*args, **kwargs)
-        if request is not None and request.user.is_staff and not request.user.is_superuser:
-            penempatan_admin = request.user.riwayatpenempatan_set.filter(status=True).last()
+        if request is not None and request.user.is_staff and not request.user.is_dokumen_admin:
+            penempatan_admin = request.user.riwayat_penempatan.filter(status=True).last()
             self.fields['pegawai'].queryset = Users.objects.filter(
-                riwayatpenempatan__penempatan_level3__sub_bidang=penempatan_admin.penempatan, riwayatpenempatan__status=True
+                riwayat_penempatan__penempatan_level3__sub_bidang=penempatan_admin.penempatan, riwayat_penempatan__status=True
             ).distinct()|Users.objects.filter(
-                riwayatpenempatan__penempatan_level2__bidang=penempatan_admin.penempatan, riwayatpenempatan__status=True
+                riwayat_penempatan__penempatan_level2__bidang=penempatan_admin.penempatan, riwayat_penempatan__status=True
             ).distinct()
-        elif request is not None and request.user.is_superuser:
+        elif request is not None and request.user.is_dokumen_admin:
             self.fields['pegawai'].queryset = Users.objects.filter(is_active=True)
         else:
             self.fields['pegawai'].queryset = Users.objects.none()
@@ -598,7 +676,7 @@ class FormAlihanRiwayatDiklat(forms.ModelForm):
         self.fields['skp'].widget=forms.HiddenInput()
 
 
-class UrutkanRiwayatDiklatForm(forms.ModelForm):
+class UrutkanRiwayatDiklatForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatDiklat
         fields = ('no_urut_dokumen', 'nama_diklat', 'tgl_sertifikat')
@@ -612,7 +690,7 @@ class UrutkanRiwayatDiklatForm(forms.ModelForm):
 urutkan_dokumen_diklat = inlineformset_factory(DokumenSDM, RiwayatDiklat, UrutkanRiwayatDiklatForm, extra=0, can_delete=False)
 
 
-class FormRiwayatDiklatLaporan(forms.ModelForm):
+class FormRiwayatDiklatLaporan(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatDiklat
         fields = ('pegawai', 'no_sertifikat', 'tgl_sertifikat', 'jam_pelajaran', 'kategori_kompetensi', 'kompetensi', 'periode_berlaku_sertifikat', 'file', 'file_laporan')
@@ -658,7 +736,7 @@ class FormRiwayatDiklatLaporan(forms.ModelForm):
         return instance
 
 
-class RiwayatDiklatForm(forms.ModelForm):
+class RiwayatDiklatForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatDiklat
         fields = "__all__"
@@ -675,7 +753,7 @@ class RiwayatDiklatForm(forms.ModelForm):
         self.fields['dokumen'].required = False
         self.fields['dokumen'].widget = forms.HiddenInput()
 
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget = forms.MultipleHiddenInput()
             self.fields['pegawai'].initial = [self.request.user.pk]
             self.fields['no_urut_dokumen'].widget = forms.HiddenInput()
@@ -709,7 +787,7 @@ class RiwayatDiklatForm(forms.ModelForm):
         return instance
 
     
-class FormRiwayatDiklatSPT(forms.ModelForm):
+class FormRiwayatDiklatSPT(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatDiklat
         fields = ('pegawai', 'dokumen', 'jenis_diklat', 'nama_diklat', 'penyelenggara', 'metode', 'tgl_mulai', 'tgl_selesai', 'skp')
@@ -717,7 +795,7 @@ class FormRiwayatDiklatSPT(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(FormRiwayatDiklatSPT, self).__init__(*args, **kwargs) 
-        if self.request is not None and self.request.user.is_superuser:
+        if self.request is not None and self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget.attrs['class']='pegawai'
             # self.fields['pegawai'].widget.attrs['class']='select2'
             self.fields['pegawai'].label = ''
@@ -743,7 +821,7 @@ class FormRiwayatDiklatSPT(forms.ModelForm):
             self.fields['skp'].widget=forms.HiddenInput()   
         
 
-class FormRiwayatDiklatProses(forms.ModelForm):
+class FormRiwayatDiklatProses(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatDiklat
         fields = ('pegawai', 'dokumen', 'jenis_diklat', 'nama_diklat', 'penyelenggara')
@@ -760,7 +838,7 @@ class FormRiwayatDiklatProses(forms.ModelForm):
         self.fields['penyelenggara'].widget=forms.HiddenInput()
 
 
-class RiwayatCutiForm(forms.ModelForm):
+class RiwayatCutiForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatCuti
         fields = ('pegawai', 'dokumen', 'jenis_cuti', 'tgl_mulai_cuti', 'tgl_akhir_cuti', 'lama_cuti', 'domisili_saat_cuti', 
@@ -769,7 +847,7 @@ class RiwayatCutiForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatCutiForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget.attrs['hidden'] = 'hidden'
             self.fields['dokumen'].widget.attrs['hidden'] = 'hidden'
             self.fields['pegawai'].label = ''
@@ -779,7 +857,7 @@ class RiwayatCutiForm(forms.ModelForm):
         self.fields['tgl_surat'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         
         
-class RiwayatCutiTundaForm(forms.ModelForm):
+class RiwayatCutiTundaForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatCuti
         fields = ('pegawai', 'dokumen', 'jenis_cuti', 'tgl_mulai_cuti', 'tgl_akhir_cuti', 'alasan_cuti', 'lama_cuti', 'domisili_saat_cuti', 
@@ -788,7 +866,7 @@ class RiwayatCutiTundaForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatCutiTundaForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget.attrs['hidden'] = 'hidden'
             self.fields['dokumen'].widget.attrs['hidden'] = 'hidden'
             self.fields['pegawai'].label = ''
@@ -799,7 +877,7 @@ class RiwayatCutiTundaForm(forms.ModelForm):
         self.fields['tgl_akhir_cuti'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
 
 
-class UrutkanRiwayatCutiForm(forms.ModelForm):
+class UrutkanRiwayatCutiForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatCuti
         fields = ('no_urut_dokumen', 'jenis_cuti')
@@ -826,7 +904,7 @@ class CutiTundaMultipleChoiceField(forms.ModelMultipleChoiceField):
 
         return f"Tahun {tahun} – Tunda {total} hari (sisa {sisa} hari)"
     
-class RiwayatPengajuanCutiForm(forms.ModelForm):
+class RiwayatPengajuanCutiForm(SecureEmployeeModelForm):
     pakai_tunda_saja = forms.BooleanField(required=False, label="Ambil cuti tunda saja")
     # field tambahan untuk klaim cuti tunda
     cuti_tunda_dipilih = CutiTundaMultipleChoiceField(
@@ -875,7 +953,7 @@ class RiwayatPengajuanCutiForm(forms.ModelForm):
             attrs={'type': 'date', 'class': bootstrap_col}
         )
 
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['dokumen'].widget = forms.HiddenInput()
             self.fields['pegawai'].widget = forms.HiddenInput()
 
@@ -971,7 +1049,7 @@ class RiwayatPengajuanCutiForm(forms.ModelForm):
 
             
 
-class RiwayatCutiUploadDakungForm(forms.ModelForm):
+class RiwayatCutiUploadDakungForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatCuti
         fields = ('pegawai', 'dokumen', 'file_pengajuan', 'file_pendukung')
@@ -995,7 +1073,7 @@ class RiwayatCutiUploadDakungForm(forms.ModelForm):
     #     return file_pendukung
 
 
-class RiwayatCutiUploadSuratForm(forms.ModelForm):
+class RiwayatCutiUploadSuratForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatCuti
         fields = ('pegawai', 'dokumen', 'no_surat', 'tgl_surat', 'file')
@@ -1009,7 +1087,7 @@ class RiwayatCutiUploadSuratForm(forms.ModelForm):
         self.fields['dokumen'].widget=forms.HiddenInput()
 
 
-class RiwayatHukumanForm(forms.ModelForm):
+class RiwayatHukumanForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatHukuman
         fields = ('pegawai', 'dokumen', 'jenis_hukuman', 'no_srt_kep', 'tgl_srt_kep', 'hukuman_ke', 'ket', 'file')
@@ -1017,13 +1095,13 @@ class RiwayatHukumanForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatHukumanForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
         self.fields['tgl_srt_kep'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
 
 
-class UrutkanRiwayatHukumanForm(forms.ModelForm):
+class UrutkanRiwayatHukumanForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatHukuman
         fields = ('no_urut_dokumen', 'jenis_hukuman', 'tgl_srt_kep')
@@ -1037,7 +1115,7 @@ class UrutkanRiwayatHukumanForm(forms.ModelForm):
 urutkan_dokumen_hukuman = inlineformset_factory(DokumenSDM, RiwayatHukuman, UrutkanRiwayatHukumanForm, extra=0, can_delete=False)
 
 
-class RiwayatPenghargaanForm(forms.ModelForm):
+class RiwayatPenghargaanForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatPenghargaan
         fields = ('pegawai', 'dokumen', 'jenis_penghargaan', 'tahun_perolehan', 'no_srt_kep', 'tgl_srt_kep', 'file')
@@ -1045,7 +1123,7 @@ class RiwayatPenghargaanForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatPenghargaanForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
             self.fields['pegawai'].label = ''
@@ -1053,7 +1131,7 @@ class RiwayatPenghargaanForm(forms.ModelForm):
         self.fields['tgl_srt_kep'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
 
 
-class UrutkanRiwayatPenghargaanForm(forms.ModelForm):
+class UrutkanRiwayatPenghargaanForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatPenghargaan
         fields = ('no_urut_dokumen', 'jenis_penghargaan', 'tgl_srt_kep')
@@ -1067,7 +1145,7 @@ class UrutkanRiwayatPenghargaanForm(forms.ModelForm):
 urutkan_dokumen_penghargaan = inlineformset_factory(DokumenSDM, RiwayatPenghargaan, UrutkanRiwayatPenghargaanForm, extra=0, can_delete=False)
 
 
-class RiwayatKeluargaForm(forms.ModelForm):
+class RiwayatKeluargaForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatKeluarga
         fields = ('pegawai', 'dokumen', 'no_kk', 'file')
@@ -1081,7 +1159,7 @@ class RiwayatKeluargaForm(forms.ModelForm):
             self.fields['dokumen'].widget = forms.HiddenInput()
 
 
-class UrutkanRiwayatKeluargaForm(forms.ModelForm):
+class UrutkanRiwayatKeluargaForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatKeluarga
         fields = ('no_urut_dokumen', 'pegawai', 'no_kk')
@@ -1095,7 +1173,7 @@ class UrutkanRiwayatKeluargaForm(forms.ModelForm):
 urutkan_dokumen_keluarga = inlineformset_factory(DokumenSDM, RiwayatKeluarga, UrutkanRiwayatKeluargaForm, extra=0, can_delete=False)
 
 
-class RiwayatKeluargaOrangTuaForm(forms.ModelForm):
+class RiwayatKeluargaOrangTuaForm(SecureEmployeeModelForm):
     class Meta:
         model = OrangTua
         fields = ('keluarga', 'nama', 'status_hidup', 'pekerjaan', 'jk', 'nik', 'agama', 'tlp', 'alamat')
@@ -1106,7 +1184,7 @@ class RiwayatKeluargaOrangTuaForm(forms.ModelForm):
         self.fields['keluarga'].widget = forms.HiddenInput()
             
 
-class RiwayatKeluargaPasanganForm(forms.ModelForm):
+class RiwayatKeluargaPasanganForm(SecureEmployeeModelForm):
     class Meta:
         model = Pasangan
         fields = ('keluarga', 'nama', 'status_hidup', 'pasangan_ke', 'tempat_lahir', 'tgl_lahir', 'akte_meninggal', 'tgl_meninggal', 'akte_menikah', 'tgl_menikah', 'tgl_cerai', 'pekerjaan', 'jk', 'nik',
@@ -1121,7 +1199,7 @@ class RiwayatKeluargaPasanganForm(forms.ModelForm):
         self.fields['tgl_menikah'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
 
 
-class RiwayatKeluargaAnakForm(forms.ModelForm):
+class RiwayatKeluargaAnakForm(SecureEmployeeModelForm):
     class Meta:
         model = Anak
         fields = ('keluarga', 'nama', 'status_hidup', 'tempat_lahir', 'tgl_lahir', 'akte_meninggal', 'tgl_meninggal', 'pekerjaan', 'jk', 'nik', 'agama', 'tlp', 'alamat', 'masuk_daftar_gaji')
@@ -1133,7 +1211,7 @@ class RiwayatKeluargaAnakForm(forms.ModelForm):
         self.fields['tgl_meninggal'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         
 
-class RiwayatInovasiFullForm(forms.ModelForm):
+class RiwayatInovasiFullForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatInovasi
         fields = '__all__'
@@ -1141,12 +1219,12 @@ class RiwayatInovasiFullForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop("request", None)
         super(RiwayatInovasiFullForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['dokumen'].widget = forms.HiddenInput()
             self.fields['pegawai'].widget = forms.HiddenInput()
 
 
-class RiwayatInovasiForm(forms.ModelForm):
+class RiwayatInovasiForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatInovasi
         fields = ('pegawai', 'dokumen', 'bidang', 'judul', 'desk', 'makalah',)
@@ -1154,12 +1232,12 @@ class RiwayatInovasiForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop("request", None)
         super(RiwayatInovasiForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['dokumen'].widget = forms.HiddenInput()
 
 
-class RiwayatInovasiTLForm(forms.ModelForm):
+class RiwayatInovasiTLForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatInovasi
         fields = ('pegawai', 'dokumen', 'bidang', 'judul')
@@ -1173,7 +1251,7 @@ class RiwayatInovasiTLForm(forms.ModelForm):
         self.fields['judul'].widget = forms.HiddenInput()        
 
 
-class RiwayatInovasiSKForm(forms.ModelForm):
+class RiwayatInovasiSKForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatInovasi
         fields = ('pegawai', 'dokumen', 'bidang', 'judul', 'no_sk', 'tanggal', 'file_sk')
@@ -1185,11 +1263,11 @@ class RiwayatInovasiSKForm(forms.ModelForm):
         self.fields['tanggal'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['bidang'].widget = forms.HiddenInput()
         self.fields['judul'].widget = forms.HiddenInput()
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_dokumen_admin:
             self.fields['pegawai'].widget = forms.HiddenInput()
 
 
-class UrutkanRiwayatInovasiForm(forms.ModelForm):
+class UrutkanRiwayatInovasiForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatInovasi
         fields = ('no_urut_dokumen', 'judul', 'no_sk')
@@ -1203,18 +1281,19 @@ class UrutkanRiwayatInovasiForm(forms.ModelForm):
 urutkan_dokumen_inovasi = inlineformset_factory(DokumenSDM, RiwayatInovasi, UrutkanRiwayatInovasiForm, extra=0, can_delete=False)
 
 
-class RiwayatPenugasanForm(forms.ModelForm):
+class RiwayatPenugasanForm(SecureEmployeeModelForm):
     class Meta:
         model=RiwayatPenugasan
         fields = ('pegawai', 'dokumen', 'jabatan', 'panggol', 'nama_keg', 'tempat_keg', 'peran', 'lama_keg', 'tgl_mulai', 'tgl_selesai', 'anggaran', 'sumber_angg', 'file_spt')
 
     def __init__(self, *args, **kwargs):
         user=kwargs.pop("user", None)
+        self.document_user = user
         initial_values = kwargs.pop('initial_values', {})
         super(RiwayatPenugasanForm, self).__init__(*args, **kwargs)
         for field, value in initial_values.items():
             self.fields[field].initial = value
-        if user and not user.is_superuser:
+        if user and not user.is_dokumen_admin:
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
             self.fields['jabatan'] = forms.ModelChoiceField(queryset=RiwayatJabatan.objects.filter(pegawai=user))
@@ -1227,7 +1306,7 @@ class RiwayatPenugasanForm(forms.ModelForm):
         self.fields['tgl_selesai'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
 
     
-class UrutkanRiwayatPenugasanForm(forms.ModelForm):
+class UrutkanRiwayatPenugasanForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatPenugasan
         fields = ('no_urut_dokumen', 'nama_keg', 'tempat_keg')

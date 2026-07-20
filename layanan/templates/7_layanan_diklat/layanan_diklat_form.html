@@ -2,10 +2,10 @@
 {% load crispy_forms_tags %}
 
 {% block button %}
-    {% if request.user.is_staff and not request.user.is_superuser %}
+    {% if request.user.is_staff and not request.user.is_diklat_admin %}
     <a class="btn btn-outline-primary" href="{% url 'layanan_urls:layanan_diklat_staf_view' %}">Diklat Staf</a>
     {% endif %}
-    <a class="btn btn-outline-info" href="{% url 'layanan_urls:layanan_diklat_list_view' %}">{% if request.user.is_superuser %} Riwayat Diklat {% else %} Diklatku {% endif %}</a>
+    <a class="btn btn-outline-info" href="{% url 'layanan_urls:layanan_diklat_list_view' %}">{% if request.user.is_diklat_admin %} Riwayat Diklat {% else %} Diklatku {% endif %}</a>
 {% endblock %}
 
 {% block child_content %}

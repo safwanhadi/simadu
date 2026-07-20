@@ -19,7 +19,7 @@
             </div>
             <div class="row mt-2">
                 <div class="col-md-4 text-bold">Instalasi</div>
-                <div class="col-md-8">: {{detail.pegawai.riwayatpenempatan_set.last.penempatan}}</div>
+                <div class="col-md-8">: {{detail.pegawai.riwayat_penempatan.last.penempatan}}</div>
             </div>
             <div class="row mt-2">
                 <div class="col-md-4 text-bold">Jenis Diklat</div>
@@ -157,7 +157,7 @@
             </table>
         </div> 
     {% endif %}
-    {% if request.user.is_superuser %}
+    {% if request.user.is_diklat_admin %}
         <div class="row">
             <div class="col-md-12 text-center pt-5">
                 <span>Klik Tombol Proses Usulan untuk konfirmasi kepada <span style="font-weight: bold; color:blue;">{{detail.pegawai.full_name}}</span> bahwa usulannya sedang diproses untuk menentukan apakah usulan akan ditindaklanjut atau tidak</span><br><br>

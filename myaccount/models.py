@@ -7,6 +7,24 @@ from django.db.models.signals import post_save
 from PIL import Image
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
+from django.conf import settings
+
+from .roles import (
+    ADMIN_AKUN,
+    ADMIN_DASHBOARD,
+    ADMIN_DISIPLIN,
+    ADMIN_DOKUMEN,
+    ADMIN_GROUPS,
+    ADMIN_INFORMASI,
+    ADMIN_LAPORAN,
+    ADMIN_LAYANAN_BERKALA,
+    ADMIN_LAYANAN_PANGKAT,
+    ADMIN_LAYANAN_JABATAN,
+    ADMIN_LAYANAN_CUTI,
+    ADMIN_LAYANAN_DIKLAT,
+    ADMIN_LAYANAN_INOVASI,
+    ADMIN_LAYANAN_SIP,
+)
 
 def validate_file_size(value):
     filesize = value.size
@@ -73,6 +91,81 @@ class Users(AbstractBaseUser, PermissionsMixin):
             return f'{self.first_name}_{self.last_name}'
         else:
             return f'{self.first_name}'
+
+    def has_admin_role(self, *group_names):
+        """Superuser adalah root; admin operasional ditentukan oleh grup."""
+        if not self.is_active:
+            return False
+        if self.is_superuser:
+            return True
+
+        cached_groups = getattr(self, '_admin_group_names_cache', None)
+        if cached_groups is None:
+            cached_groups = set(self.groups.values_list('name', flat=True))
+            self._admin_group_names_cache = cached_groups
+        return bool(cached_groups.intersection(group_names))
+
+    @property
+    def is_app_admin(self):
+        return self.has_admin_role(*ADMIN_GROUPS)
+
+    @property
+    def is_dashboard_admin(self):
+        return self.has_admin_role(ADMIN_DASHBOARD)
+
+    @property
+    def is_dokumen_admin(self):
+        return self.has_admin_role(ADMIN_DOKUMEN)
+
+    @property
+    def has_dokumen_admin_group(self):
+        return self.is_superuser or any(
+            group.name == ADMIN_DOKUMEN for group in self.groups.all()
+        )
+
+    @property
+    def is_cuti_admin(self):
+        return self.has_admin_role(ADMIN_LAYANAN_CUTI)
+
+    @property
+    def is_berkala_admin(self):
+        return self.has_admin_role(ADMIN_LAYANAN_BERKALA)
+
+    @property
+    def is_pangkat_admin(self):
+        return self.has_admin_role(ADMIN_LAYANAN_PANGKAT)
+
+    @property
+    def is_jabatan_admin(self):
+        return self.has_admin_role(ADMIN_LAYANAN_JABATAN)
+
+    @property
+    def is_diklat_admin(self):
+        return self.has_admin_role(ADMIN_LAYANAN_DIKLAT)
+
+    @property
+    def is_inovasi_admin(self):
+        return self.has_admin_role(ADMIN_LAYANAN_INOVASI)
+
+    @property
+    def is_sip_admin(self):
+        return self.has_admin_role(ADMIN_LAYANAN_SIP)
+
+    @property
+    def is_disiplin_admin(self):
+        return self.has_admin_role(ADMIN_DISIPLIN)
+
+    @property
+    def is_informasi_admin(self):
+        return self.has_admin_role(ADMIN_INFORMASI)
+
+    @property
+    def is_laporan_admin(self):
+        return self.has_admin_role(ADMIN_LAPORAN)
+
+    @property
+    def is_akun_admin(self):
+        return self.has_admin_role(ADMIN_AKUN)
     
     @property
     def full_name(self):
@@ -218,3 +311,63 @@ class ProfilAdmin(models.Model):
         elif self.unor.exists():
             data = self.unor.all()
         return str(data)
+
+
+class TelegramAccount(models.Model):
+    user = models.OneToOneField(
+        Users,
+        related_name='telegram_account',
+        on_delete=models.CASCADE,
+    )
+    telegram_user_id = models.BigIntegerField(unique=True)
+    chat_id = models.BigIntegerField(unique=True)
+    phone_number = models.CharField(max_length=20)
+    telegram_username = models.CharField(max_length=64, blank=True)
+    verified_at = models.DateTimeField(auto_now_add=True)
+    last_reset_requested_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('-updated_at',)
+
+    def __str__(self):
+        return f'{self.user.email} - {self.telegram_user_id}'
+
+
+class AccountRegistration(models.Model):
+    PENDING = 'pending'
+    APPROVED = 'approved'
+    REJECTED = 'rejected'
+    STATUS_CHOICES = (
+        (PENDING, 'Menunggu Verifikasi'),
+        (APPROVED, 'Disetujui'),
+        (REJECTED, 'Ditolak'),
+    )
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        related_name='registration_request',
+        on_delete=models.CASCADE,
+    )
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default=PENDING,
+        db_index=True,
+    )
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name='reviewed_account_registrations',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ('-submitted_at',)
+
+    def __str__(self):
+        return f'{self.user.email} - {self.get_status_display()}'

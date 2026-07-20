@@ -23,7 +23,7 @@
             </div>
             <div class="row mt-2">
                 <div class="col-md-4 text-bold">Instalasi</div>
-                <div class="col-md-8">: {{riwayatobj.pegawai.last.riwayatpenempatan_set.last.penempatan}}</div>
+                <div class="col-md-8">: {{riwayatobj.pegawai.last.riwayat_penempatan.last.penempatan}}</div>
             </div>
             <div class="row mt-2">
                 <div class="col-md-4 text-bold">Jenis Diklat</div>
@@ -84,7 +84,7 @@
                           </h5>
                     </div>
 
-                    {% if request.user.is_superuser %}
+                    {% if request.user.is_diklat_admin %}
                         <div><a class="btn btn-outline-info" href="{% url 'layanan_urls:catatan_sdm_update_view' pk=object.id %}">Buat catatan</a></div>
                     {% endif %}
                   </div>
@@ -206,7 +206,7 @@
             </table>
         </div> 
     </div>
-    {% if request.user.is_superuser %}
+    {% if request.user.is_diklat_admin %}
         <div class="row">
             <div class="col-md-12 text-center pt-5">
                 <span>Klik Tombol Proses Usulan untuk konfirmasi kepada <span style="font-weight: bold; color:blue;">{{object.pegawai.full_name}}</span> bahwa usulannya sedang diproses untuk menentukan apakah usulan akan ditindaklanjut atau tidak</span><br><br>

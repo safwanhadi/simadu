@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-lg-6"><div class="card card-danger card-outline">
+    <div class="card-header"><h5 class="mb-0">Hapus Riwayat Kinerja</h5></div>
+    <form method="post">{% csrf_token %}<div class="card-body"><p>Yakin ingin menghapus riwayat kinerja periode <strong>{{ object.periode_kinerja_awal|date:'d-m-Y' }} sampai {{ object.periode_kinerja_akhir|date:'d-m-Y' }}</strong>?</p><p class="text-danger mb-0">File yang tersimpan juga akan dihapus.</p></div>
+        <div class="card-footer d-flex justify-content-between"><a href="{% url 'riwayat_urls:riwayat_kinerja' %}" class="btn btn-secondary">Batal</a><button type="submit" class="btn btn-danger">Hapus</button></div>
+    </form>
+</div></div></div>
+{% endblock %}

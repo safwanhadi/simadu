@@ -10,7 +10,7 @@
                 <div class="icon">
                     <i class="ion ion-stats-bars"></i>
                 </div>
-                <a href="{% url 'dashboard_urls:dashboard_sdm_view' sdm=sdm.slug %}" class="small-box-footer">Lihat Detail <i class="fas fa-arrow-circle-right"></i></a>
+                <a href="{% url 'dashboard_urls:dashboard_sdm_view' sdm=sdm.pk %}" class="small-box-footer">Lihat Detail <i class="fas fa-arrow-circle-right"></i></a>
             </div>
         </div>
         {% endfor %}
@@ -19,7 +19,12 @@
     <div class="row">
         <hr class="left-line">
         <div class="btn-detail text-center">
-            <button class="btn btn-primary text-center" id="btn_card_detail">
+            <button type="button"
+                    class="btn btn-primary text-center"
+                    id="btn_card_detail"
+                    aria-controls="card-nakes"
+                    aria-expanded="false"
+                    title="Tampilkan seluruh card pegawai">
                 <i class="fas fa-angle-double-down fa-1x" id="btn_down" style="display: block;"></i>
                 <i class="fas fa-angle-double-up fa-1x" id="btn_up" style="display: none;"></i>
             </button>

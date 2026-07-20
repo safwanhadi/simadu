@@ -27,7 +27,7 @@
                         </div>
                         <p class="h4">{{title}}</p>
                     </div>
-                    {% if request.user.is_superuser %}
+                    {% if request.user.is_disiplin_admin %}
                         <div>
                             <a href="{% url 'disiplinsdm_urls:kehadiran_create' %}" class="btn btn-outline-primary">Tambah Kehadiran</a>
                             <a href="{% url 'disiplinsdm_urls:kehadiran_upload_fingerprint' %}" class="btn btn-outline-secondary">Upload Fingerprint</a>
@@ -69,7 +69,7 @@
                                     </div>
                                     
                                 </form>
-                                {% if request.user.is_staff %}
+                                {% if request.user.is_staff or request.user.is_disiplin_admin %}
                                 <nav class="mb-3 mt-3">
                                     <div class="nav nav-tabs" id="nav-tab" role="tablist">
                                     <a class="nav-item nav-link" href="{% url 'disiplinsdm_urls:kehadiran_list' %}" role="tab" >Pegawai Lainnya</a>
@@ -103,7 +103,7 @@
                                             <td>{{item.jumlah_izin}}</td>
                                             <td>{{item.jumlah_sakit}}</td>
                                             <td>
-                                                {% if request.user.is_superuser %}
+                                                {% if request.user.is_disiplin_admin %}
                                                 <a href="{% url 'disiplinsdm_urls:kehadiran_update' pk=item.pk %}" class="btn btn-primary">add/edit</a>
                                                 <a href="{% url 'disiplinsdm_urls:kehadiran_detail_user' pk=item.pk %}" class="btn btn-info">detail</a>
                                                 {% else %}

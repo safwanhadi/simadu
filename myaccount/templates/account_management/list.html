@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="card card-solid">
+    <div class="card-header">
+        <h3 class="card-title">{{ card_title }}</h3>
+        <div class="card-tools">
+            <a href="{% url 'myaccount_urls:account_registration_review_list' %}" class="btn btn-sm btn-warning">
+                <i class="fas fa-user-clock"></i> Verifikasi Registrasi
+                {% if pending_registration_count %}<span class="badge badge-light">{{ pending_registration_count }}</span>{% endif %}
+            </a>
+            <a href="{% url 'myaccount_urls:account_registration' %}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">
+                <i class="fas fa-user-plus"></i> Halaman Registrasi
+            </a>
+        </div>
+    </div>
+    <div class="card-body">
+        {% if inactive_count %}
+        <div class="alert alert-warning">
+            <i class="fas fa-user-clock mr-1"></i>
+            Terdapat <strong>{{ inactive_count }}</strong> akun pegawai lama yang sedang nonaktif.
+            <a href="?status=inactive" class="alert-link">Tampilkan akun</a>
+        </div>
+        {% endif %}
+
+        <div class="btn-group mb-3" role="group" aria-label="Filter status akun">
+            <a href="?{% if q %}q={{ q|urlencode }}{% endif %}" class="btn btn-sm {% if not status %}btn-primary{% else %}btn-outline-primary{% endif %}">Semua</a>
+            <a href="?status=inactive{% if q %}&q={{ q|urlencode }}{% endif %}" class="btn btn-sm {% if status == 'inactive' %}btn-warning{% else %}btn-outline-warning{% endif %}">Nonaktif</a>
+            <a href="?status=active{% if q %}&q={{ q|urlencode }}{% endif %}" class="btn btn-sm {% if status == 'active' %}btn-success{% else %}btn-outline-success{% endif %}">Aktif</a>
+        </div>
+
+        <form method="get" class="mb-3">
+            {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+            <div class="input-group">
+                <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Cari nama, email, atau NIP">
+                <div class="input-group-append">
+                    <button class="btn btn-primary" type="submit"><i class="fas fa-search"></i> Cari</button>
+                    {% if q %}
+                    <a href="{% url 'myaccount_urls:account_management_list' %}{% if status %}?status={{ status }}{% endif %}" class="btn btn-secondary">Reset</a>
+                    {% endif %}
+                </div>
+            </div>
+        </form>
+
+        <div class="table-responsive">
+            <table class="table table-bordered table-hover">
+                <thead>
+                    <tr>
+                        <th>Nama</th>
+                        <th>Email</th>
+                        <th>NIP</th>
+                        <th class="text-center">Status Akun</th>
+                        <th class="text-center">Staff</th>
+                        <th class="text-center">Admin Dokumen</th>
+                        <th style="min-width: 310px;">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for account in account_list %}
+                    <tr>
+                        <td>{{ account.full_name|default:'-' }}</td>
+                        <td>{{ account.email }}</td>
+                        <td>{{ account.profil_user.nip|default:'-' }}</td>
+                        <td class="text-center">
+                            {% if account.is_active %}
+                            <span class="badge badge-success">Aktif</span>
+                            {% else %}
+                            <span class="badge badge-danger">Nonaktif</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if account.is_staff %}
+                            <span class="badge badge-primary">Staff</span>
+                            {% else %}
+                            <span class="badge badge-secondary">User</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if account.has_dokumen_admin_group %}<span class="badge badge-info">Admin Dokumen</span>{% else %}<span class="badge badge-light">-</span>{% endif %}
+                        </td>
+                        <td>
+                            <a href="{% url 'myaccount_urls:account_reset_password' pk=account.pk %}" class="btn btn-warning btn-sm">
+                                <i class="fas fa-key"></i> Reset Password
+                            </a>
+                            {% if account.pk != request.user.pk %}
+                            <form method="post" action="{% url 'myaccount_urls:account_toggle_active' pk=account.pk %}" class="d-inline" onsubmit="return confirm('Ubah status aktif akun ini?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm {% if account.is_active %}btn-danger{% else %}btn-success{% endif %}">
+                                    {% if account.is_active %}Nonaktifkan{% else %}<i class="fas fa-toggle-on"></i> Aktifkan Kembali{% endif %}
+                                </button>
+                            </form>
+                            <form method="post" action="{% url 'myaccount_urls:account_toggle_document_admin' pk=account.pk %}" class="d-inline" onsubmit="return confirm('Ubah peran Admin Dokumen akun ini?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm {% if account.has_dokumen_admin_group %}btn-outline-info{% else %}btn-info{% endif %}">
+                                    <i class="fas fa-folder-open"></i> {% if account.has_dokumen_admin_group %}Cabut Admin Dokumen{% else %}Jadikan Admin Dokumen{% endif %}
+                                </button>
+                            </form>
+                            <form method="post" action="{% url 'myaccount_urls:account_toggle_staff' pk=account.pk %}" class="d-inline" onsubmit="return confirm('Ubah status staff akun ini?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm {% if account.is_staff %}btn-outline-secondary{% else %}btn-primary{% endif %}">
+                                    {% if account.is_staff %}Hapus Staff{% else %}Jadikan Staff{% endif %}
+                                </button>
+                            </form>
+                            {% else %}
+                            <span class="text-muted ml-1">Akun Anda</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="7" class="text-center text-muted">Akun tidak ditemukan.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if is_paginated %}
+        <nav aria-label="Navigasi halaman akun">
+            <ul class="pagination justify-content-center mb-0">
+                {% if page_obj.has_previous %}
+                <li class="page-item"><a class="page-link" href="?q={{ q|urlencode }}&status={{ status|urlencode }}&page={{ page_obj.previous_page_number }}">Sebelumnya</a></li>
+                {% endif %}
+                <li class="page-item disabled"><span class="page-link">Halaman {{ page_obj.number }} dari {{ page_obj.paginator.num_pages }}</span></li>
+                {% if page_obj.has_next %}
+                <li class="page-item"><a class="page-link" href="?q={{ q|urlencode }}&status={{ status|urlencode }}&page={{ page_obj.next_page_number }}">Berikutnya</a></li>
+                {% endif %}
+            </ul>
+        </nav>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

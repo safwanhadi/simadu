@@ -26,7 +26,7 @@
                 <p class="h4">{{title}}</p>
             </div>
             <div>
-            {% if request.user.is_superuser %}
+            {% if request.user.is_disiplin_admin %}
                 <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:harilibur_create' %}">Tambah Libur</a>
             {% endif %}
             </div>

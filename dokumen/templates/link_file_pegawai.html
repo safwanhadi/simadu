@@ -1,45 +1,37 @@
-<ul>
-    {% if file_kepeg.profil.file_ktp %}
-    <li><a href="{{file_kepeg.profil.file_ktp.url}}">KTP</a></li>
-    {% endif %}
-    {% if file_kepeg.profil.file_npwp %}
-    <li><a href="{{file_kepeg.profil.file_npwp.url}}">NPWP</a></li>
-    {% endif %}
-    {% if file_kepeg.profil.file_jkn %}
-    <li><a href="{{file_kepeg.profil.file_jkn.url}}">Kartu JKN</a></li>
-    {% endif %}
-    {% if file_kepeg.profil.file_taspen %}
-    <li><a href="{{file_kepeg.profil.file_taspen.url}}">BPJS Tenaga Kerja/Taspen</a></li>
-    {% endif %}
-    {% if file_kepeg.pendidikan.file_ijazah %}
-    <li><a href="{{file_kepeg.pendidikan.file_ijazah.url}}">Ijazah Terakhir</a></li>
-    {% endif %}
-    {% if file_kepeg.pendidikan.file_transkrip %}
-    <li><a href="{{file_kepeg.pendidikan.file_transkrip.url}}">Transkrip Terakhir</a></li>
-    {% endif %}
-    {% if file_kepeg.panggol.file %}
-    <li><a href="{{file_kepeg.panggol.file.url}}">SK KP Terakhir</a></li>
-    {% endif %}
-    {% if file_kepeg.pengangkatan_cpns.file_sk %}
-    <li><a href="{{file_kepeg.pengangkatan_cpns.file_sk.url}}">SK CPNS</a></li>
-    {% endif %}
-    {% if file_kepeg.pengangkatan.file_sk %}
-    <li><a href="{{file_kepeg.pengangkatan.file_sk.url}}">SK Pengangkatan ASN/Non ASN</a></li>
-    {% endif %}
-    {% if file_kepeg.pengangkatan.file_spmt %}
-    <li><a href="{{file_kepeg.pengangkatan.file_spmt.url}}">SPMT</a></li>
-    {% endif %}
-    {% if file_kepeg.pengangkatan.file_latsar %}
-    <li><a href="{{file_kepeg.pengangkatan.file_latsar.url}}">Latsar</a></li>
-    {% endif %}
-    {% if file_kepeg.pengangkatan.file_karpeg %}
-    <li><a href="{{file_kepeg.pengangkatan.file_karpeg.url}}">Karpeg</a></li>
-    {% endif %}
-    {% if file_kepeg.penempatan.file %}
-    <li><a href="{{file_kepeg.penempatan.file.url}}">SK Penempatan</a></li>
-    {% endif %}
-    {% if file_kepeg.berkala.file %}
-    <li><a href="{{file_kepeg.berkala.file.url}}">SK Gaji Berkala</a></li>
-    {% endif %}
+{% regroup file_kepeg.links by category as file_categories %}
 
-</ul>
+{% if file_categories %}
+<div class="employee-file-list">
+    {% for category in file_categories %}
+    <div class="employee-file-group">
+        <div class="employee-file-category">
+            <span>{{ category.grouper }}</span>
+            <span class="badge badge-light">{{ category.list|length }}</span>
+        </div>
+        {% for file in category.list %}
+        <a href="{{ file.url }}"
+           target="_blank"
+           rel="noopener noreferrer"
+           class="employee-file-link">
+            <span class="employee-file-icon">
+                <i class="fas {{ file.icon }}"></i>
+            </span>
+            <span class="employee-file-label">
+                <strong>{{ file.label }}</strong>
+                <small>Buka dokumen</small>
+            </span>
+            <i class="fas fa-external-link-alt employee-file-action"></i>
+        </a>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="employee-file-empty">
+    <span class="employee-file-empty-icon">
+        <i class="far fa-folder-open"></i>
+    </span>
+    <h6>Belum ada file tersedia</h6>
+    <p>File utama pegawai akan tampil otomatis setelah dokumen diunggah.</p>
+</div>
+{% endif %}

@@ -47,10 +47,10 @@
                                 {% for item in data %}
                                 <tr>
                                     <td>{{forloop.counter}}</td>
-                                    <td>{{item.pegawai.full_name}}</td>
+                                    <td>{{item.full_name}}</td>
                                     <td>
-                                        {% if item.pegawai.penempatan_aktif %}
-                                            {{ item.pegawai.penempatan_aktif.0.penempatan_level4.instalasi }}  <!-- riwayat penempatan terakhir -->
+                                        {% if item.penempatan_aktif %}
+                                            {{ item.penempatan_aktif.0.penempatan }}
                                         {% else %}
                                             -
                                         {% endif %}

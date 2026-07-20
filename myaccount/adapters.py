@@ -1,16 +1,38 @@
-from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
-from django.contrib.auth import get_user_model
-from django.core.exceptions import PermissionDenied
+import logging
 
-User = get_user_model()
+from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
+
+logger = logging.getLogger(__name__)
+
 
 class RestrictToExistingUserAdapter(DefaultSocialAccountAdapter):
-    def pre_social_login(self, request, sociallogin):
-        # 1. Ambil email dari akun Google yang mencoba login
-        email = sociallogin.user.email
-        
-        # 2. Cek apakah user dengan email tersebut sudah ada di database Django
-        if not User.objects.filter(email=email).exists():
-            # 3. Jika tidak ada, batalkan login dan beri respon error
-            # Anda bisa melempar PermissionDenied agar muncul halaman 403
-            raise PermissionDenied("Akun Anda belum terdaftar. Silakan hubungi administrator.")
+    """Izinkan social login hanya untuk user lokal yang sudah terdaftar."""
+
+    def is_open_for_signup(self, request, sociallogin):
+        # Matching user existing ditangani secara aman melalui konfigurasi
+        # EMAIL_AUTHENTICATION Google. Jika tidak cocok, jangan buat user baru.
+        return False
+
+    def on_authentication_error(
+        self,
+        request,
+        provider,
+        error=None,
+        exception=None,
+        extra_context=None,
+    ):
+        # Catat tipe kegagalan tanpa menulis authorization code, token, atau
+        # detail exception yang mungkin memuat data autentikasi ke log.
+        logger.warning(
+            'Social login gagal: provider=%s code=%s exception_type=%s',
+            getattr(provider, 'id', 'unknown'),
+            error,
+            type(exception).__name__ if exception else None,
+        )
+        return super().on_authentication_error(
+            request,
+            provider,
+            error=error,
+            exception=exception,
+            extra_context=extra_context,
+        )

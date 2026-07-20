@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-4">
+        <div class="small-box bg-info"><div class="inner"><h3>{{ employee_count }}</h3><p>Pegawai Aktif</p></div><div class="icon"><i class="fas fa-users"></i></div></div>
+    </div>
+    <div class="col-md-4">
+        <div class="small-box bg-warning"><div class="inner"><h3>{{ education_unverified_count }}</h3><p>Ijazah Belum Diverifikasi</p></div><div class="icon"><i class="fas fa-hourglass-half"></i></div></div>
+    </div>
+    <div class="col-md-4">
+        <div class="small-box bg-success"><div class="inner"><h3>{{ education_verified_count }}</h3><p>Ijazah Terverifikasi</p></div><div class="icon"><i class="fas fa-check-circle"></i></div></div>
+    </div>
+</div>
+
+<div class="card card-outline card-info">
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-user-check mr-1"></i> Pilih Pegawai untuk Pemeriksaan</h3></div>
+    <div class="card-body">
+        <div class="alert alert-light border">
+            Pilih pegawai untuk membuka dokumennya. Setelah itu gunakan menu akses cepat pada setiap halaman dokumen untuk berpindah jenis dokumen tanpa kehilangan pegawai yang sedang diperiksa.
+        </div>
+        <form method="get" class="mb-3">
+            <div class="input-group">
+                <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Cari nama, email, atau NIP">
+                <div class="input-group-append">
+                    <button class="btn btn-primary"><i class="fas fa-search"></i> Cari</button>
+                    {% if q %}<a href="{% url 'riwayat_urls:document_admin_dashboard' %}" class="btn btn-secondary">Reset</a>{% endif %}
+                </div>
+            </div>
+        </form>
+        <div class="table-responsive">
+            <table class="table table-bordered table-hover">
+                <thead><tr><th>Nama</th><th>Email</th><th>NIP/NIK</th><th>Nomor HP</th><th>Aksi</th></tr></thead>
+                <tbody>
+                    {% for employee in employee_list %}
+                    <tr>
+                        <td>{{ employee.full_name|default:'-' }}</td>
+                        <td>{{ employee.email }}</td>
+                        <td>{{ employee.profil_user.nip|default:'-' }}</td>
+                        <td>{{ employee.profil_user.no_hp|default:'-' }}</td>
+                        <td>
+                            {% if employee.profil_user.nip %}
+                            <a href="{% url 'riwayat_urls:riwayat_view' %}?nip={{ employee.profil_user.nip|urlencode }}" class="btn btn-sm btn-info"><i class="fas fa-folder-open"></i> Buka Dokumen</a>
+                            <a href="{% url 'riwayat_urls:riwayat_pendidikan' %}?nip={{ employee.profil_user.nip|urlencode }}" class="btn btn-sm btn-warning"><i class="fas fa-user-check"></i> Periksa Ijazah</a>
+                            {% else %}<span class="text-muted">Profil belum lengkap</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}<tr><td colspan="5" class="text-center text-muted">Pegawai tidak ditemukan.</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if is_paginated %}<nav><ul class="pagination justify-content-center mb-0">
+            {% if page_obj.has_previous %}<li class="page-item"><a class="page-link" href="?q={{ q|urlencode }}&page={{ page_obj.previous_page_number }}">Sebelumnya</a></li>{% endif %}
+            <li class="page-item disabled"><span class="page-link">Halaman {{ page_obj.number }} dari {{ page_obj.paginator.num_pages }}</span></li>
+            {% if page_obj.has_next %}<li class="page-item"><a class="page-link" href="?q={{ q|urlencode }}&page={{ page_obj.next_page_number }}">Berikutnya</a></li>{% endif %}
+        </ul></nav>{% endif %}
+    </div>
+</div>
+{% endblock %}

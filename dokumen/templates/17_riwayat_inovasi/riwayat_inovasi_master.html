@@ -25,19 +25,16 @@
             <div class="card-header">
                 <div class="d-flex flex-row justify-content-between">
                     <div class="d-flex flex-row mb-1">
-                        {% if request.user.is_superuser and nip %}
-                            <a href="{% url 'riwayat_urls:riwayat_inovasi' %}" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
-                        {% endif %}
+                        <a href="{{ document_menu_url }}" class="text-dark mr-2" title="Kembali ke menu riwayat"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
                         <h5>Data Riwayat Inovasi</h5>
                     </div>
-                    {% if request.user.is_superuser %}
+                    {% if request.user.is_dokumen_admin %}
                     <div>
-                        {% if not request.user.is_superuser %}
+                        {% if request.user.is_dokumen_admin and not nip %}
                         <a href="{% url 'riwayat_urls:riwayat_inovasi_urutkan' pk=dok.id %}" class="btn btn-outline-info">Urutkan Dokumen</a>
-                        {% elif nip %}
+                        {% elif request.user.is_dokumen_admin and nip %}
                         <a href="{% url 'riwayat_urls:riwayat_inovasi_urutkan' pk=dok.id %}?nip={{nip}}" class="btn btn-outline-info">Urutkan Dokumen</a>
                         {% endif %}
-                        <input type="button" class="btn btn-outline-success" id="add_data" value="Tambah Data">
                     </div>
                     {% endif %}
                 </div>
@@ -56,7 +53,7 @@
                     <div class="col-md-12">
                         {% if nip %}
                             {% include '17_riwayat_inovasi/riwayat_inovasi_perorang.html' %}
-                        {% elif request.user.is_superuser  %}
+                        {% elif request.user.is_dokumen_admin  %}
                             {% include '17_riwayat_inovasi/riwayat_inovasi.html' %}
                         {% endif %}
                     </div>
@@ -102,7 +99,7 @@
 
 <script>
     const btn = document.getElementById('add_data');
-    
+    if (btn) {
     btn.addEventListener('click', () => {
     const form = document.getElementById('form_data');
     const data = document.getElementById('list_data');
@@ -119,6 +116,7 @@
         btn.value="Tambah Data"
       }
 });
+    }
 </script>
     
 {% endblock script %}

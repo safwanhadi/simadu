@@ -107,7 +107,7 @@
                                 <i class="fas fa-plus"></i> Ajukan Cuti Baru
                             </a>
                         </li>
-                        {% if check_cuti.can_manage_cuti_tunda user %}
+                        {% if request.user.is_cuti_admin %}
                         <li class="nav-item">
                             <a class="nav-link" href="{% url 'cuti:cuti_tunda_create' %}">
                                 <i class="fas fa-pause"></i> Ajukan Cuti Tertunda

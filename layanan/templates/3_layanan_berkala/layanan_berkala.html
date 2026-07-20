@@ -73,10 +73,10 @@
                 <td>{% if item.status == 'belum' %}
                     <a style="font-size: small;" href="{% url 'layanan_urls:layanan_berkala_update_view' id=item.id %}" class="btn btn-outline-warning">Edit</a>
 
-                    {% elif item.status == 'pengajuan' and request.user.is_superuser %}
+                    {% elif item.status == 'pengajuan' and request.user.is_berkala_admin %}
                         <a class="btn btn-outline-primary" href="{% url 'layanan_urls:layanan_berkala_admin_view' layanan_id=item.id nip=item.pegawai.profil_user.nip %}" style="font-size: small;">Proses</a>
 
-                    {% elif item.status == 'proses' and request.user.is_superuser %}
+                    {% elif item.status == 'proses' and request.user.is_berkala_admin %}
                         <a class="btn btn-outline-info" href="{% url 'file_urls:berkala_docx' layanan_id=item.id %}" style="font-size: small;">Draf Berkala</a>
                         <a class="btn btn-outline-success" href="{% url 'layanan_urls:layanan_berkala_admin_upload_view' berkala_id=item.berkala.id layanan_id=item.id nip=item.pegawai.profil_user.nip %}" style="font-size: small;">Upload File</a>
 

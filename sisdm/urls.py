@@ -18,8 +18,11 @@ from django.conf import settings
 from django.contrib import admin
 from django.urls import path, include
 from django.conf.urls.static import static
+from myaccount.views import AboutSimaduView, PrivacyPolicyView
 
 urlpatterns = [
+    path('tentang-simadu/', AboutSimaduView.as_view(), name='about_simadu'),
+    path('privacy-policy/', PrivacyPolicyView.as_view(), name='privacy_policy'),
     path('admin/', admin.site.urls),
     path('accounts/', include(('myaccount.urls', 'myaccount_urls'), namespace='myaccount_urls')),
     path('auth/', include('allauth.urls')),

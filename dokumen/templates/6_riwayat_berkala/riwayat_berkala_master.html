@@ -26,16 +26,14 @@
             <div class="card-header">
                 <div class="d-flex flex-row justify-content-between">
                     <div class="d-flex flex-row mb-1">
-                        {% if update_form or request.user.is_superuser and nip %}
-                            <a href="{% url 'riwayat_urls:riwayat_berkala' %}" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
-                        {% endif %}
+                        <a href="{{ document_menu_url }}" class="text-dark mr-2" title="Kembali ke menu riwayat"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
                         <h5>Data Riwayat Kenaikan Gaji Berkala</h5>
                     </div>
                     {% if not update_form %}
                     <div>
-                        {% if not request.user.is_superuser %}
+                        {% if request.user.is_dokumen_admin and not nip %}
                         <a href="{% url 'riwayat_urls:riwayat_berkala_urutkan' pk=dok.id %}" class="btn btn-outline-info">Urutkan Dokumen</a>
-                        {% elif nip %}
+                        {% elif request.user.is_dokumen_admin and nip %}
                         <a href="{% url 'riwayat_urls:riwayat_berkala_urutkan' pk=dok.id %}?nip={{nip}}" class="btn btn-outline-info">Urutkan Dokumen</a>
                         {% endif %}
                         <input type="button" class="btn btn-outline-success" id="add_data" value="Tambah Data">
@@ -54,7 +52,7 @@
                     </div>
                 </div>
                 <div class="row" id="list_data" style="display: {{data_view}};">
-                    {% if status_berkala and next_berkala and not request.user.is_superuser%}
+                    {% if status_berkala and next_berkala and not request.user.is_dokumen_admin%}
                     <div class="col-md-12 border border-success border-block rounded p-2 m-2" style="background-color: rgb(164, 233, 176);">
                         <span>Kenaikan berkala anda selanjutnya pada bulan <b>{{next_berkala.month|month_name}} - {{next_berkala.year}}</b> silahkan segera ajukan permohonan atau ajukan 3 bulan sebelum ditetapkan</span>
                     </div>
@@ -62,7 +60,7 @@
                     <div class="col-md-12">
                         {% if nip %}
                             {% include '6_riwayat_berkala/riwayat_berkala_perorang.html' %}
-                        {% elif request.user.is_superuser  %}
+                        {% elif request.user.is_dokumen_admin  %}
                             {% include '6_riwayat_berkala/riwayat_berkala.html' %}
                         {% endif %}
                     </div>

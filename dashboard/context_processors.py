@@ -1,12 +1,107 @@
 from dokumen.models import DokumenSDM
-from layanan.models import JenisLayanan, LayananCuti, LayananGajiBerkala, LayananUsulanInovasi, LayananUsulanDiklat
+from dokumen.access import get_selected_nip
+from dokumen.requirements import get_required_documents
+from dokumen.notifications import get_sip_expiry_notifications
+from myaccount.models import Users
+from layanan.models import (
+    JenisLayanan,
+    LayananCuti,
+    LayananGajiBerkala,
+    LayananNaikPangkat,
+    LayananNaikJabatan,
+    LayananSIP,
+    LayananUsulanInovasi,
+    LayananUsulanDiklat,
+)
 from informasi.models import NasehatdanHadist
 from itertools import chain
 from django.db.models import Q
 
 
+def _sip_notification_values(queryset):
+    """Samakan penanda layanan SIP dengan routing notifikasi dashboard."""
+    notifications = list(queryset.values(
+        'id', 'pegawai__first_name', 'pegawai__last_name',
+        'status', 'created_at'
+    ).order_by('-created_at'))
+    for notification in notifications:
+        notification['layanan__url'] = 'yansip'
+    return notifications
+
+
+def _berkala_notification_values(queryset):
+    notifications = list(queryset.values(
+        'id', 'pegawai__first_name', 'pegawai__last_name',
+        'pegawai__profil_user__nip', 'status', 'created_at'
+    ).order_by('-created_at'))
+    for notification in notifications:
+        notification['layanan__url'] = 'yanberkala'
+    return notifications
+
+
+def _cuti_notification_values(queryset):
+    notifications = list(queryset.values(
+        'id', 'pegawai__first_name', 'pegawai__last_name',
+        'verifikasicuti__persetujuan3', 'status', 'created_at'
+    ).order_by('-created_at'))
+    for notification in notifications:
+        notification['layanan__url'] = 'yancuti'
+    return notifications
+
+
+def _pangkat_notification_values(queryset):
+    notifications = list(queryset.values(
+        'id', 'pegawai__first_name', 'pegawai__last_name',
+        'status', 'created_at'
+    ).order_by('-created_at'))
+    for notification in notifications:
+        notification['layanan__url'] = 'yanpangkat'
+    return notifications
+
+
+def _jabatan_notification_values(queryset):
+    notifications = list(queryset.values(
+        'id', 'pegawai__first_name', 'pegawai__last_name',
+        'status', 'created_at'
+    ).order_by('-created_at'))
+    for notification in notifications:
+        notification['layanan__url'] = 'yanjabatan'
+    return notifications
+
+
+def _diklat_notification_values(queryset):
+    notifications = list(queryset.values(
+        'id', 'riwayatdiklat__nama_diklat',
+        'riwayatdiklat__pegawai__first_name',
+        'riwayatdiklat__pegawai__last_name',
+        'status', 'created_at',
+    ).order_by('-created_at'))
+    for notification in notifications:
+        notification['layanan__url'] = 'yandiklat'
+    return notifications
+
+
+def _inovasi_notification_values(queryset):
+    notifications = list(queryset.values(
+        'id', 'pegawai__first_name', 'pegawai__last_name',
+        'status', 'created_at',
+    ).order_by('-created_at'))
+    for notification in notifications:
+        notification['layanan__url'] = 'yaninovasi'
+    return notifications
+
+
 def menu_riwayat_sdm(request):
     data_dokumen = DokumenSDM.objects.all().order_by('id')
+    if request.user.is_authenticated:
+        employee = request.user
+        if request.user.is_dokumen_admin:
+            nip = get_selected_nip(request)
+            if not nip:
+                return {'data_dokumen': data_dokumen}
+            employee = Users.objects.filter(profil_user__nip=nip).first()
+        if employee is not None:
+            data_dokumen, _employment = get_required_documents(employee)
     return {'data_dokumen': data_dokumen}
 
 def menu_layanan_sdm(request):
@@ -25,21 +120,46 @@ def notifikasi_layanan(request):
         return {
             'notifikasi_layanan': [], 'notif_cuti': [], 'notif_cuti_admin': [],
             'notif_berkala': [], 'notif_diklat': [], 'notif_diklat_admin': [],
-            'notif_inovasi': []
+            'notif_inovasi': [], 'notif_sip': [], 'notif_pangkat': [],
+            'notif_jabatan': [], 'sip_expiry_notifications': [],
+            'notification_total': 0,
         }
+
+    sip_expiry_notifications = get_sip_expiry_notifications(request.user)
 
     # === Blok 2: Untuk Superuser (Melihat Semua Notifikasi Pengajuan) ===
     if request.user.is_superuser:
-        layanan_cuti = LayananCuti.objects.filter(status="pengajuan").values('id', 'pegawai__first_name', 'pegawai__last_name', 'layanan__url', 'status', 'created_at').order_by('-created_at')
-        layanan_berkala = LayananGajiBerkala.objects.filter(status="pengajuan").values('id', 'pegawai__first_name', 'pegawai__last_name', 'layanan__url', 'status', 'created_at')
-        layanan_diklat = LayananUsulanDiklat.objects.filter(status="usulan").values('id', 'riwayatdiklat__nama_diklat', 'riwayatdiklat__pegawai__first_name', 'layanan__url', 'status', 'created_at')
-        layanan_inovasi = LayananUsulanInovasi.objects.filter(status="usulan").values('id', 'pegawai__first_name', 'pegawai__last_name', 'layanan__url', 'status', 'created_at')
+        layanan_cuti = _cuti_notification_values(
+            LayananCuti.objects.filter(status="pengajuan")
+        )
+        layanan_berkala = _berkala_notification_values(
+            LayananGajiBerkala.objects.filter(status="pengajuan")
+        )
+        layanan_diklat = _diklat_notification_values(
+            LayananUsulanDiklat.objects.filter(status='usulan')
+        )
+        layanan_inovasi = _inovasi_notification_values(
+            LayananUsulanInovasi.objects.filter(status='usulan')
+        )
+        layanan_sip = _sip_notification_values(
+            LayananSIP.objects.filter(status="belum", is_read=False)
+        )
+        layanan_pangkat = _pangkat_notification_values(
+            LayananNaikPangkat.objects.filter(status='pengajuan')
+        )
+        layanan_jabatan = _jabatan_notification_values(
+            LayananNaikJabatan.objects.filter(status='pengajuan')
+        )
         
-        notifikasi = list(chain(layanan_cuti, layanan_berkala, layanan_diklat, layanan_inovasi))
+        notifikasi = list(chain(layanan_cuti, layanan_berkala, layanan_diklat, layanan_inovasi, layanan_sip, layanan_pangkat, layanan_jabatan))
         return {
             'notifikasi_layanan': notifikasi, 'notif_cuti': layanan_cuti, 'notif_berkala': layanan_berkala,
-            'notif_diklat': layanan_diklat, 'notif_inovasi': layanan_inovasi,
-            'notif_cuti_admin': [], 'notif_diklat_admin': []
+            'notif_diklat': layanan_diklat, 'notif_inovasi': layanan_inovasi, 'notif_sip': layanan_sip,
+            'notif_pangkat': layanan_pangkat,
+            'notif_jabatan': layanan_jabatan,
+            'notif_cuti_admin': [], 'notif_diklat_admin': [],
+            'sip_expiry_notifications': sip_expiry_notifications,
+            'notification_total': len(notifikasi) + len(sip_expiry_notifications),
         }
 
     # === Blok 3: Untuk User Biasa dan Admin Hirarki ===
@@ -48,7 +168,10 @@ def notifikasi_layanan(request):
     layanan_diklat_admin = LayananUsulanDiklat.objects.none()
 
     # Query notifikasi untuk admin hirarki (jika user adalah staff)
-    if request.user.is_staff and hasattr(request.user, 'profil_admin'):
+    if (
+        request.user.is_staff
+        and hasattr(request.user, 'profil_admin')
+    ):
         from strukturorg.models import SubBidang, Bidang  # Import di dalam fungsi untuk menghindari circular import
         profil_admin = request.user.profil_admin
 
@@ -137,14 +260,92 @@ def notifikasi_layanan(request):
                 riwayatdiklat__pegawai__riwayat_penempatan__status=True
             ).distinct()
 
+    # Admin modul menerima seluruh pengajuan melalui daftar notifikasi utama,
+    # sehingga hasil hierarki tidak perlu digabungkan lagi.
+    if request.user.is_cuti_admin:
+        layanan_cuti_admin = LayananCuti.objects.none()
+    if request.user.is_diklat_admin:
+        layanan_diklat_admin = LayananUsulanDiklat.objects.none()
+
+    layanan_cuti_admin = _cuti_notification_values(layanan_cuti_admin)
+    layanan_diklat_admin = _diklat_notification_values(layanan_diklat_admin)
+
     # Query notifikasi untuk pegawai (pribadi)
-    layanan_cuti_pegawai = LayananCuti.objects.filter(pegawai=request.user, status="selesai", is_read=False)
-    layanan_berkala = LayananGajiBerkala.objects.filter(pegawai=request.user, status="selesai", is_read=False)
-    layanan_diklat = LayananUsulanDiklat.objects.filter(riwayatdiklat__pegawai=request.user, status="selesai", is_read=False)
-    layanan_inovasi = LayananUsulanInovasi.objects.filter(pegawai=request.user, status="selesai", is_read=False)
+    if request.user.is_cuti_admin:
+        layanan_cuti_pegawai = _cuti_notification_values(
+            LayananCuti.objects.filter(status="pengajuan")
+        )
+    else:
+        layanan_cuti_pegawai = _cuti_notification_values(
+            LayananCuti.objects.filter(
+                pegawai=request.user, status='selesai', is_read=False,
+            )
+        )
+    if request.user.is_berkala_admin:
+        layanan_berkala = _berkala_notification_values(
+            LayananGajiBerkala.objects.filter(status="pengajuan")
+        )
+    else:
+        layanan_berkala = _berkala_notification_values(
+            LayananGajiBerkala.objects.filter(
+                pegawai=request.user, status='selesai', is_read=False,
+            )
+        )
+    if request.user.is_diklat_admin:
+        layanan_diklat = _diklat_notification_values(
+            LayananUsulanDiklat.objects.filter(status='usulan')
+        )
+    else:
+        layanan_diklat = _diklat_notification_values(
+            LayananUsulanDiklat.objects.filter(
+                riwayatdiklat__pegawai=request.user,
+                status='selesai',
+                is_read=False,
+            )
+        )
+    if request.user.is_inovasi_admin:
+        layanan_inovasi = _inovasi_notification_values(
+            LayananUsulanInovasi.objects.filter(status='usulan')
+        )
+    else:
+        layanan_inovasi = _inovasi_notification_values(
+            LayananUsulanInovasi.objects.filter(
+                pegawai=request.user, status='selesai', is_read=False,
+            )
+        )
+    if request.user.is_sip_admin:
+        layanan_sip = _sip_notification_values(
+            LayananSIP.objects.filter(status="belum", is_read=False)
+        )
+    else:
+        layanan_sip = _sip_notification_values(
+            LayananSIP.objects.filter(
+                pegawai=request.user, status="selesai", is_read=False
+            )
+        )
+    if request.user.is_pangkat_admin:
+        layanan_pangkat = _pangkat_notification_values(
+            LayananNaikPangkat.objects.filter(status='pengajuan')
+        )
+    else:
+        layanan_pangkat = _pangkat_notification_values(
+            LayananNaikPangkat.objects.filter(
+                pegawai=request.user, status='selesai', is_read=False
+            )
+        )
+    if request.user.is_jabatan_admin:
+        layanan_jabatan = _jabatan_notification_values(
+            LayananNaikJabatan.objects.filter(status='pengajuan')
+        )
+    else:
+        layanan_jabatan = _jabatan_notification_values(
+            LayananNaikJabatan.objects.filter(
+                pegawai=request.user, status='selesai', is_read=False
+            )
+        )
 
     # Gabungkan semua notifikasi
-    notifikasi = list(chain(layanan_cuti_admin, layanan_diklat_admin, layanan_cuti_pegawai, layanan_berkala, layanan_diklat, layanan_inovasi))
+    notifikasi = list(chain(layanan_cuti_admin, layanan_diklat_admin, layanan_cuti_pegawai, layanan_berkala, layanan_diklat, layanan_inovasi, layanan_sip, layanan_pangkat, layanan_jabatan))
 
     return {
         'notifikasi_layanan': notifikasi,
@@ -152,8 +353,13 @@ def notifikasi_layanan(request):
         'notif_berkala': layanan_berkala,
         'notif_diklat': layanan_diklat,
         'notif_inovasi': layanan_inovasi,
+        'notif_sip': layanan_sip,
+        'notif_pangkat': layanan_pangkat,
+        'notif_jabatan': layanan_jabatan,
         'notif_cuti_admin': layanan_cuti_admin,
-        'notif_diklat_admin': layanan_diklat_admin
+        'notif_diklat_admin': layanan_diklat_admin,
+        'sip_expiry_notifications': sip_expiry_notifications,
+        'notification_total': len(notifikasi) + len(sip_expiry_notifications),
     }
     
 

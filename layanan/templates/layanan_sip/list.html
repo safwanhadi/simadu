@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+<!-- {% load humanize %} -->
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block content %}
+
+<a href="{% url 'layanan_urls:layanan_sip_create' %}" class="btn btn-primary mb-3">
+    Ajukan SIP
+</a>
+
+<table class="table table-bordered" id="data_table">
+    <thead>
+        <tr>
+            <th>No</th>
+            {% if request.user.is_sip_admin %}
+                <th>Pegawai</th>
+            {% endif %}
+            <th>Layanan</th>
+            <th>KTP</th>
+            <th>Foto</th>
+            <th>Ijazah</th>
+            <th>STR</th>
+            <th>SKP</th>
+            <th>Status</th>
+            <th>Tanggal</th>
+            <th>Aksi</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in layanan_sip_list %}
+        <tr>
+            <td>{{ forloop.counter }}</td>
+            {% if request.user.is_sip_admin %}
+                <td>{{ item.pegawai.full_name }}</td>
+            {% endif %}
+            <td>{{ item.layanan }}</td>
+            <td>{% if item.is_ktp %}✅{% else %}❌{% endif %}</td>
+            <td>{% if item.is_foto %}✅{% else %}❌{% endif %}</td>
+            <td>{% if item.ijazah %}✅{% else %}❌{% endif %}</td>
+            <td>{% if item.str_profesi %}✅{% else %}❌{% endif %}</td>
+            <td>{% if item.kecukupan_skp %}✅{% else %}❌{% endif %}</td>
+            <td>{{ item.status }}</td>
+            <td>{{ item.created_at|date:"d M Y H:i" }}</td>
+            <td>
+                <a href="{% url 'layanan_urls:layanan_sip_detail' pk=item.pk %}" class="btn btn-sm btn-info">
+                    Detail
+                </a>
+
+                {% if item.status == "belum" %}
+                <a href="{% url 'layanan_urls:layanan_sip_update' pk=item.pk %}" class="btn btn-sm btn-warning">
+                    Edit
+                </a>
+                {% endif %}
+            </td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="10" class="text-center">
+                Belum ada permohonan SIP.
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% endblock %}
+
+{% block script %}
+<script>
+    $(document).ready(function () {
+        $('#data_table').DataTable({
+            dom: 'Blfrtip',
+            buttons: [
+                'copy', 'csv', 'excel', 'pdf'
+            ],
+            lengthMenu: [
+                [10, 25, 50, -1],
+                [10, 25, 50, 'All'],
+            ],
+        });
+    });
+</script>
+
+    
+{% endblock script %}

@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-9">
+        <div class="card card-solid">
+            <div class="card-header">
+                <h5 class="mb-0">{{ card_title }}</h5>
+            </div>
+            <form method="post">
+                {% csrf_token %}
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        Pilih dokumen yang sudah tersedia pada menu Riwayat SDM. SK Jabatan Fungsional,
+                        PAK, dan riwayat mutasi dapat dikosongkan jika tidak relevan.
+                    </div>
+                    {{ form|crispy }}
+                </div>
+                <div class="card-footer d-flex justify-content-between">
+                    <a href="{% url 'layanan_urls:layanan_pangkat_list' %}" class="btn btn-secondary">Kembali</a>
+                    <button type="submit" class="btn btn-success">Simpan dan Ajukan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+    $(function () {
+        window.addServiceFormOption = function (fieldId, value, text) {
+            const field = $('#' + fieldId);
+            if (!field.length) return;
+
+            if (!field.find('option[value="' + value + '"]').length) {
+                field.append(new Option(text, value, true, true));
+            }
+            if (field.prop('multiple')) {
+                const values = field.val() || [];
+                if (!values.includes(String(value))) values.push(String(value));
+                field.val(values);
+            } else {
+                field.val(String(value));
+            }
+            field.trigger('change');
+        };
+
+        const shortcuts = {
+            id_sk_kp_terakhir: "{% url 'riwayat_urls:riwayat_panggol' %}",
+            id_kinerja_dua_thn: "{% url 'riwayat_urls:riwayat_kinerja_create' %}?popup=1&field=id_kinerja_dua_thn",
+            id_sk_jabfung: "{% url 'riwayat_urls:riwayat_jabatan' %}",
+            id_pak: "{% url 'riwayat_urls:riwayat_pak_create' %}?popup=1&field=id_pak",
+            id_pendidikan: "{% url 'riwayat_urls:riwayat_pendidikan' %}",
+            id_pengangkatan: "{% url 'riwayat_urls:riwayat_pengangkatan' %}",
+            id_mutasi: "{% url 'riwayat_urls:riwayat_bekerja' %}"
+        };
+
+        $('.select2').select2({
+            theme: 'bootstrap4',
+            width: '100%',
+            placeholder: 'Pilih data',
+            allowClear: true
+        });
+
+        Object.entries(shortcuts).forEach(function ([fieldId, url]) {
+            const field = $('#' + fieldId);
+            if (!field.length) return;
+            field.closest('.form-group').append(
+                $('<a>', {
+                    href: url,
+                    target: '_blank',
+                    class: 'btn btn-outline-primary btn-sm mt-2 add-supporting-data',
+                    html: '<i class="fas fa-plus-circle"></i> Tambah data jika belum tersedia'
+                })
+            );
+        });
+    });
+</script>
+{% endblock script %}

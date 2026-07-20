@@ -1,0 +1,88 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load template_tags %}
+{% load crispy_forms_tags %}
+<!-- {% load humanize %} -->
+
+{% block title_page %}
+{{title_page}}
+{% endblock title_page %}
+
+{% block css %}
+
+{% endblock css %}
+
+{% block content %}
+<form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+
+    <div class="card">
+
+        <div class="card-header">
+            <h5 class="mb-0">
+                Form Permohonan SIP
+            </h5>
+        </div>
+
+        <div class="card-body">
+
+            {{ form|crispy }}
+
+            <hr>
+
+            <div class="alert alert-info">
+
+                <h6 class="mb-2">
+                    Surat Pernyataan Kecukupan SKP
+                </h6>
+
+                <p class="mb-3">
+                    Silakan download format surat pernyataan terlebih dahulu,
+                    kemudian cetak, tandatangani di atas materai Rp10.000,
+                    scan menjadi PDF dan upload kembali pada kolom
+                    <strong>Kecukupan SKP</strong>.
+                </p>
+
+                {% if object %}
+                    <a href="{% url 'file_urls:generate_surat_kecukupan_skp' object.pk %}"
+                       class="btn btn-success">
+                        <i class="fas fa-download"></i>
+                        Download Format Surat Kecukupan SKP
+                    </a>
+                {% else %}
+
+                    <button
+                        type="button"
+                        class="btn btn-success"
+                        disabled>
+                        <i class="fas fa-download"></i>
+                        Simpan data terlebih dahulu untuk mengunduh format
+                    </button>
+
+                {% endif %}
+
+            </div>
+
+        </div>
+
+        <div class="card-footer">
+
+            <button class="btn btn-primary">
+                Simpan
+            </button>
+
+            <a href="{% url 'layanan_urls:layanan_sip_list' %}"
+               class="btn btn-secondary">
+                Kembali
+            </a>
+
+        </div>
+
+    </div>
+
+</form>
+{% endblock %}
+
+{% block script %}
+
+{% endblock script %}

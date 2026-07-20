@@ -1,16 +1,19 @@
 from django.db.models.query import QuerySet
-from django.shortcuts import render, redirect
+from django.shortcuts import get_object_or_404, render, redirect
 from django.urls import reverse, reverse_lazy
 from django.views import View
-from django.views.generic import ListView, UpdateView, DetailView, CreateView
+from django.views.generic import FormView, ListView, TemplateView, UpdateView, DetailView, CreateView
 from django.contrib.auth import logout
+from django.contrib.auth.models import Group
 from django.contrib import messages
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib.auth.views import LoginView, LogoutView, PasswordChangeView, PasswordChangeDoneView
 from django.contrib.messages.views import SuccessMessageMixin
 import os
 from django.http import JsonResponse
 from django.db.models import Q
+from django.db import transaction
+from django.utils import timezone
 
 from urllib.parse import urlencode
 from django.conf import settings
@@ -28,11 +31,293 @@ from rest_framework.response import Response
 
 from .models import ProfilSDM
 
-from .models import ProfilSDM, Users
-from .forms import ProfilForm, UserAdminChangeForm
+from .models import AccountRegistration, ProfilSDM, Users
+from .forms import (
+    AdminResetPasswordForm,
+    EmployeeRegistrationForm,
+    ProfilForm,
+    UserAdminChangeForm,
+)
 import logging
+from .roles import ADMIN_DOKUMEN
+
+
+class AccountAdminRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
+    """Batasi pengelolaan akun untuk superuser atau anggota grup Admin Akun."""
+
+    def test_func(self):
+        return self.request.user.is_akun_admin
+
+
+class AccountManagementListView(AccountAdminRequiredMixin, ListView):
+    model = Users
+    template_name = 'account_management/list.html'
+    context_object_name = 'account_list'
+    paginate_by = 25
+
+    def get_queryset(self):
+        queryset = (
+            Users.objects
+            .select_related('profil_user')
+            .prefetch_related('groups')
+            .exclude(is_superuser=True)
+            .exclude(registration_request__status__in=(
+                AccountRegistration.PENDING,
+                AccountRegistration.REJECTED,
+            ))
+            .order_by('is_active', 'first_name', 'last_name', 'email')
+        )
+        status = self.request.GET.get('status', '').strip()
+        if status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        elif status == 'active':
+            queryset = queryset.filter(is_active=True)
+        query = self.request.GET.get('q', '').strip()
+        if query:
+            queryset = queryset.filter(
+                Q(email__icontains=query)
+                | Q(first_name__icontains=query)
+                | Q(last_name__icontains=query)
+                | Q(profil_user__nip__icontains=query)
+            )
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'q': self.request.GET.get('q', '').strip(),
+            'status': self.request.GET.get('status', '').strip(),
+            'inactive_count': Users.objects.filter(
+                is_active=False,
+                is_superuser=False,
+            ).exclude(registration_request__status__in=(
+                AccountRegistration.PENDING,
+                AccountRegistration.REJECTED,
+            )).count(),
+            'pending_registration_count': AccountRegistration.objects.filter(
+                status=AccountRegistration.PENDING,
+            ).count(),
+            'account_management': 'active',
+            'card_title': 'Pengelolaan Akun',
+            'title_page': 'Pengelolaan Akun',
+        })
+        return context
+
+
+class EmployeeRegistrationView(FormView):
+    form_class = EmployeeRegistrationForm
+    template_name = 'registration/account_register.html'
+    success_url = reverse_lazy('myaccount_urls:account_registration_success')
+
+    def form_valid(self, form):
+        form.save()
+        return super().form_valid(form)
+
+
+class EmployeeRegistrationSuccessView(TemplateView):
+    template_name = 'registration/account_register_success.html'
+
+
+class AccountRegistrationReviewListView(AccountAdminRequiredMixin, ListView):
+    model = AccountRegistration
+    template_name = 'account_management/registration_list.html'
+    context_object_name = 'registration_list'
+    paginate_by = 25
+
+    def get_queryset(self):
+        queryset = AccountRegistration.objects.select_related(
+            'user',
+            'user__profil_user',
+            'reviewed_by',
+        )
+        status = self.request.GET.get('status', AccountRegistration.PENDING)
+        valid_statuses = {
+            AccountRegistration.PENDING,
+            AccountRegistration.APPROVED,
+            AccountRegistration.REJECTED,
+        }
+        if status in valid_statuses:
+            queryset = queryset.filter(status=status)
+        query = self.request.GET.get('q', '').strip()
+        if query:
+            queryset = queryset.filter(
+                Q(user__email__icontains=query)
+                | Q(user__first_name__icontains=query)
+                | Q(user__last_name__icontains=query)
+                | Q(user__profil_user__nip__icontains=query)
+            )
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'q': self.request.GET.get('q', '').strip(),
+            'status': self.request.GET.get('status', AccountRegistration.PENDING),
+            'pending_count': AccountRegistration.objects.filter(
+                status=AccountRegistration.PENDING,
+            ).count(),
+            'account_registration_review': 'active',
+            'card_title': 'Verifikasi Registrasi Akun',
+            'title_page': 'Verifikasi Registrasi Akun',
+        })
+        return context
+
+
+class AccountRegistrationActionMixin(AccountAdminRequiredMixin):
+    def get_registration(self, statuses):
+        return get_object_or_404(
+            AccountRegistration.objects.select_related('user'),
+            pk=self.kwargs['pk'],
+            status__in=statuses,
+            user__is_superuser=False,
+        )
+
+
+class AccountRegistrationApproveView(AccountRegistrationActionMixin, View):
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        registration = self.get_registration((
+            AccountRegistration.PENDING,
+            AccountRegistration.REJECTED,
+        ))
+        registration.user.is_active = True
+        registration.user.save(update_fields=['is_active'])
+        registration.status = AccountRegistration.APPROVED
+        registration.reviewed_at = timezone.now()
+        registration.reviewed_by = request.user
+        registration.save(update_fields=['status', 'reviewed_at', 'reviewed_by'])
+        messages.success(
+            request,
+            f'Registrasi {registration.user.email} disetujui dan akun telah aktif.',
+        )
+        return redirect('myaccount_urls:account_registration_review_list')
+
+
+class AccountRegistrationRejectView(AccountRegistrationActionMixin, View):
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        registration = self.get_registration((AccountRegistration.PENDING,))
+        registration.user.is_active = False
+        registration.user.save(update_fields=['is_active'])
+        registration.status = AccountRegistration.REJECTED
+        registration.reviewed_at = timezone.now()
+        registration.reviewed_by = request.user
+        registration.save(update_fields=['status', 'reviewed_at', 'reviewed_by'])
+        messages.success(request, f'Registrasi {registration.user.email} ditolak.')
+        return redirect('myaccount_urls:account_registration_review_list')
+
+
+class AccountActionMixin(AccountAdminRequiredMixin):
+    def get_target(self):
+        # Akun superuser tidak boleh dimutasi dari menu operasional ini.
+        return get_object_or_404(
+            Users.objects.exclude(is_superuser=True).exclude(
+                registration_request__status__in=(
+                    AccountRegistration.PENDING,
+                    AccountRegistration.REJECTED,
+                ),
+            ),
+            pk=self.kwargs['pk'],
+        )
+
+
+class AccountToggleActiveView(AccountActionMixin, View):
+    def post(self, request, *args, **kwargs):
+        target = self.get_target()
+        if target.pk == request.user.pk:
+            messages.error(request, 'Anda tidak dapat menonaktifkan akun sendiri.')
+        else:
+            target.is_active = not target.is_active
+            target.save(update_fields=['is_active'])
+            status = 'diaktifkan' if target.is_active else 'dinonaktifkan'
+            messages.success(request, f'Akun {target.email} berhasil {status}.')
+        return redirect('myaccount_urls:account_management_list')
+
+
+class AccountToggleStaffView(AccountActionMixin, View):
+    def post(self, request, *args, **kwargs):
+        target = self.get_target()
+        if target.pk == request.user.pk:
+            messages.error(request, 'Anda tidak dapat mengubah status staff akun sendiri.')
+        else:
+            target.is_staff = not target.is_staff
+            target.save(update_fields=['is_staff'])
+            status = 'dijadikan staff' if target.is_staff else 'dihapus dari staff'
+            messages.success(request, f'Akun {target.email} berhasil {status}.')
+        return redirect('myaccount_urls:account_management_list')
+
+
+class AccountToggleDocumentAdminView(AccountActionMixin, View):
+    def post(self, request, *args, **kwargs):
+        target = self.get_target()
+        if target.pk == request.user.pk:
+            messages.error(
+                request,
+                'Anda tidak dapat mengubah peran Admin Dokumen akun sendiri.',
+            )
+        else:
+            group, _ = Group.objects.get_or_create(name=ADMIN_DOKUMEN)
+            if target.groups.filter(pk=group.pk).exists():
+                target.groups.remove(group)
+                status = 'dicabut'
+            else:
+                target.groups.add(group)
+                status = 'diberikan'
+            messages.success(
+                request,
+                f'Peran Admin Dokumen untuk {target.email} berhasil {status}.',
+            )
+        return redirect('myaccount_urls:account_management_list')
+
+
+class AccountResetPasswordView(AccountActionMixin, FormView):
+    form_class = AdminResetPasswordForm
+    template_name = 'account_management/reset_password.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.target = self.get_target()
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.target
+        return kwargs
+
+    def form_valid(self, form):
+        form.save()
+        messages.success(
+            self.request,
+            f'Kata sandi akun {self.target.email} berhasil direset.',
+        )
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse('myaccount_urls:account_management_list')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'target': self.target,
+            'account_management': 'active',
+            'card_title': 'Reset Kata Sandi',
+            'title_page': 'Reset Kata Sandi Akun',
+        })
+        return context
 
 logger = logging.getLogger(__name__)
+
+
+class PrivacyPolicyView(TemplateView):
+    template_name = 'privacy_policy.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['privacy_contact_email'] = settings.PRIVACY_CONTACT_EMAIL
+        return context
+
+
+class AboutSimaduView(TemplateView):
+    template_name = 'about_simadu.html'
 
 
 class SimaduLoginView(LoginView):

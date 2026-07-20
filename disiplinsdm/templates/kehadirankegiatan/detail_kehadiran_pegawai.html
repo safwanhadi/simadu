@@ -105,7 +105,7 @@
                                 </td>
                                 
                                 <td class="text-center pe-3">
-                                    {% if request.user.is_superuser and hari.id %}
+                                    {% if request.user.is_disiplin_admin and hari.id %}
                                         <a href="{% url 'disiplinsdm_urls:update_kehadiran_pegawai' hari.id %}?bulan={{request.GET.bulan}}&tahun={{request.GET.tahun}}" class="btn btn-sm btn-outline-danger p-1 rounded-circle d-inline-flex align-items-center justify-content-center shadow-sm" style="width: 28px; height: 28px;" title="Koreksi Data Absen">
                                             <i class="fas fa-edit" style="font-size: 0.75rem;"></i>
                                         </a>

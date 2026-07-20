@@ -9,7 +9,10 @@ from .models import (
     LayananUsulanInovasi, 
     VerifikasiCuti,
     PelimpahanTugas,
-    VerifikasiDiklat
+    VerifikasiDiklat,
+    LayananSIP,
+    LayananNaikPangkat,
+    LayananNaikJabatan,
 )
 
 # Register your models here.
@@ -23,3 +26,6 @@ admin.site.register(LayananUsulanInovasi)
 admin.site.register(VerifikasiCuti)
 admin.site.register(PelimpahanTugas)
 admin.site.register(VerifikasiDiklat)
+admin.site.register(LayananSIP)
+admin.site.register(LayananNaikPangkat)
+admin.site.register(LayananNaikJabatan)

@@ -41,6 +41,14 @@
                             <h5>Notifikasi Usulan Diklat</h5>
                         {% elif data == 'yaninovasi' %}
                             <h5>Notifikasi Usulan Inovasi</h5>
+                        {% elif data == 'yansip' %}
+                            <h5>Notifikasi Usulan SIP</h5>
+                        {% elif data == 'yanpangkat' %}
+                            <h5>Notifikasi Usulan Kenaikan Pangkat</h5>
+                        {% elif data == 'yanjabatan' %}
+                            <h5>Notifikasi Usulan Kenaikan Jabatan</h5>
+                        {% elif data == 'sip-expiry' %}
+                            <h5>Pengingat Masa Berlaku SIP</h5>
                         {% else %}
                             <h5>Detail Seluruh Notifikasi</h5>
                         {% endif %}
@@ -51,34 +59,76 @@
                             <thead>
                                 <tr>
                                     <th>No</th>
+                                    {% if data == 'sip-expiry' %}
+                                    <th>Profesi</th>
+                                    <th>Nomor SIP</th>
+                                    <th>Masa Berlaku</th>
+                                    <th>Status</th>
+                                    {% else %}
                                     <th>Pegawai</th>
                                     <th>Jenis Usulan</th>
                                     <th>Tanggal Usulan</th>
+                                    {% endif %}
                                     <th>Aksi</th>
-                                    {% if data == 'yancuti' and request.user.is_staff %}
+                                    {% if data == 'yancuti' and request.user.is_staff or data == 'yancuti' and request.user.is_cuti_admin %}
                                     <th>Persetujuan</th>
                                     {% endif %}
                                 </tr>
                             </thead>
                             <tbody>
-                                {% if data == 'yancuti' %}
+                                {% if data == 'sip-expiry' %}
+                                    {% for item in sip_expiry_notifications %}
+                                        <tr>
+                                            <td>{{ forloop.counter }}</td>
+                                            <td>{{ item.riwayat_profesi.profesi|default:'-' }}</td>
+                                            <td>{{ item.no_sip|default:'-' }}</td>
+                                            <td>{{ item.berlaku_sd|date:'d M Y' }}</td>
+                                            <td>
+                                                {% if item.is_expired %}
+                                                    <span class="badge badge-danger">{{ item.expiry_message }}</span>
+                                                {% else %}
+                                                    <span class="badge badge-warning">{{ item.expiry_message }}</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <a href="{% url 'riwayat_urls:riwayat_sipprofesi' id=item.riwayat_profesi_id %}"
+                                                   class="btn btn-info btn-sm">
+                                                    <i class="fas fa-eye mr-1"></i>Lihat SIP
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    {% empty %}
+                                        <tr>
+                                            <td colspan="6" class="text-center text-muted py-4">
+                                                <i class="fas fa-check-circle text-success mr-1"></i>
+                                                Tidak ada SIP yang akan berakhir dalam enam bulan ke depan.
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% elif data == 'yancuti' %}
                                     {% for item in notif_cuti %}
                                         <tr>
                                             <td>{{forloop.counter}}</td>
-                                            <td>{{item.pegawai.full_name}}</td>
+                                            <td>
+                                                {% if item.pegawai %}
+                                                    {{item.pegawai.full_name}}
+                                                {% else %}
+                                                    {{item.pegawai__first_name}} {{item.pegawai__last_name}}
+                                                {% endif %}
+                                            </td>
                                             <td>Usulan Cuti</td>
                                             <td>{{item.created_at}}</td>
                                             <td>
-                                                {% if request.user.is_superuser %}
+                                                {% if request.user.is_cuti_admin %}
                                                     <a href="{% url 'layanan_urls:layanan_cuti_verifikasi' id=item.id %}" class="btn btn-info">Proses</a>
                                                 {% else %}
-                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan={{data}}" method="post">
+                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan=yancuti" method="post">
                                                     {% csrf_token %}
                                                     <button type="submit" class="btn btn-info">Lihat Detail</button>
                                                 </form>
                                                 {% endif %}
                                             </td>
-                                            {% if request.user.is_superuser %}
+                                            {% if request.user.is_cuti_admin %}
                                             <td>
                                                 {% if item.verifikasicuti__persetujuan3 %}
                                                     <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
@@ -94,7 +144,7 @@
                                     {% for item_admin in notif_cuti_admin %}
                                         <tr>
                                             <td>{{forloop.counter}}</td>
-                                            <td>{{item_admin.pegawai.full_name}}</td>
+                                            <td>{{item_admin.pegawai__first_name}} {{item_admin.pegawai__last_name}}</td>
                                             <td>Usulan Cuti</td>
                                             <td>{{item_admin.created_at}}</td>
                                             <td>
@@ -123,10 +173,14 @@
                                             <td>Usulan Gaji Berkala</td>
                                             <td>{{item.created_at}}</td>
                                             <td>
-                                                {% if request.user.is_superuser %}
-                                                    <a href="{% url 'layanan_urls:layanan_berkala_admin_view' layanan_id=item.id nip=item.pegawai.profil_user.nip %}" class="btn btn-info">Proses</a>
+                                                {% if request.user.is_berkala_admin %}
+                                                    {% if item.pegawai__profil_user__nip %}
+                                                        <a href="{% url 'layanan_urls:layanan_berkala_admin_view' layanan_id=item.id nip=item.pegawai__profil_user__nip %}" class="btn btn-info">Proses</a>
+                                                    {% else %}
+                                                        <span class="badge badge-danger">NIP pegawai belum tersedia</span>
+                                                    {% endif %}
                                                 {% else %}
-                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan={{data}}" method="post">
+                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan=yanberkala" method="post">
                                                     {% csrf_token %}
                                                     <button type="submit" class="btn btn-info">Lihat Detail</button>
                                                 </form>
@@ -142,10 +196,10 @@
                                             <td>Usulan Diklat</td>
                                             <td>{{item.created_at}}</td>
                                             <td>
-                                                {% if request.user.is_superuser %}
+                                                {% if request.user.is_diklat_admin %}
                                                     <a href="{% url 'layanan_urls:layanan_diklat_update_view' pk=item.id %}?case=proses" class="btn btn-info">Proses</a>
                                                 {% else %}
-                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan={{data}}" method="post">
+                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan=yandiklat" method="post">
                                                     {% csrf_token %}
                                                     <button type="submit" class="btn btn-info">Lihat Detail</button>
                                                 </form>
@@ -174,14 +228,65 @@
                                             <td>Usulan Inovasi</td>
                                             <td>{{item.created_at}}</td>
                                             <td>
-                                                {% if request.user.is_superuser %}
+                                                {% if request.user.is_inovasi_admin %}
                                                     <a href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=proses" class="btn btn-info">Proses</a>
                                                 {% else %}
-                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan={{data}}" method="post">
+                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan=yaninovasi" method="post">
                                                     {% csrf_token %}
                                                     <button type="submit" class="btn btn-info">Lihat Detail</button>
                                                 </form>
                                                 {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% elif data == 'yansip' %}
+                                    {% for item in notif_sip %}
+                                        <tr>
+                                            <td>{{forloop.counter}}</td>
+                                            <td>{{item.pegawai__first_name}} {{item.pegawai__last_name}}</td>
+                                            <td>Usulan SIP</td>
+                                            <td>{{item.created_at}}</td>
+                                            <td>
+                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan=yansip" method="post">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-info">
+                                                        {% if request.user.is_sip_admin %}Proses{% else %}Lihat Detail{% endif %}
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% elif data == 'yanpangkat' %}
+                                    {% for item in notif_pangkat %}
+                                        <tr>
+                                            <td>{{forloop.counter}}</td>
+                                            <td>{{item.pegawai__first_name}} {{item.pegawai__last_name}}</td>
+                                            <td>Usulan Kenaikan Pangkat</td>
+                                            <td>{{item.created_at}}</td>
+                                            <td>
+                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan=yanpangkat" method="post">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-info">
+                                                        {% if request.user.is_pangkat_admin %}Proses{% else %}Lihat Detail{% endif %}
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% elif data == 'yanjabatan' %}
+                                    {% for item in notif_jabatan %}
+                                        <tr>
+                                            <td>{{forloop.counter}}</td>
+                                            <td>{{item.pegawai__first_name}} {{item.pegawai__last_name}}</td>
+                                            <td>Usulan Kenaikan Jabatan</td>
+                                            <td>{{item.created_at}}</td>
+                                            <td>
+                                                <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan=yanjabatan" method="post">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-info">
+                                                        {% if request.user.is_jabatan_admin %}Proses{% else %}Lihat Detail{% endif %}
+                                                    </button>
+                                                </form>
                                             </td>
                                         </tr>
                                     {% endfor %}
@@ -199,26 +304,61 @@
                                                 <span class="bg-dark pt-2 pb-2 pl-3 pr-3 rounded">Usulan Diklat</span>
                                             {% elif item.layanan__url == 'yaninovasi' %}
                                                 <span class="bg-danger pt-2 pb-2 pl-3 pr-3 rounded">Usulan Inovasi</span>
+                                            {% elif item.layanan__url == 'yansip' %}
+                                                <span class="bg-primary pt-2 pb-2 pl-3 pr-3 rounded">Usulan SIP</span>
+                                            {% elif item.layanan__url == 'yanpangkat' %}
+                                                <span class="bg-success pt-2 pb-2 pl-3 pr-3 rounded">Usulan Kenaikan Pangkat</span>
+                                            {% elif item.layanan__url == 'yanjabatan' %}
+                                                <span class="bg-info pt-2 pb-2 pl-3 pr-3 rounded">Usulan Kenaikan Jabatan</span>
                                             {% endif %}
                                         </td>
                                         <td>{{item.created_at}}</td>
                                         <td>
-                                            {% if request.user.is_superuser %}
+                                            {% if request.user.is_superuser or item.layanan__url == 'yanberkala' and request.user.is_berkala_admin or item.layanan__url == 'yancuti' and request.user.is_cuti_admin or item.layanan__url == 'yandiklat' and request.user.is_diklat_admin or item.layanan__url == 'yaninovasi' and request.user.is_inovasi_admin or item.layanan__url == 'yanpangkat' and request.user.is_pangkat_admin or item.layanan__url == 'yanjabatan' and request.user.is_jabatan_admin %}
                                                 {% if item.layanan__url == 'yancuti' %}
                                                     <a href="{% url 'layanan_urls:layanan_cuti_update_view' status='riwayat' id=item.id %}?case=tindaklanjut" class="btn btn-info">Proses</a>
                                                 {% elif item.layanan__url == 'yanberkala' %}
-                                                    <a href="{% url 'layanan_urls:layanan_berkala_admin_view' layanan_id=item.id nip=item.pegawai__profil_user__nip %}" class="btn btn-info">Proses</a>
+                                                    {% if item.pegawai__profil_user__nip %}
+                                                        <a href="{% url 'layanan_urls:layanan_berkala_admin_view' layanan_id=item.id nip=item.pegawai__profil_user__nip %}" class="btn btn-info">Proses</a>
+                                                    {% else %}
+                                                        <span class="badge badge-danger">NIP pegawai belum tersedia</span>
+                                                    {% endif %}
                                                 {% elif item.layanan__url == 'yandiklat' %}
-                                                    <a href="{% url 'layanan_urls:layanan_diklat_update_view' pk=item.diklat__id %}?case=proses" class="btn btn-info">Proses</a>
+                                                    <a href="{% url 'layanan_urls:layanan_diklat_update_view' pk=item.id %}?case=proses" class="btn btn-info">Proses</a>
                                                 {% elif item.layanan__url == 'yaninovasi' %}
                                                     <a href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=proses" class="btn btn-info">Proses</a>
+                                                {% elif item.layanan__url == 'yansip' %}
+                                                    <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan=yansip" method="post">
+                                                        {% csrf_token %}
+                                                        <button type="submit" class="btn btn-info">Proses</button>
+                                                    </form>
+                                                {% elif item.layanan__url == 'yanpangkat' %}
+                                                    <a href="{% url 'layanan_urls:layanan_pangkat_process' pk=item.id %}" class="btn btn-info">Proses</a>
+                                                {% elif item.layanan__url == 'yanjabatan' %}
+                                                    <a href="{% url 'layanan_urls:layanan_jabatan_process' pk=item.id %}" class="btn btn-info">Proses</a>
                                                 {% endif %}
                                             {% else %}
                                                 <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan={{item.layanan__url}}" method="post">
                                                     {% csrf_token %}
-                                                    <button type="submit" class="btn btn-info">Lihat Detail</>
+                                                    <button type="submit" class="btn btn-info">Lihat Detail</button>
                                                 </form>
                                             {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                    {% for item in sip_expiry_notifications %}
+                                    <tr>
+                                        <td>{{ forloop.counter }}</td>
+                                        <td>{{ request.user.full_name }}</td>
+                                        <td>
+                                            <span class="{% if item.is_expired %}bg-danger{% else %}bg-warning{% endif %} pt-2 pb-2 pl-3 pr-3 rounded">
+                                                Masa Berlaku SIP
+                                            </span>
+                                        </td>
+                                        <td>{{ item.berlaku_sd|date:'d M Y' }}</td>
+                                        <td>
+                                            <a href="{% url 'riwayat_urls:riwayat_sipprofesi' id=item.riwayat_profesi_id %}"
+                                               class="btn btn-info btn-sm">Lihat SIP</a>
                                         </td>
                                     </tr>
                                     {% endfor %}

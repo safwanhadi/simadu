@@ -45,7 +45,7 @@ Layanan cuti
                         <div class="row" id="form_data">
                             <div class="col-md-12">
                                 <div class="row">
-                                    {% if not request.user.is_superuser %}
+                                    {% if not request.user.is_cuti_admin %}
                                     <div class="col-md-12 border border-success border-block rounded p-2" style="background-color: rgb(164, 233, 176);">
                                         {% if cek_sisa_cuti > 0 %}
                                             <span>Sisa cuti tahunan anda {{cek_sisa_cuti}} hari</span>
@@ -72,7 +72,7 @@ Layanan cuti
                                                 {% include '6_layanan_cuti/layanan_cuti_tindaklanjut.html' %}
                                             {% elif nip %}
                                                 {% include '6_layanan_cuti/layanan_cuti_perorang.html' %}
-                                            {% elif request.user.is_superuser  %}
+                                            {% elif request.user.is_cuti_admin  %}
                                                 {% include '6_layanan_cuti/layanan_cuti.html' %}
                                             {% else %}
                                                 {% include 'riwayat_404.html' %}

@@ -26,14 +26,14 @@
                 <p class="h4">{{title}}</p>
             </div>
             <div>
-            {% if request.user.is_superuser %}
+            {% if request.user.is_disiplin_admin %}
                 <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:harilibur_list' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Libur</a>
                 <a class="btn btn-outline-primary" href="{% url 'disiplinsdm_urls:rekap_kehadiran_bulanan' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}">Kehadiran</a>
                 <a href="{% url 'disiplinsdm_urls:salin_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-secondary">Copy jadwal</a>
                 <a href="{% url 'disiplinsdm_urls:salin_jadwal_instalasi' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-warning">Copy instalasi</a>
                 <a href="{% url 'disiplinsdm_urls:evaluasi_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-success">Cek Status Jadwal</a>
                 <a href="{% url 'disiplinsdm_urls:rekap_piket' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-info">Rekap Piket</a>
-            {% elif request.user.is_staff %}
+            {% elif request.user.is_staff or request.user.is_disiplin_admin %}
                 <a href="{% url 'disiplinsdm_urls:salin_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-secondary">Copy jadwal</a>
                 <a href="{% url 'disiplinsdm_urls:salin_jadwal_instalasi' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-warning">Copy jadwal instalasi</a>
                 <a href="{% url 'disiplinsdm_urls:evaluasi_jadwal' %}{% if filtered_query %}?{{ filtered_query }}{% endif %}" class="btn btn-outline-success">Cek Status Jadwal</a>
@@ -46,7 +46,7 @@
         </div>
     </div>
     <div class="card-body">
-        {% if request.user.is_staff %}
+        {% if request.user.is_staff or request.user.is_disiplin_admin %}
         <div class="row">
             <div class="col-md-12 border rounded mb-4 p-3">
                 <div class="row">
@@ -99,7 +99,7 @@
         {% endif %}
         <div class="row">
             <div class="col-md-9">
-                {% if request.user.is_superuser %}
+                {% if request.user.is_disiplin_admin %}
                 <div class="form-group row">
                     <div class="col-md-3">Bidang/Instalasi</div>
                     <div class="col-md-9">Semua Instalasi/Unit/Subbagian</div>
@@ -233,7 +233,7 @@
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% if request.user.is_staff %}
+                                    {% if request.user.is_staff or request.user.is_disiplin_admin %}
                                         <a href="{% url 'disiplinsdm_urls:jadwal_auto_create' pk=item.id %}{% if filtered_query %}?{{filtered_query}}{% endif %}" class="btn btn-primary btn-sm mr-1 mb-1"><i class="fas fa-info"></i></a>
                                         <a href="{% url 'disiplinsdm_urls:jadwal_detail' pk=item.id %}{% if filtered_query %}?{{filtered_query}}{% endif %}" class="btn btn-info btn-sm mr-1 mb-1"><i class="fas fa-binoculars"></i></a>
                                         {% if item.status == 'diajukan' %}

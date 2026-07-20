@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="card card-solid">
+    <div class="card-header d-flex align-items-center">
+        <h5 class="mb-0">{{ card_title }}</h5>
+        <a href="{% url 'riwayat_urls:riwayat_pak_create' %}" class="btn btn-success btn-sm ml-auto"><i class="fas fa-plus"></i> Tambah PAK</a>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered table-hover">
+                <thead><tr><th>No</th>{% if request.user.is_dokumen_admin %}<th>Pegawai</th>{% endif %}<th>Nomor Surat</th><th>Tanggal</th><th>Angka Kredit</th><th>File</th><th>Aksi</th></tr></thead>
+                <tbody>
+                    {% for item in data %}
+                    <tr>
+                        <td>{{ forloop.counter }}</td>
+                        {% if request.user.is_dokumen_admin %}<td>{{ item.pegawai.full_name }}</td>{% endif %}
+                        <td>{{ item.no_srt|default:'-' }}</td>
+                        <td>{{ item.tgl_srt|date:'d-m-Y'|default:'-' }}</td>
+                        <td>{{ item.ak }}</td>
+                        <td>{% if item.file %}<a href="{{ item.file.url }}" target="_blank" class="btn btn-outline-success btn-sm">Lihat</a>{% else %}-{% endif %}</td>
+                        <td>
+                            <a href="{% url 'riwayat_urls:riwayat_pak_update' pk=item.pk %}" class="btn btn-warning btn-sm">Ubah</a>
+                            <a href="{% url 'riwayat_urls:riwayat_pak_delete' pk=item.pk %}" class="btn btn-danger btn-sm">Hapus</a>
+                        </td>
+                    </tr>
+                    {% empty %}<tr><td colspan="7" class="text-center text-muted">Belum ada riwayat PAK.</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

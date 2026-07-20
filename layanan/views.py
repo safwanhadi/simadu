@@ -35,6 +35,8 @@ from .models import (
     VerifikasiDiklat, 
     LayananUsulanInovasi,
     PelimpahanTugas,
+    LayananNaikPangkat,
+    LayananNaikJabatan,
 )
 from myaccount.models import Users
 from dokumen.models import (
@@ -102,6 +104,10 @@ from .forms import (
     PelimpahanTugasCreateForm,
     PelimpahanTugasPenerimaForm,
     PelimpahanTugasAtasanForm,
+    LayananNaikPangkatForm,
+    RiwayatPanggolHasilLayananForm,
+    LayananNaikJabatanForm,
+    RiwayatJabatanHasilLayananForm,
     )
 
 # Create your views here.
@@ -151,7 +157,7 @@ def delete_existing_object(data_submitted, data, file):
         return None
     return None
         
-class NotifikasiView(View):
+class NotifikasiView(LoginRequiredMixin, View):
     def get_cuti_object(self, id):
         try:
             data = LayananCuti.objects.get(id=id)
@@ -179,42 +185,145 @@ class NotifikasiView(View):
             return data
         except LayananUsulanInovasi.DoesNotExist:
             return None
+
+    def get_sip_object(self, id):
+        try:
+            return LayananSIP.objects.get(id=id)
+        except LayananSIP.DoesNotExist:
+            return None
+
+    def get_pangkat_object(self, id):
+        try:
+            return LayananNaikPangkat.objects.get(id=id)
+        except LayananNaikPangkat.DoesNotExist:
+            return None
+
+    def get_jabatan_object(self, id):
+        try:
+            return LayananNaikJabatan.objects.get(id=id)
+        except LayananNaikJabatan.DoesNotExist:
+            return None
             
     def get(self, request, *args, **kwargs):
         get_layanan = request.GET.get('layanan')
         context={
-            'data':get_layanan
+            'data': get_layanan,
+            'notification_menu': 'active',
         }
         return render(request, 'layanan_view_from_notif.html', context)
     
     def post(self, request, *args, **kwargs):
         id_layanan = kwargs.get('id')
-        get_layanan = request.GET.get('layanan')
-        get_case = request.GET.get('case')
+        get_layanan = (request.GET.get('layanan') or '').strip()
+        get_case = (request.GET.get('case') or 'detail').strip()
         if get_layanan == 'yancuti':
-            url = reverse('layanan_urls:layanan_cuti_update_view', kwargs={'status':'riwayat', 'id':id_layanan})
             data = self.get_cuti_object(id_layanan)
-            data.is_read = True
-            data.save()
-            return redirect(f'{url}?case={get_case}')
+            can_open = data is not None and (
+                request.user.is_cuti_admin or data.pegawai_id == request.user.pk
+            )
+            if can_open:
+                data.is_read = True
+                data.save(update_fields=['is_read', 'updated_at'])
+                url = reverse(
+                    'layanan_urls:layanan_cuti_update_view',
+                    kwargs={'status': 'riwayat', 'id': id_layanan},
+                )
+                return redirect(f'{url}?case={get_case}')
+            return redirect('layanan_urls:layanan_cuti_listview')
         elif get_layanan == 'yanberkala':
-            url = reverse('layanan_urls:layanan_berkala_update_view', kwargs={'id':id_layanan})
             data = self.get_berkala_object(id_layanan)
-            data.is_read = True
-            data.save()
-            return redirect(f'{url}?case={get_case}')
+            can_open = data is not None and (
+                request.user.is_berkala_admin or data.pegawai_id == request.user.pk
+            )
+            if can_open:
+                data.is_read = True
+                data.save(update_fields=['is_read', 'updated_at'])
+                url = reverse(
+                    'layanan_urls:layanan_berkala_update_view',
+                    kwargs={'id': id_layanan},
+                )
+                return redirect(f'{url}?case={get_case}')
+            return redirect('layanan_urls:layanan_berkala_view')
         if get_layanan == 'yandiklat':
-            url = reverse('layanan_urls:layanan_diklat_update_view', kwargs={'id':id_layanan})
             data = self.get_diklat_object(id_layanan)
-            data.is_read = True
-            data.save()
-            return redirect(f'{url}?case={get_case}')
+            can_open = data is not None and (
+                request.user.is_diklat_admin
+                or data.riwayatdiklat_set.filter(pegawai=request.user).exists()
+            )
+            if can_open:
+                data.is_read = True
+                data.save(update_fields=['is_read', 'updated_at'])
+                url = reverse(
+                    'layanan_urls:layanan_diklat_update_view',
+                    kwargs={'pk': id_layanan},
+                )
+                return redirect(f'{url}?case={get_case}')
+            return redirect('layanan_urls:layanan_diklat_list_view')
         if get_layanan == 'yaninovasi':
-            url = reverse('layanan_urls:layanan_inovasi_update_view', kwargs={'id':id_layanan})
             data = self.get_inovasi_object(id_layanan)
-            data.is_read = True
-            data.save()
-            return redirect(f'{url}?case={get_case}')
+            can_open = data is not None and (
+                request.user.is_inovasi_admin
+                or data.pegawai_id == request.user.pk
+            )
+            if can_open:
+                data.is_read = True
+                data.save(update_fields=['is_read', 'updated_at'])
+                url = reverse(
+                    'layanan_urls:layanan_inovasi_update_view',
+                    kwargs={'id': id_layanan},
+                )
+                return redirect(f'{url}?case={get_case}')
+            return redirect('layanan_urls:layanan_inovasi_view')
+        if get_layanan == 'yansip':
+            data = self.get_sip_object(id_layanan)
+            can_open = data is not None and (
+                request.user.is_sip_admin or data.pegawai_id == request.user.pk
+            )
+            if can_open:
+                data.is_read = True
+                data.save(update_fields=['is_read', 'updated_at'])
+                return redirect(
+                    reverse('layanan_urls:layanan_sip_detail', kwargs={'pk': data.pk})
+                )
+            return redirect('layanan_urls:layanan_sip_list')
+        if get_layanan == 'yanpangkat':
+            data = self.get_pangkat_object(id_layanan)
+            can_open = data is not None and (
+                request.user.is_pangkat_admin or data.pegawai_id == request.user.pk
+            )
+            if can_open:
+                if not request.user.is_pangkat_admin:
+                    data.is_read = True
+                    data.save(update_fields=['is_read', 'updated_at'])
+                route_name = (
+                    'layanan_urls:layanan_pangkat_process'
+                    if request.user.is_pangkat_admin
+                    else 'layanan_urls:layanan_pangkat_detail'
+                )
+                return redirect(reverse(route_name, kwargs={'pk': data.pk}))
+            return redirect('layanan_urls:layanan_pangkat_list')
+        if get_layanan == 'yanjabatan':
+            data = self.get_jabatan_object(id_layanan)
+            can_open = data is not None and (
+                request.user.is_jabatan_admin or data.pegawai_id == request.user.pk
+            )
+            if can_open:
+                if not request.user.is_jabatan_admin:
+                    data.is_read = True
+                    data.save(update_fields=['is_read', 'updated_at'])
+                route_name = (
+                    'layanan_urls:layanan_jabatan_process'
+                    if request.user.is_jabatan_admin
+                    else 'layanan_urls:layanan_jabatan_detail'
+                )
+                return redirect(reverse(route_name, kwargs={'pk': data.pk}))
+            return redirect('layanan_urls:layanan_jabatan_list')
+
+        messages.warning(
+            request,
+            'Jenis notifikasi tidak dikenali atau data notifikasi sudah tidak tersedia.',
+        )
+        return redirect('layanan_urls:notifikasi_view')
 
 
 notfoundview = 'riwayat_urls:notfound_view'
@@ -229,7 +338,7 @@ class RiwayatLayananCutiView(LoginRequiredMixin, CheckCuti, ListView):
         user = self.request.user
         nip = get_nip(user)
         data = RiwayatCuti.objects.all().order_by('-updated_at')
-        if not self.request.user.is_superuser:
+        if not self.request.user.is_cuti_admin:
             if nip:
                 data = RiwayatCuti.objects.filter(pegawai__profil_user__nip=nip).order_by('-updated_at')
             else:
@@ -274,7 +383,7 @@ class RiwayatCutiBawahanView(LoginRequiredMixin, UserPassesTestMixin, ListView):
             .order_by('-updated_at')
         )
 
-        if user.is_superuser:
+        if user.is_cuti_admin:
             return base_qs
 
         profil_admin = getattr(user, 'profil_admin', None)
@@ -363,7 +472,7 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
         return DokumenSDM.objects.filter(url='cuti').first()
 
     def get_nip_user(self):
-        if self.request.user.is_superuser:
+        if self.request.user.is_cuti_admin:
             return None
         profil = getattr(self.request.user, 'profil_user', None)
         return getattr(profil, 'nip', None)
@@ -380,7 +489,7 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
         user = self.request.user
         layanan_default = self.get_layanan_default()
 
-        if not user.is_superuser:
+        if not user.is_cuti_admin:
             initial['pegawai'] = user
         initial['layanan'] = layanan_default
         initial['status'] = 'pengajuan'
@@ -409,7 +518,7 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
             )
         else:
             initial_riwayat = {'dokumen': dokumen_default}
-            if not user.is_superuser:
+            if not user.is_cuti_admin:
                 initial_riwayat['pegawai'] = user
 
             formset = pengajuan_cuti_formset(
@@ -477,7 +586,7 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
             # 1) Simpan LayananCuti
             # ============================================================
             self.object = form.save(commit=False)
-            if not request.user.is_superuser:
+            if not request.user.is_cuti_admin:
                 self.object.pegawai = request.user
             if not self.object.status:
                 self.object.status = "pengajuan"
@@ -717,8 +826,7 @@ class AdminOverrideKlaimTundaForCutiView(LoginRequiredMixin, UserPassesTestMixin
     form_class = OverrideKlaimTundaForCutiForm
 
     def test_func(self):
-        # Sesuaikan dengan permission Anda
-        return self.request.user.is_superuser or getattr(self.request.user, "is_staff", False)
+        return self.request.user.is_cuti_admin
 
     def dispatch(self, request, *args, **kwargs):
         self.cuti_klaim = get_object_or_404(RiwayatCuti, pk=kwargs["riwayat_id"])
@@ -791,9 +899,9 @@ class PelimpahanTugasCreateView(LoginRequiredMixin, CreateView):
         self.riwayat_cuti = get_object_or_404(RiwayatCuti, pk=kwargs['riwayat_pk'])
 
         # opsional: pastikan hanya pemilik cuti yang boleh buat pelimpahan
-        if request.user.is_superuser and hasattr(self.riwayat_cuti, 'pelimpahan_tugas'):
+        if request.user.is_cuti_admin and hasattr(self.riwayat_cuti, 'pelimpahan_tugas'):
             return redirect('layanan_urls:pelimpahan_detail', pk=self.riwayat_cuti.pelimpahan_tugas.pk)
-        if request.user.is_superuser:
+        if request.user.is_cuti_admin:
             messages.info(request, 'Pemohon belum membuat pelimpahan tugas.')
             return redirect('layanan_urls:layanan_cuti_listview')
 
@@ -850,7 +958,7 @@ class PelimpahanTugasDetailView(LoginRequiredMixin, DetailView):
         u = request.user
 
         # hanya superuser, pemberi, penerima, atasan penyetuju yang boleh akses
-        if u.is_superuser or u in [obj.pemberi_tugas, obj.penerima_tugas, obj.atasan_penyetuju]:
+        if u.is_cuti_admin or u in [obj.pemberi_tugas, obj.penerima_tugas, obj.atasan_penyetuju]:
             return super().dispatch(request, *args, **kwargs)
         
         # Jika bukan siapa-siapa → redirect
@@ -1095,7 +1203,7 @@ class LayanananCutiInlineCreateView(LoginRequiredMixin, CheckCuti, CreateView):
         kwargs = super().get_form_kwargs()
         layanan = JenisLayanan.objects.filter(url='yancuti')
         initial = {'layanan':layanan.first(), 'status':'pengajuan'}
-        if self.request.user.is_authenticated and not self.request.user.is_superuser:
+        if self.request.user.is_authenticated and not self.request.user.is_cuti_admin:
             initial['pegawai'] = self.request.user
         initial['pegawai'] = self.request.user
         kwargs['request'] = self.request
@@ -1184,7 +1292,7 @@ class LayananCutiInlineFormView(LoginRequiredMixin, CheckCuti, View):
         initial = {'layanan':layanan.first(), 'status':'pengajuan'}
         nip = None
         card_title = 'Riwayat Pengajuan Cuti'
-        if not request.user.is_superuser:
+        if not request.user.is_cuti_admin:
             initial_riwayat = {'pegawai':user, 'dokumen':dokumen.first()}
             initial = {'pegawai':user, 'layanan':layanan.first(), 'status':'pengajuan'}
             nip = get_nip(user)
@@ -1274,7 +1382,7 @@ class LayananCutiTundaView(LoginRequiredMixin, CheckCuti, ListView):
         tahun_ini = tanggal.year
         two_year_before = tanggal.year - 2
         queryset = LayananCuti.objects.filter(pegawai=self.request.user, cuti_tunda=True, cuti__tahun_cuti__lte=tahun_ini, cuti__tahun_cuti__gt=two_year_before )
-        if self.request.user.is_superuser:
+        if self.request.user.is_cuti_admin:
             queryset = LayananCuti.objects.filter(cuti__status_cuti='Tunda', cuti__tahun_cuti__lte=tahun_ini, cuti__tahun_cuti__gt=two_year_before)
         return queryset
     
@@ -1780,7 +1888,7 @@ class VerifikasiCutiAccessMixin(LoginRequiredMixin):
     
     def is_monitor_user(self) -> bool:
         u = self.request.user
-        return u.is_authenticated and u.is_superuser
+        return u.is_authenticated and u.is_cuti_admin
 
     def dispatch(self, request, *args, **kwargs):
         # Panggil current_level utk validasi akses di awal
@@ -2053,7 +2161,7 @@ class GajiBerkalaCheck:
         return None
     
 
-class BerkalaListView(ListView):
+class BerkalaListView(LoginRequiredMixin, ListView):
     """
     Menampilkan daftar monitoring gaji berkala pegawai.
     Menghitung interval kenaikan gaji berkala berikutnya dan mengurutkannya
@@ -2163,6 +2271,8 @@ class BerkalaListView(ListView):
 
 
 def createlayananberkala(request, riwayat_id):
+    if not request.user.is_authenticated or not request.user.is_berkala_admin:
+        raise PermissionDenied
     try:
         riwayat_berkala = RiwayatGajiBerkala.objects.get(id=riwayat_id)
         jenis_layanan = JenisLayanan.objects.filter(url='yanberkala').first()
@@ -2233,9 +2343,12 @@ class LayananGajiBerkalaUpdateView(LoginRequiredMixin, GajiBerkalaCheck, View):
         return redirect(reverse(self.redirect_display))
     
 
-class LayananGajiBerkalaAdminView(LoginRequiredMixin, View):
+class LayananGajiBerkalaAdminView(LoginRequiredMixin, UserPassesTestMixin, View):
     login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
+
+    def test_func(self):
+        return self.request.user.is_berkala_admin
 
     def get_object(self, layanan_id):
         try:
@@ -2256,7 +2369,7 @@ class LayananGajiBerkalaAdminView(LoginRequiredMixin, View):
         detail = self.get_object(layanan_id)
         selected_nip = kwargs.get('nip')
         nip = None
-        if request.user.is_superuser:
+        if request.user.is_berkala_admin:
             nip = selected_nip
         else:
             nip = get_nip(request.user)
@@ -2276,9 +2389,12 @@ class LayananGajiBerkalaAdminView(LoginRequiredMixin, View):
         return render(request, '3_layanan_berkala/layanan_berkala_admin_view.html', context)
 
 
-class LayananGajiBerkalaAdminAddView(LoginRequiredMixin, View):    
+class LayananGajiBerkalaAdminAddView(LoginRequiredMixin, UserPassesTestMixin, View):
     login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
+
+    def test_func(self):
+        return self.request.user.is_berkala_admin
         
     def get_user(self, nip):
         try: 
@@ -2291,7 +2407,7 @@ class LayananGajiBerkalaAdminAddView(LoginRequiredMixin, View):
         selected_nip = kwargs.get('nip')
         dokumen = DokumenSDM.objects.filter(url='berkala')
         nip = None
-        if request.user.is_superuser:
+        if request.user.is_berkala_admin:
             nip = selected_nip
         else:
             nip = get_nip(request.user)
@@ -2336,9 +2452,12 @@ class LayananGajiBerkalaAdminAddView(LoginRequiredMixin, View):
             return redirect(reverse('layanan_urls:layanan_berkala_admin_add_view', kwargs={'layanan_id':layanan_id, 'nip':nip} ))
         
 
-class LayananGajiBerkalaUpload(LoginRequiredMixin, View):
+class LayananGajiBerkalaUpload(LoginRequiredMixin, UserPassesTestMixin, View):
     login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
+
+    def test_func(self):
+        return self.request.user.is_berkala_admin
 
     def get_object(self, id):
         try:
@@ -2393,11 +2512,14 @@ class LayananGajiBerkalaUpload(LoginRequiredMixin, View):
         return redirect(f'{url_reverse}?action=upload')
 
 
-class PengalihanDiklatCreateView(LoginRequiredMixin, CreateView):
+class PengalihanDiklatCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
     model = LayananUsulanDiklat
     form_class = FormPengalihanUsulanDiklat
     template_name = '7_layanan_diklat/layanan_diklat_pengalihan.html'
     success_url = reverse_lazy('layanan_urls:layanan_diklat_staf_view')
+
+    def test_func(self):
+        return self.request.user.is_staff or self.request.user.is_diklat_admin
     
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -2459,11 +2581,14 @@ class PengalihanDiklatCreateView(LoginRequiredMixin, CreateView):
         return super().form_invalid(form)
 
         
-class PenugasanDiklatCreateView(LoginRequiredMixin, CreateView):
+class PenugasanDiklatCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
     model = LayananUsulanDiklat
     form_class = FormPenugasanUsulanDiklat
     template_name = '7_layanan_diklat/layanan_diklat_form.html'
     success_url = reverse_lazy('layanan_urls:layanan_diklat_staf_view')
+
+    def test_func(self):
+        return self.request.user.is_staff or self.request.user.is_diklat_admin
     
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -2506,15 +2631,18 @@ class PenugasanDiklatCreateView(LoginRequiredMixin, CreateView):
         messages.error(self.request, 'Data gagal disimpan!')
         return super().form_invalid(form)
 
-class LayananUsulanDiklatStaffView(LoginRequiredMixin, ListView):
+class LayananUsulanDiklatStaffView(LoginRequiredMixin, UserPassesTestMixin, ListView):
     login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
     template_name = '7_layanan_diklat/layanan_diklat_list.html'
     model = LayananUsulanDiklat
+
+    def test_func(self):
+        return self.request.user.is_staff or self.request.user.is_diklat_admin
     
     def get_queryset(self):
         queryset = None
-        if self.request.user.is_staff and not self.request.user.is_superuser:
+        if self.request.user.is_staff and not self.request.user.is_diklat_admin:
             penempatan_admin = self.request.user.riwayat_penempatan.filter(status=True).last()
             if penempatan_admin:
                 queryset=self.model.objects.filter(
@@ -2524,7 +2652,7 @@ class LayananUsulanDiklatStaffView(LoginRequiredMixin, ListView):
                     ).order_by('-id').exclude(riwayatdiklat__pegawai=self.request.user).distinct()|self.model.objects.filter(
                         riwayatdiklat__pegawai__riwayat_penempatan__penempatan_level1__unor=penempatan_admin.penempatan, riwayatdiklat__pegawai__riwayat_penempatan__status=True
                     ).order_by('-id').exclude(riwayatdiklat__pegawai=self.request.user).distinct()  
-        elif self.request.user.is_superuser:
+        elif self.request.user.is_diklat_admin:
             queryset = super().get_queryset()
         return queryset
     
@@ -2547,7 +2675,7 @@ class LayananUsulanDiklatListView(LoginRequiredMixin, ListView):
     
     def get_queryset(self):
         nip = get_nip(self.request.user)
-        if not self.request.user.is_superuser and nip:
+        if not self.request.user.is_diklat_admin and nip:
             queryset = LayananUsulanDiklat.objects.filter(riwayatdiklat__pegawai__profil_user__nip=nip).order_by('-id')
         else:
             queryset = LayananUsulanDiklat.objects.all().order_by('-id')
@@ -2557,7 +2685,7 @@ class LayananUsulanDiklatListView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
         nip = get_nip(self.request.user)
         context['card_title'] = 'Riwayat Usulan Diklat'
-        if not self.request.user.is_superuser and nip:
+        if not self.request.user.is_diklat_admin and nip:
             context['card_title'] = 'Riwayat Diklat Saya'
         context['diklat']='active'
         context['layanan']='active'
@@ -2566,7 +2694,7 @@ class LayananUsulanDiklatListView(LoginRequiredMixin, ListView):
         return context
     
     def get_template_names(self):
-        if self.request.user.is_superuser:
+        if self.request.user.is_diklat_admin:
             return ['7_layanan_diklat/layanan_diklat_list.html']
         return ['7_layanan_diklat/layanan_diklat_perorang.html']
     
@@ -2592,7 +2720,7 @@ class LayananUsulanDiklatCreateView(LoginRequiredMixin, CreateView):
         user = Users.objects.filter(profil_user__nip=nip)
         dokumen = DokumenSDM.objects.filter(url='diklat')
         initial = [{'dokumen':dokumen.first()}]
-        if not self.request.user.is_superuser:
+        if not self.request.user.is_diklat_admin:
             initial = [{
                 'pegawai':user, 'dokumen':dokumen.first()
             }]
@@ -2648,7 +2776,7 @@ class LayananUsulanDiklatView(LoginRequiredMixin, View):
         initial = {'layanan':layanan.first()}
         nip = None
         detail = None
-        if not user.is_superuser:
+        if not user.is_diklat_admin:
             nip = get_nip(user)
             initial_riwayat = {'pegawai':user, 'dokumen':dokumen.first()}
             initial = {'pegawai':user, 'layanan':layanan.first()}
@@ -2702,6 +2830,16 @@ class LayananUsulanDiklatUpdateView(LoginRequiredMixin, UpdateView):
     redirect_field_name = 'next'
     model = LayananUsulanDiklat
     success_url = reverse_lazy('layanan_urls:layanan_diklat_list_view')
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.GET.get('case') == 'spt' and not request.user.is_diklat_admin:
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        if request.GET.get('case') == 'proses' and not request.user.is_diklat_admin:
+            raise PermissionDenied
+        return super().post(request, *args, **kwargs)
     
     def get_form_class(self):
         case_data = self.request.GET.get('case')
@@ -2875,10 +3013,15 @@ class VerifikasiDiklatView(LoginRequiredMixin, UpdateView):
         return redirect(f'{url}?case=proses#openModal')
 
 
-class CatatanSDMUsulanLayananDiklatUpdateView(LoginRequiredMixin, UpdateView):
+class CatatanSDMUsulanLayananDiklatUpdateView(
+    LoginRequiredMixin, UserPassesTestMixin, UpdateView
+):
     model = LayananUsulanDiklat
     form_class = FormCatatanSDMUsulanLayananDiklat
     template_name = '7_layanan_diklat/layanan_diklat_catatan_sdm.html'
+
+    def test_func(self):
+        return self.request.user.is_diklat_admin
     
     def get_success_url(self):
         url = reverse('layanan_urls:layanan_diklat_update_view', kwargs={'pk':self.get_object().id})
@@ -2921,7 +3064,7 @@ class LayananUsulanInovasiView(LoginRequiredMixin, View):
         initial = {'layanan':layanan.first(), 'status':'usulan'}
         nip = None
         card_title = 'Riwayat Usulan Inovasi'
-        if not request.user.is_superuser:
+        if not request.user.is_inovasi_admin:
             initial_riwayat = {'pegawai':user, 'dokumen':dokumen.first()}
             initial = {'pegawai':user, 'layanan':layanan.first(), 'status':'usulan'}
             nip = get_nip(user)
@@ -2968,9 +3111,18 @@ class LayananUsulanInovasiUpdateView(LoginRequiredMixin, View):
     login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
+    def dispatch(self, request, *args, **kwargs):
+        admin_cases = {'proses', 'sk', 'tl'}
+        if request.GET.get('case') in admin_cases and not request.user.is_inovasi_admin:
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
     def get_object(self, id):
         try:
-            data = LayananUsulanInovasi.objects.get(id=id)
+            queryset = LayananUsulanInovasi.objects.all()
+            if not self.request.user.is_inovasi_admin:
+                queryset = queryset.filter(pegawai=self.request.user)
+            data = queryset.get(id=id)
             return data
         except LayananUsulanInovasi.DoesNotExist:
             return None
@@ -2991,7 +3143,7 @@ class LayananUsulanInovasiUpdateView(LoginRequiredMixin, View):
         card_title = 'Edit Usulan Inovasi'
         form_view = 'block'
         data_view = 'none'
-        if request.user.is_superuser:
+        if request.user.is_inovasi_admin:
             nip = selected_nip
         else:
             nip = get_nip(request.user)  
@@ -3023,7 +3175,7 @@ class LayananUsulanInovasiUpdateView(LoginRequiredMixin, View):
             card_title = 'Detail Usulan Inovasi'
             data_view = 'block'
             form_view = 'none'
-        elif request.user.is_superuser:
+        elif request.user.is_inovasi_admin:
             form = full_update_inovasi_formset(instance=riwayat_instance)
             riwayat_form = RiwayatInovasiFullForm(instance=riwayat_instance, request=request)
         context={
@@ -3064,7 +3216,7 @@ class LayananUsulanInovasiUpdateView(LoginRequiredMixin, View):
         elif get_case == 'tl':
             form = tindaklanjut_inovasi_formset(data=request.POST, files=request.FILES, instance=riwayat_instance, form_kwargs={'request': request})
             riwayat_form = RiwayatInovasiTLForm(data=request.POST, files=request.FILES, instance=riwayat_instance, request=request)
-        elif request.user.is_superuser:
+        elif request.user.is_inovasi_admin:
             form = full_update_inovasi_formset(data=request.POST, files=request.FILES, instance=riwayat_instance)
             riwayat_form = RiwayatInovasiFullForm(data=request.POST, files=request.FILES, instance=riwayat_instance, request=request)
         if riwayat_form.is_valid() and form.is_valid():
@@ -3091,3 +3243,641 @@ class LayananUsulanInovasiUpdateView(LoginRequiredMixin, View):
         messages.error(request, 'Maaf data gagal disimpan!')
         return redirect(reverse('layanan_urls:layanan_inovasi_view'))
 
+
+from .models import LayananSIP
+from .forms import LayananSIPForm, UploadRekomendasiSIPForm, UploadPersyaratanSIPForm
+
+
+class LayananSIPListView(LoginRequiredMixin, ListView):
+    model = LayananSIP
+    template_name = "layanan_sip/list.html"
+    context_object_name = "layanan_sip_list"
+    paginate_by = 10
+
+    def get_queryset(self):
+        layanan_sip = LayananSIP.objects.filter(pegawai=self.request.user).select_related(
+            "pegawai",
+        ).order_by("-created_at")
+
+        if self.request.user.is_sip_admin:
+            layanan_sip = LayananSIP.objects.all().select_related(
+                "pegawai",
+            ).order_by("-created_at")
+
+        return layanan_sip
+
+    def get_context_data(self):
+        context = super().get_context_data()
+        context["card_title"] = "Data Permohonan SIP"
+        context["title_page"] = "Layanan SIP"
+        return context
+
+
+class LayananSIPCreateView(LoginRequiredMixin, CreateView):
+    model = LayananSIP
+    form_class = LayananSIPForm
+    template_name = "layanan_sip/form.html"
+    success_url = reverse_lazy("layanan_urls:layanan_sip_list")
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
+
+    def form_valid(self, form):
+        if not self.request.user.is_sip_admin:
+            form.instance.pegawai = self.request.user
+        response = super().form_valid(form)
+
+        messages.success(self.request, "Permohonan SIP berhasil diajukan.")
+        return response
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["card_title"] = "Permohonan SIP"
+        context["title_page"] = "Layanan SIP"
+        return context
+
+
+class LayananSIPDetailView(LoginRequiredMixin, DetailView):
+    model = LayananSIP
+    template_name = "layanan_sip/detail.html"
+    context_object_name = "layanan_sip"
+
+    def get_queryset(self):
+        # 1. Ambil query dasar dengan select_related untuk menghemat query database (Bagus!)
+        queryset = super().get_queryset().select_related(
+            "pegawai",
+            "layanan",
+            "ijazah",
+            "str_profesi",
+        )
+
+        # 2. Atur hak akses: Jika BUKAN superuser, kunci hanya untuk datanya sendiri
+        if not self.request.user.is_sip_admin:
+            queryset = queryset.filter(pegawai=self.request.user)
+
+        # JIKA SUPERUSER, biarkan lolos tanpa filter agar bisa melihat detail SIP milik siapa saja
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["card_title"] = "Detail Permohonan SIP"
+        context["title_page"] = "Layanan SIP"
+        return context
+
+
+class LayananSIPUpdateView(LoginRequiredMixin, UpdateView):
+    model = LayananSIP
+    form_class = LayananSIPForm
+    template_name = "layanan_sip/form.html"
+    success_url = reverse_lazy("layanan_urls:layanan_sip_list")
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
+
+    def get_queryset(self):
+        qs = LayananSIP.objects.all()
+
+        if self.request.user.is_sip_admin:
+            return qs
+
+        return qs.filter(pegawai=self.request.user)
+
+    def form_valid(self, form):
+        if not self.request.user.is_sip_admin:
+            form.instance.pegawai = self.request.user
+
+        return super().form_valid(form)
+
+
+class LayananSIPUploadRekomendasiView(
+    LoginRequiredMixin, UserPassesTestMixin, UpdateView
+):
+    model = LayananSIP
+    form_class = UploadRekomendasiSIPForm
+    template_name = "layanan_sip/upload_rekomendasi.html"
+
+    def test_func(self):
+        return (
+            self.request.user.is_sip_admin
+            or self.get_object().pegawai_id == self.request.user.pk
+        )
+
+    def handle_no_permission(self):
+        messages.error(self.request, "Anda tidak memiliki akses untuk mengunggah dokumen SKP ini.")
+        return redirect("layanan_urls:layanan_sip_list")
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
+
+    def form_valid(self, form):
+        replaced_files = []
+        for field_name in form.fields:
+            if field_name not in self.request.FILES:
+                continue
+
+            old_file = getattr(self.object, field_name, None)
+            if old_file and old_file.name:
+                replaced_files.append((field_name, old_file.storage, old_file.name))
+
+        # Permohonan baru dinyatakan selesai setelah rekomendasi final tersedia.
+        if (
+            self.request.user.is_sip_admin
+            and form.cleaned_data.get("surat_rekomendasi_sip")
+        ):
+            form.instance.status = "selesai"
+            # Munculkan notifikasi baru kepada pegawai setelah rekomendasi selesai.
+            form.instance.is_read = False
+
+        with transaction.atomic():
+            response = super().form_valid(form)
+
+            # Hapus file lama hanya setelah data file baru berhasil disimpan ke DB.
+            for field_name, storage, old_name in replaced_files:
+                new_file = getattr(self.object, field_name)
+                if old_name != new_file.name:
+                    transaction.on_commit(
+                        lambda storage=storage, name=old_name: storage.delete(name),
+                        robust=True,
+                    )
+
+        if self.request.user.is_sip_admin and self.object.surat_rekomendasi_sip:
+            message = "Dokumen berhasil diunggah dan status permohonan menjadi selesai."
+        else:
+            message = "Dokumen rekomendasi SIP berhasil diunggah."
+        messages.success(self.request, message)
+        return response
+
+    def get_success_url(self):
+        return reverse("layanan_urls:layanan_sip_detail", kwargs={"pk": self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["card_title"] = "Upload/Ganti Dokumen Rekomendasi SIP"
+        context["title_page"] = "Layanan SIP"
+        context["is_admin_upload"] = self.request.user.is_sip_admin
+        context["current_documents"] = [
+            {
+                "label": form_field.label,
+                "file": getattr(self.object, field_name, None),
+            }
+            for field_name, form_field in context["form"].fields.items()
+        ]
+        return context
+
+
+class LayananSIPUploadPersyaratanView(LoginRequiredMixin, FormView):
+    form_class = UploadPersyaratanSIPForm
+    template_name = "layanan_sip/upload_persyaratan.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.layanan_sip = get_object_or_404(
+            LayananSIP.objects.select_related("pegawai", "ijazah"),
+            pk=kwargs["pk"],
+            pegawai=request.user,
+        )
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["layanan_sip"] = self.layanan_sip
+        return kwargs
+
+    def form_valid(self, form):
+        with transaction.atomic():
+            form.save()
+        messages.success(self.request, "Dokumen persyaratan SIP berhasil diunggah.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse(
+            "layanan_urls:layanan_sip_detail",
+            kwargs={"pk": self.layanan_sip.pk},
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["layanan_sip"] = self.layanan_sip
+        context["card_title"] = "Upload Persyaratan SIP"
+        context["title_page"] = "Layanan SIP"
+        return context
+
+
+class LayananNaikPangkatListView(LoginRequiredMixin, ListView):
+    model = LayananNaikPangkat
+    template_name = 'layanan_pangkat/list.html'
+    context_object_name = 'usulan_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = (
+            LayananNaikPangkat.objects
+            .select_related('pegawai', 'layanan', 'sk_kp_terakhir', 'pendidikan')
+            .prefetch_related('kinerja_dua_thn', 'pak')
+            .order_by('-created_at')
+        )
+        if self.request.user.is_pangkat_admin:
+            return queryset
+        return queryset.filter(pegawai=self.request.user)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'card_title': 'Usulan Kenaikan Pangkat',
+            'title_page': 'Layanan Kenaikan Pangkat',
+            'layanan': 'active',
+            'selected': 'yanpangkat',
+        })
+        return context
+
+
+class LayananNaikPangkatCreateView(LoginRequiredMixin, CreateView):
+    model = LayananNaikPangkat
+    form_class = LayananNaikPangkatForm
+    template_name = 'layanan_pangkat/form.html'
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
+
+    def form_valid(self, form):
+        layanan = JenisLayanan.objects.filter(url='yanpangkat', status=True).first()
+        if not layanan:
+            form.add_error(None, 'Jenis layanan kenaikan pangkat belum dikonfigurasi.')
+            return self.form_invalid(form)
+
+        form.instance.pegawai = self.request.user
+        form.instance.layanan = layanan
+        form.instance.status = 'pengajuan'
+        form.instance.is_read = False
+        response = super().form_valid(form)
+        messages.success(self.request, 'Usulan kenaikan pangkat berhasil dikirim.')
+        return response
+
+    def get_success_url(self):
+        return reverse('layanan_urls:layanan_pangkat_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'card_title': 'Ajukan Kenaikan Pangkat',
+            'title_page': 'Layanan Kenaikan Pangkat',
+            'layanan': 'active',
+            'selected': 'yanpangkat',
+        })
+        return context
+
+
+class LayananNaikPangkatUpdateView(LoginRequiredMixin, UpdateView):
+    model = LayananNaikPangkat
+    form_class = LayananNaikPangkatForm
+    template_name = 'layanan_pangkat/form.html'
+
+    def get_queryset(self):
+        return LayananNaikPangkat.objects.filter(
+            pegawai=self.request.user,
+            status='pengajuan',
+        )
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
+
+    def form_valid(self, form):
+        form.instance.pegawai = self.request.user
+        form.instance.is_read = False
+        messages.success(self.request, 'Usulan kenaikan pangkat berhasil diperbarui.')
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse('layanan_urls:layanan_pangkat_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'card_title': 'Ubah Usulan Kenaikan Pangkat',
+            'title_page': 'Layanan Kenaikan Pangkat',
+            'layanan': 'active',
+            'selected': 'yanpangkat',
+        })
+        return context
+
+
+class LayananNaikPangkatDetailView(LoginRequiredMixin, DetailView):
+    model = LayananNaikPangkat
+    template_name = 'layanan_pangkat/detail.html'
+    context_object_name = 'usulan'
+
+    def get_queryset(self):
+        queryset = (
+            LayananNaikPangkat.objects
+            .select_related(
+                'pegawai', 'layanan', 'sk_kp_terakhir', 'sk_jabfung',
+                'pendidikan', 'pengangkatan', 'mutasi',
+            )
+            .prefetch_related('kinerja_dua_thn', 'pak', 'riwayatpanggol_set')
+        )
+        if self.request.user.is_pangkat_admin:
+            return queryset
+        return queryset.filter(pegawai=self.request.user)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'hasil_pangkat': self.object.riwayatpanggol_set.order_by('-id').first(),
+            'card_title': 'Detail Usulan Kenaikan Pangkat',
+            'title_page': 'Layanan Kenaikan Pangkat',
+            'layanan': 'active',
+            'selected': 'yanpangkat',
+        })
+        return context
+
+
+class LayananNaikPangkatProcessView(
+    LoginRequiredMixin, UserPassesTestMixin, FormView
+):
+    form_class = RiwayatPanggolHasilLayananForm
+    template_name = 'layanan_pangkat/process.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.usulan = get_object_or_404(
+            LayananNaikPangkat.objects.select_related('pegawai', 'layanan'),
+            pk=kwargs['pk'],
+        )
+        self.hasil = self.usulan.riwayatpanggol_set.order_by('-id').first()
+        return super().dispatch(request, *args, **kwargs)
+
+    def test_func(self):
+        return self.request.user.is_pangkat_admin
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['instance'] = self.hasil
+        return kwargs
+
+    def form_valid(self, form):
+        dokumen = DokumenSDM.objects.filter(
+            Q(url='panggol') | Q(url='pangkat')
+        ).first()
+        if not dokumen:
+            form.add_error(None, 'Jenis dokumen riwayat pangkat belum dikonfigurasi.')
+            return self.form_invalid(form)
+
+        old_file = None
+        if self.hasil and self.hasil.file and 'file' in self.request.FILES:
+            old_file = (self.hasil.file.storage, self.hasil.file.name)
+
+        with transaction.atomic():
+            hasil = form.save(commit=False)
+            hasil.pegawai = self.usulan.pegawai
+            hasil.dokumen = dokumen
+            hasil.usulan = self.usulan
+            hasil.save()
+
+            self.usulan.status = 'selesai'
+            self.usulan.is_read = False
+            self.usulan.save(update_fields=['status', 'is_read', 'updated_at'])
+
+            if old_file and old_file[1] != hasil.file.name:
+                transaction.on_commit(
+                    lambda storage=old_file[0], name=old_file[1]: storage.delete(name),
+                    robust=True,
+                )
+
+        messages.success(
+            self.request,
+            'Hasil kenaikan pangkat berhasil disimpan ke Riwayat Pangkat/Golongan.',
+        )
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse(
+            'layanan_urls:layanan_pangkat_detail',
+            kwargs={'pk': self.usulan.pk},
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'usulan': self.usulan,
+            'hasil_pangkat': self.hasil,
+            'card_title': 'Proses Kenaikan Pangkat',
+            'title_page': 'Layanan Kenaikan Pangkat',
+            'layanan': 'active',
+            'selected': 'yanpangkat',
+        })
+        return context
+
+
+class LayananNaikJabatanListView(LoginRequiredMixin, ListView):
+    model = LayananNaikJabatan
+    template_name = 'layanan_jabatan/list.html'
+    context_object_name = 'usulan_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = (
+            LayananNaikJabatan.objects
+            .select_related('pegawai', 'layanan', 'kompetensi', 'pendidikan', 'pak')
+            .prefetch_related('kinerja_dua_thn')
+            .order_by('-created_at')
+        )
+        if self.request.user.is_jabatan_admin:
+            return queryset
+        return queryset.filter(pegawai=self.request.user)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'card_title': 'Usulan Kenaikan Jabatan',
+            'title_page': 'Layanan Kenaikan Jabatan',
+            'layanan': 'active',
+            'selected': 'yanjabatan',
+        })
+        return context
+
+
+class LayananNaikJabatanCreateView(LoginRequiredMixin, CreateView):
+    model = LayananNaikJabatan
+    form_class = LayananNaikJabatanForm
+    template_name = 'layanan_jabatan/form.html'
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
+
+    def form_valid(self, form):
+        layanan = JenisLayanan.objects.filter(url='yanjabatan', status=True).first()
+        if not layanan:
+            form.add_error(None, 'Jenis layanan kenaikan jabatan belum dikonfigurasi.')
+            return self.form_invalid(form)
+
+        form.instance.pegawai = self.request.user
+        form.instance.layanan = layanan
+        form.instance.status = 'pengajuan'
+        form.instance.is_read = False
+        response = super().form_valid(form)
+        messages.success(self.request, 'Usulan kenaikan jabatan berhasil dikirim.')
+        return response
+
+    def get_success_url(self):
+        return reverse('layanan_urls:layanan_jabatan_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'card_title': 'Ajukan Kenaikan Jabatan',
+            'title_page': 'Layanan Kenaikan Jabatan',
+            'layanan': 'active',
+            'selected': 'yanjabatan',
+        })
+        return context
+
+
+class LayananNaikJabatanUpdateView(LoginRequiredMixin, UpdateView):
+    model = LayananNaikJabatan
+    form_class = LayananNaikJabatanForm
+    template_name = 'layanan_jabatan/form.html'
+
+    def get_queryset(self):
+        return LayananNaikJabatan.objects.filter(
+            pegawai=self.request.user,
+            status='pengajuan',
+        )
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
+
+    def form_valid(self, form):
+        form.instance.pegawai = self.request.user
+        form.instance.is_read = False
+        messages.success(self.request, 'Usulan kenaikan jabatan berhasil diperbarui.')
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse('layanan_urls:layanan_jabatan_detail', kwargs={'pk': self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'card_title': 'Ubah Usulan Kenaikan Jabatan',
+            'title_page': 'Layanan Kenaikan Jabatan',
+            'layanan': 'active',
+            'selected': 'yanjabatan',
+        })
+        return context
+
+
+class LayananNaikJabatanDetailView(LoginRequiredMixin, DetailView):
+    model = LayananNaikJabatan
+    template_name = 'layanan_jabatan/detail.html'
+    context_object_name = 'usulan'
+
+    def get_queryset(self):
+        queryset = (
+            LayananNaikJabatan.objects
+            .select_related(
+                'pegawai', 'layanan', 'kompetensi', 'pendidikan',
+                'str_profesi', 'pak',
+            )
+            .prefetch_related('kinerja_dua_thn', 'riwayatjabatan_set')
+        )
+        if self.request.user.is_jabatan_admin:
+            return queryset
+        return queryset.filter(pegawai=self.request.user)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'hasil_jabatan': self.object.riwayatjabatan_set.order_by('-id').first(),
+            'card_title': 'Detail Usulan Kenaikan Jabatan',
+            'title_page': 'Layanan Kenaikan Jabatan',
+            'layanan': 'active',
+            'selected': 'yanjabatan',
+        })
+        return context
+
+
+class LayananNaikJabatanProcessView(
+    LoginRequiredMixin, UserPassesTestMixin, FormView
+):
+    form_class = RiwayatJabatanHasilLayananForm
+    template_name = 'layanan_jabatan/process.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.usulan = get_object_or_404(
+            LayananNaikJabatan.objects.select_related('pegawai', 'layanan'),
+            pk=kwargs['pk'],
+        )
+        self.hasil = self.usulan.riwayatjabatan_set.order_by('-id').first()
+        return super().dispatch(request, *args, **kwargs)
+
+    def test_func(self):
+        return self.request.user.is_jabatan_admin
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['instance'] = self.hasil
+        return kwargs
+
+    def form_valid(self, form):
+        dokumen = DokumenSDM.objects.filter(url='jabatan').first()
+        if not dokumen:
+            form.add_error(None, 'Jenis dokumen riwayat jabatan belum dikonfigurasi.')
+            return self.form_invalid(form)
+
+        old_file = None
+        if self.hasil and self.hasil.file and 'file' in self.request.FILES:
+            old_file = (self.hasil.file.storage, self.hasil.file.name)
+
+        with transaction.atomic():
+            hasil = form.save(commit=False)
+            hasil.pegawai = self.usulan.pegawai
+            hasil.dokumen = dokumen
+            hasil.usulan = self.usulan
+            hasil.save()
+            form.save_m2m()
+
+            self.usulan.status = 'selesai'
+            self.usulan.is_read = False
+            self.usulan.save(update_fields=['status', 'is_read', 'updated_at'])
+
+            if old_file and old_file[1] != hasil.file.name:
+                transaction.on_commit(
+                    lambda storage=old_file[0], name=old_file[1]: storage.delete(name),
+                    robust=True,
+                )
+
+        messages.success(
+            self.request,
+            'Hasil kenaikan jabatan berhasil disimpan ke Riwayat Jabatan.',
+        )
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse(
+            'layanan_urls:layanan_jabatan_detail',
+            kwargs={'pk': self.usulan.pk},
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'usulan': self.usulan,
+            'hasil_jabatan': self.hasil,
+            'card_title': 'Proses Kenaikan Jabatan',
+            'title_page': 'Layanan Kenaikan Jabatan',
+            'layanan': 'active',
+            'selected': 'yanjabatan',
+        })
+        return context

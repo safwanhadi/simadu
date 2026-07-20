@@ -43,7 +43,7 @@ Layanan cuti
                         <div class="row" id="form_data">
                             <div class="col-md-12">
                                 <div class="row">
-                                    {% if not request.user.is_superuser %}
+                                    {% if not request.user.is_cuti_admin %}
                                     <div class="col-md-12 border border-success border-block rounded p-2" style="background-color: rgb(164, 233, 176);">
                                         {% if cek_sisa_cuti > 0 %}
                                             <span>Sisa cuti tahunan anda {{cek_sisa_cuti}} hari</span>
@@ -67,7 +67,7 @@ Layanan cuti
                                                         <th>Tanggal Cuti</th>
                                                         <th>Tahun Cuti</th>
                                                         <th>Lama Cuti</th>
-                                                        {% if request.user.is_superuser %}
+                                                        {% if request.user.is_cuti_admin %}
                                                         <th>Cuti Tunda</th>
                                                         {% endif %}
                                                         <th>Aksi</th>
@@ -81,7 +81,7 @@ Layanan cuti
                                                         <td>{{item.cuti.jenis_cuti}}</td>
                                                         <td>{{item.cuti.tahun_cuti}}</td>
                                                         <td>{{item.cuti.lama_cuti}}</td>
-                                                        {% if request.user.is_superuser %}
+                                                        {% if request.user.is_cuti_admin %}
                                                         <td>
                                                             {% if item.cuti_tunda == True %}
                                                             <i class="fas fa-check-circle text-success"></i>
@@ -92,7 +92,7 @@ Layanan cuti
                                                         {% endif %}
                                                         <td>
                                                             <a href="{% url 'layanan_urls:layanan_ambil_cuti_tunda_view' pk=item.cuti.id %}" class="btn btn-outline-info">Ambil cuti</a>
-                                                            {% if request.user.is_superuser %}
+                                                            {% if request.user.is_cuti_admin %}
                                                             <a href="{% url 'layanan_urls:layanan_update_cuti_tunda_view' pk=item.cuti.id %}" class="btn btn-outline-warning">Update cuti</a>
                                                             {% endif %}
                                                         </td>

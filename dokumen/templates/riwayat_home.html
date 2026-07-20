@@ -6,17 +6,151 @@
 {{title_page}}
 {% endblock title_page %}
 
+{% block styles %}
+{{ block.super }}
+<style>
+    .employee-file-card {
+        border: 0;
+        border-radius: 14px;
+        box-shadow: 0 8px 24px rgba(31, 45, 61, .08);
+        overflow: hidden;
+    }
+    .employee-file-card .card-header {
+        background: linear-gradient(135deg, #0bc4c4, #19a4a8);
+        color: #fff;
+        border: 0;
+        padding: 1rem 1.1rem;
+    }
+    .employee-file-card .card-title { font-weight: 600; }
+    .employee-file-count {
+        background: rgba(255, 255, 255, .18);
+        border: 1px solid rgba(255, 255, 255, .3);
+        border-radius: 999px;
+        font-size: .72rem;
+        padding: .25rem .55rem;
+    }
+    .employee-file-group + .employee-file-group { border-top: 1px solid #edf1f5; }
+    .employee-file-category {
+        align-items: center;
+        background: #f6f8fb;
+        color: #667085;
+        display: flex;
+        font-size: .68rem;
+        font-weight: 700;
+        justify-content: space-between;
+        letter-spacing: .08em;
+        padding: .55rem 1rem;
+        text-transform: uppercase;
+    }
+    .employee-file-link {
+        align-items: center;
+        color: #344054;
+        display: flex;
+        gap: .7rem;
+        padding: .72rem 1rem;
+        transition: background-color .2s ease, transform .2s ease;
+    }
+    .employee-file-link + .employee-file-link { border-top: 1px solid #f0f2f5; }
+    .employee-file-link:hover {
+        background: #f0f9fa;
+        color: #117a80;
+        text-decoration: none;
+        transform: translateX(3px);
+    }
+    .employee-file-icon {
+        align-items: center;
+        background: #e6f5f6;
+        border-radius: 10px;
+        color: #168b90;
+        display: inline-flex;
+        flex: 0 0 36px;
+        height: 36px;
+        justify-content: center;
+    }
+    .employee-file-label { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+    .employee-file-label strong { font-size: .83rem; line-height: 1.2; }
+    .employee-file-label small { color: #98a2b3; font-size: .7rem; margin-top: .15rem; }
+    .employee-file-action { color: #b7c0cc; font-size: .7rem; }
+    .employee-file-empty { color: #667085; padding: 2rem 1.25rem; text-align: center; }
+    .employee-file-empty-icon {
+        align-items: center;
+        background: #f2f4f7;
+        border-radius: 50%;
+        color: #98a2b3;
+        display: inline-flex;
+        font-size: 1.4rem;
+        height: 52px;
+        justify-content: center;
+        margin-bottom: .75rem;
+        width: 52px;
+    }
+    .employee-file-empty h6 { color: #344054; font-weight: 600; }
+    .employee-file-empty p { font-size: .78rem; margin: 0; }
+    .document-status-legend {
+        align-items: center;
+        background: #f8fafc;
+        border: 1px solid #e4e9f0;
+        border-radius: 10px;
+        color: #475467;
+        display: flex;
+        flex-wrap: wrap;
+        font-size: .76rem;
+        gap: .55rem 1rem;
+        margin-bottom: 1rem;
+        padding: .7rem .85rem;
+    }
+    .document-status-legend-title { color: #344054; font-weight: 700; }
+    .document-status-legend-item { align-items: center; display: inline-flex; gap: .4rem; }
+    .document-status-color {
+        border: 1px solid rgba(0, 0, 0, .08);
+        border-radius: 4px;
+        display: inline-block;
+        flex: 0 0 16px;
+        height: 16px;
+        width: 16px;
+    }
+    .document-status-color-danger { background-color: #dc3545; }
+    .document-status-color-info { background-color: #17a2b8; }
+</style>
+{% endblock styles %}
+
 {% block subcontent %}
 <div class="row">
-    <div class="{% if not request.user.is_superuser or not request.user.is_staff %} col-md-9 {% else %} col-md-12 {% endif %}">
+    <div class="{% if request.user.is_dokumen_admin %} col-md-12 {% else %} col-md-9 {% endif %}">
         <div class="card card-solid">
             <div class="card-body pb-0">
+                {% if employment_record_missing %}
+                <div class="alert alert-warning">
+                    Status kepegawaian belum ditetapkan. Lengkapi Riwayat Pengangkatan terlebih dahulu agar daftar dokumen wajib dapat ditentukan.
+                </div>
+                {% else %}
+                <div class="d-flex justify-content-end mb-2">
+                    <span class="badge badge-secondary">Status Pegawai: {{ employment_status }}</span>
+                </div>
+                {% endif %}
+                <div class="document-status-legend" aria-label="Keterangan warna status dokumen">
+                    <span class="document-status-legend-title">
+                        <i class="fas fa-info-circle mr-1"></i>Keterangan:
+                    </span>
+                    <span class="document-status-legend-item">
+                        <span class="document-status-color document-status-color-danger"></span>
+                        Merah: dokumen wajib masih kosong
+                    </span>
+                    <span class="document-status-legend-item">
+                        <span class="document-status-color document-status-color-info"></span>
+                        Biru: data tersedia atau dokumen opsional
+                    </span>
+                    <span class="document-status-legend-item">
+                        <span class="badge badge-light border">Opsional</span>
+                        Tidak wajib diisi dan tidak ditandai merah saat kosong
+                    </span>
+                </div>
                 <div class="row d-flex flex-sm-wrap">
                     {% for dok in jenis_dok %}
                     {% if dok.url == 'jabatan' %}
-                        {% if request.user.is_superuser %}
-                            <a href="{{dok.url}}?jabatan=struktural" class="col-sm-3">
-                                <div class="small-box-sisdm bg-info p-2">
+                        {% if request.user.is_dokumen_admin %}
+                            <a href="{{dok.url}}?jabatan=struktural{% if nip %}&amp;nip={{ nip|urlencode }}{% endif %}" class="col-sm-3">
+                                <div class="small-box-sisdm {% if dok.is_empty %}bg-danger{% else %}bg-info{% endif %} p-2"{% if dok.is_empty %} title="Dokumen masih kosong"{% endif %}>
                                     <div class="inner">
                                         <div class="icon" style="width: 100%;">
                                             <i class="fas {{dok.icon}}"></i>
@@ -28,8 +162,8 @@
                                 </div>
                             </a>
                         {% else %}
-                            <a href="{{dok.url}}" class="col-sm-3">
-                                <div class="small-box-sisdm bg-info p-2">
+                            <a href="{{dok.url}}{% if nip %}?nip={{ nip|urlencode }}{% endif %}" class="col-sm-3">
+                                <div class="small-box-sisdm {% if dok.is_empty %}bg-danger{% else %}bg-info{% endif %} p-2"{% if dok.is_empty %} title="Dokumen masih kosong"{% endif %}>
                                     <div class="inner">
                                         <div class="icon" style="width: 100%;">
                                             <i class="fas {{dok.icon}}"></i>
@@ -43,7 +177,7 @@
                         {% endif %}
                     {% elif dok.url == 'disiplin' %}
                     <a href="{% url 'disiplinsdm_urls:jadwal_list' %}" class="col-sm-3">
-                        <div class="small-box-sisdm bg-info p-2">
+                        <div class="small-box-sisdm {% if dok.is_empty %}bg-danger{% else %}bg-info{% endif %} p-2"{% if dok.is_empty %} title="Dokumen masih kosong"{% endif %}>
                             <div class="inner">
                                 <div class="icon" style="width: 100%;">
                                     <i class="fas {{dok.icon}}"></i>
@@ -55,8 +189,8 @@
                         </div>
                     </a>
                     {% else %}
-                    <a href="{{dok.url}}" class="col-sm-3">
-                        <div class="small-box-sisdm bg-info p-1">
+                    <a href="{{dok.url}}{% if nip %}?nip={{ nip|urlencode }}{% endif %}" class="col-sm-3">
+                        <div class="small-box-sisdm {% if dok.is_empty %}bg-danger{% else %}bg-info{% endif %} p-1"{% if dok.is_empty %} title="Dokumen masih kosong"{% endif %}>
                             <div class="inner">
                                 <div class="icon" style="width:100%;">
                                     <i class="fas {{dok.icon}}"></i>
@@ -74,11 +208,23 @@
         </div>        
     </div>
    
-    {% if not request.user.is_superuser or not request.user.is_staff %}
+    {% if not request.user.is_dokumen_admin %}
     <div class="col-md-3">
-        <div class="card card-solid">
-            <h5 class="text-center mt-3">Daftar File Kepegawaian</h5>
+        <div class="card employee-file-card">
+            <div class="card-header d-flex align-items-center">
+                <div>
+                    <div class="card-title mb-0">
+                        <i class="fas fa-folder-open mr-2"></i>File Kepegawaian
+                    </div>
+                    <small class="d-block mt-1" style="opacity:.82;">Dokumen utama siap dibuka</small>
+                </div>
+                <span class="employee-file-count ml-auto">
+                    {{ file_kepeg.links|length }} file
+                </span>
+            </div>
+            <div class="card-body p-0">
             {% include 'link_file_pegawai.html' %}
+            </div>
         </div>
     </div>
     {% endif %}

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import ProfilSDM, Users, Gender, ProfilAdmin
+from .models import AccountRegistration, ProfilSDM, Users, Gender, ProfilAdmin, TelegramAccount
 from django import forms
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 # from.models import ExtendedUser
@@ -35,8 +35,8 @@ class UserAdmin(BaseUserAdmin):
     # the fields to be used in displaying the user model
     # these override the definitions on the base useradmin
     # that refrence specific fields on auth.user
-    list_display = ('email', 'first_name', 'last_name', 'is_active',)
-    list_filter = ('is_staff', 'is_superuser')
+    list_display = ('email', 'first_name', 'last_name', 'admin_groups', 'is_active',)
+    list_filter = ('groups', 'is_staff', 'is_superuser')
     fieldsets = (
         (None, {'fields': ('email', 'password', 'first_name', 'last_name')}),
         ('Permissions', {'fields': ('is_active', 'is_guest', 'is_staff', 'is_superuser', 'groups', 'user_permissions',)})
@@ -56,6 +56,13 @@ class UserAdmin(BaseUserAdmin):
     
     class Meta:
         model = Users
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related('groups')
+
+    @admin.display(description='Grup Admin')
+    def admin_groups(self, obj):
+        return ', '.join(group.name for group in obj.groups.all()) or '-'
     
     
 class DetailProfilSDM(admin.ModelAdmin):
@@ -67,4 +74,28 @@ admin.site.register(Users, UserAdmin)
 admin.site.register(ProfilSDM, DetailProfilSDM)
 admin.site.register(Gender)
 admin.site.register(ProfilAdmin)
+
+
+@admin.register(TelegramAccount)
+class TelegramAccountAdmin(admin.ModelAdmin):
+    list_display = (
+        'user', 'telegram_user_id', 'telegram_username', 'phone_number',
+        'verified_at', 'last_reset_requested_at',
+    )
+    search_fields = (
+        'user__email', 'user__first_name', 'user__last_name',
+        'telegram_username', 'phone_number',
+    )
+    readonly_fields = ('verified_at', 'created_at', 'updated_at')
 #
+
+
+@admin.register(AccountRegistration)
+class AccountRegistrationAdmin(admin.ModelAdmin):
+    list_display = ('user', 'status', 'submitted_at', 'reviewed_at', 'reviewed_by')
+    list_filter = ('status',)
+    search_fields = (
+        'user__email', 'user__first_name', 'user__last_name',
+        'user__profil_user__nip',
+    )
+    readonly_fields = ('submitted_at', 'reviewed_at', 'reviewed_by')

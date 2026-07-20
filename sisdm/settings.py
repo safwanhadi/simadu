@@ -69,6 +69,27 @@ INSTALLED_APPS = [
 ]
 
 AUTH_USER_MODEL = 'myaccount.Users'
+
+# Kontak publik yang ditampilkan pada halaman Kebijakan Privasi. Isi variabel
+# PRIVACY_CONTACT_EMAIL di environment production dengan alamat resmi pengelola.
+PRIVACY_CONTACT_EMAIL = config('PRIVACY_CONTACT_EMAIL', default='')
+
+# Integrasi Bot Telegram untuk pemulihan password. Rahasia hanya disimpan di
+# environment dan tidak boleh ditulis langsung ke source code.
+TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='')
+TELEGRAM_BOT_USERNAME = config('TELEGRAM_BOT_USERNAME', default='')
+TELEGRAM_WEBHOOK_SECRET = config('TELEGRAM_WEBHOOK_SECRET', default='')
+TELEGRAM_PUBLIC_BASE_URL = config(
+    'TELEGRAM_PUBLIC_BASE_URL',
+    default='http://127.0.0.1:8000',
+).rstrip('/')
+TELEGRAM_RESET_COOLDOWN = 60
+PASSWORD_RESET_TIMEOUT = 30 * 60
+SIP_EXPIRY_REMINDER_MONTHS = config(
+    'SIP_EXPIRY_REMINDER_MONTHS',
+    default=6,
+    cast=int,
+)
 # Menggantikan ACCOUNT_AUTHENTICATION_METHOD
 # Gunakan format baru ini:
 ACCOUNT_SIGNUP_FIELDS = ['email*']
@@ -110,6 +131,8 @@ TEMPLATES = [
                 'dashboard.context_processors.menu_layanan_sdm',
                 'dashboard.context_processors.notifikasi_layanan',
                 'dashboard.context_processors.runningtext',
+                'dokumen.context_processors.document_quick_navigation',
+                'dokumen.context_processors.document_admin_selected_employee',
             ],
         },
     },
@@ -168,9 +191,22 @@ SITE_ID = 1
 
 # Agar Allauth tidak membuat user baru secara otomatis di level dasar
 SOCIALACCOUNT_ADAPTER = 'myaccount.adapters.RestrictToExistingUserAdapter'
+LOGIN_REDIRECT_URL = '/accounts/sso/'
 
 SOCIALACCOUNT_QUERY_EMAIL = True
 SOCIALACCOUNT_SESSION_STORE = True
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        # Google memverifikasi kepemilikan email. Izinkan email tersebut
+        # mengautentikasi user lokal yang sudah terdaftar dan hubungkan akun
+        # sosialnya agar login berikutnya menggunakan identitas Google (sub).
+        'EMAIL_AUTHENTICATION': True,
+        'EMAIL_AUTHENTICATION_AUTO_CONNECT': True,
+        'SCOPE': ['profile', 'email'],
+        'AUTH_PARAMS': {'access_type': 'online'},
+        'OAUTH_PKCE_ENABLED': True,
+    },
+}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (

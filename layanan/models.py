@@ -42,31 +42,20 @@ class JenisLayanan(models.Model):
     nama = models.CharField(max_length=100)
     status = models.BooleanField(default=False)
     icon = models.CharField(max_length=50, blank=True)
-    url = models.CharField(max_length=50, blank=True)
+    url = models.CharField(max_length=50, blank=True, null=True, unique=True)
 
     def __str__(self):
         return self.nama
 
 STATUS = (
-    ('belum', 'belum'),
-    ('pengajuan', 'pengajuan'),
-    ('proses', 'proses'),
-    ('selesai', 'selesai')
+    ('belum', 'Belum diproses'),
+    ('pengajuan', 'Pengajuan'),
+    ('proses', 'Proses'),
+    ('selesai', 'Selesai')
 )
 
-# class LayananTubel(models.Model):
-#     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
-#     layanan = models.ForeignKey('JenisLayanan', on_delete=models.SET_NULL, null=True)
-#     status = models.CharField(max_length=50, default='belum', choices=STATUS)
 
-
-# class LayananPenyesuaianPendidikan(models.Model):
-#     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
-#     layanan = models.ForeignKey('JenisLayanan', on_delete=models.SET_NULL, null=True)
-#     status = models.CharField(max_length=50, default='belum', choices=STATUS)
-
-
-class LayananPengakuanGelar(models.Model):
+class LayananPencantumanGelar(models.Model):
     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
     layanan = models.ForeignKey('JenisLayanan', on_delete=models.SET_NULL, null=True)
     pendidikan = models.ForeignKey(RiwayatPendidikan, on_delete=models.CASCADE)
@@ -97,140 +86,102 @@ class LayananGajiBerkala(models.Model):
         return f'{self.pegawai} ({self.layanan} - {data}) - {self.status}'
 
 
-class LayananPenerbitanPAK(models.Model):
+# syarat kenaikan pangkat
+# struktural dan pelaksana: SKP dua tahun terakhir, sk pangkat terakhir, ijazah dan transkrip, sk pns dan cpns
+# fungsional --> syarat pelaksana + PAK (semua pak) + SK Jabatan Fungsional
+class LayananNaikPangkat(models.Model):
     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
-    layanan = models.ForeignKey('JenisLayanan', on_delete=models.SET_NULL, null=True)
-    kinerja = models.ForeignKey(RiwayatKinerja, on_delete=models.SET_NULL, null=True)
+    layanan = models.ForeignKey('JenisLayanan', on_delete=models.CASCADE)
+    sk_kp_terakhir = models.ForeignKey('dokumen.RiwayatPanggol', on_delete=models.SET_NULL, null=True)
+    kinerja_dua_thn = models.ManyToManyField('dokumen.RiwayatKinerja', blank=True)
+    sk_jabfung = models.ForeignKey('dokumen.RiwayatJabatan', on_delete=models.SET_NULL, null=True, blank=True, help_text="Khusus Pejabat Fungsional")
+    pak = models.ManyToManyField('dokumen.RiwayatPAK', blank=True, help_text="Khusus Pejabat Fungsional")
+    pendidikan = models.ForeignKey('dokumen.RiwayatPendidikan', on_delete=models.SET_NULL, null=True)
+    pengangkatan = models.ForeignKey('dokumen.RiwayatPengangkatan', on_delete=models.SET_NULL, null=True)
+    mutasi = models.ForeignKey('dokumen.RiwayatBekerja', on_delete=models.SET_NULL, null=True, blank=True)
     status = models.CharField(max_length=50, default='belum', choices=STATUS)
+    is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f'{self.pegawai.full_name} ({self.layanan} - {self.status})'
 
-
-class LayananKenaikanPangkat(models.Model):
+# PAK terakhir, SKP dua tahun, sertifikat kompetensi, STR
+class LayananNaikJabatan(models.Model):
     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
     layanan = models.ForeignKey('JenisLayanan', on_delete=models.SET_NULL, null=True)
-    jabatan = models.ForeignKey(RiwayatJabatan, on_delete=models.SET_NULL, null=True)
+    kinerja_dua_thn = models.ManyToManyField('dokumen.RiwayatKinerja', blank=True)
+    kompetensi = models.ForeignKey('dokumen.UjiKompetensi', on_delete=models.SET_NULL, null=True)
+    pendidikan = models.ForeignKey('dokumen.RiwayatPendidikan', on_delete=models.SET_NULL, null=True, blank=True)
+    str_profesi = models.ForeignKey('dokumen.RiwayatProfesi', on_delete=models.SET_NULL, null=True, blank=True)
+    pak = models.ForeignKey('dokumen.RiwayatPAK', on_delete=models.SET_NULL, null=True)
     status = models.CharField(max_length=50, default='belum', choices=STATUS)
+    is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f'{self.pegawai.full_name} ({self.layanan} - {self.status})'
 
-
-class KenaikanPangkatJabFungsional(models.Model):
-    jenis_kp = models.ForeignKey('LayananKenaikanPangkat', on_delete=models.CASCADE)
-    sk_kp_terakhir = models.ForeignKey(RiwayatPanggol, on_delete=models.SET_NULL, null=True)
-    kinerja_dua_thn = models.ManyToManyField(RiwayatKinerja, through='KinerjaKenaikanPangkatJafung', blank=True)
-    pak = models.ForeignKey(RiwayatPAK, on_delete=models.SET_NULL, null=True)
-    pendidikan = models.ForeignKey(RiwayatPendidikan, on_delete=models.SET_NULL, null=True)
-    pengangkatan = models.ForeignKey(RiwayatPengangkatan, on_delete=models.SET_NULL, null=True)
-    mutasi = models.ForeignKey(RiwayatBekerja, on_delete=models.SET_NULL, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return self.jenis_kp
-
-
-#tabeltengah
-class KinerjaKenaikanPangkatJafung(models.Model):
-    kenaikan_pangkat = models.ForeignKey(KenaikanPangkatJabFungsional, on_delete=models.CASCADE)
-    kinerja = models.ForeignKey(RiwayatKinerja, on_delete=models.SET_NULL, null=True)
-
-
-class KenaikanPangkatJabStruktural(models.Model):
-    jenis_kp = models.ForeignKey('LayananKenaikanPangkat', on_delete=models.CASCADE)
-    sk_kp_terakhir = models.ForeignKey(RiwayatPanggol, on_delete=models.SET_NULL, null=True)
-    kinerja_dua_thn = models.ManyToManyField(RiwayatKinerja, through='KinerjaKenaikanPangkatStruktural')
-    diklat = models.ForeignKey(RiwayatDiklat, on_delete=models.SET_NULL, null=True)
-    pendidikan = models.ForeignKey(RiwayatPendidikan, on_delete=models.SET_NULL, null=True)
-    pengangkatan = models.ForeignKey(RiwayatPengangkatan, on_delete=models.SET_NULL, null=True)
-    mutasi = models.ForeignKey(RiwayatBekerja, on_delete=models.SET_NULL, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return self.jenis_kp
-
-
-#tabeltengah
-class KinerjaKenaikanPangkatStruktural(models.Model):
-    kenaikan_pangkat = models.ForeignKey(KenaikanPangkatJabStruktural, on_delete=models.CASCADE)
-    kinerja = models.ForeignKey(RiwayatKinerja, on_delete=models.SET_NULL, null=True)
-
-
-class KenaikanPangkatJabPelaksana(models.Model):
-    jenis_kp = models.ForeignKey('LayananKenaikanPangkat', on_delete=models.CASCADE)
-    sk_kp_terakhir = models.ForeignKey(RiwayatPanggol, on_delete=models.SET_NULL, null=True)
-    kinerja_dua_thn = models.ManyToManyField(RiwayatKinerja, through='KinerjaKenaikanPangkatJabPelaksana')
-    pendidikan = models.ForeignKey(RiwayatPendidikan, on_delete=models.SET_NULL, null=True)
-    pengangkatan = models.ForeignKey(RiwayatPengangkatan, on_delete=models.SET_NULL, null=True)
-    mutasi = models.ForeignKey(RiwayatBekerja, on_delete=models.SET_NULL, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return self.jenis_kp
-
-
-#tabeltengah
-class KinerjaKenaikanPangkatJabPelaksana(models.Model):
-    kenaikan_pangkat = models.ForeignKey(KenaikanPangkatJabPelaksana, on_delete=models.CASCADE)
-    kinerja = models.ForeignKey(RiwayatKinerja, on_delete=models.SET_NULL, null=True)
-
-
-class LayananKenaikanJabatan(models.Model):
-    pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
-    layanan = models.ForeignKey('JenisLayanan', on_delete=models.SET_NULL, null=True)
-    jabatan = models.ForeignKey(RiwayatJabatan, on_delete=models.SET_NULL, null=True)
-    kinerja_dua_thn = models.ManyToManyField(RiwayatKinerja, through='KinerjaKenaikanJabFung')
-    kompetensi = models.ForeignKey(UjiKompetensi, on_delete=models.SET_NULL, null=True)
-    pak = models.ForeignKey(RiwayatPAK, on_delete=models.SET_NULL, null=True)
-    status = models.CharField(max_length=50, default='belum', choices=STATUS)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f'{self.pegawai.full_name} ({self.layanan} - {self.status})'
-    
-    
-#tabeltengah
-class KinerjaKenaikanJabFung(models.Model):
-    kenaikan_jabatan = models.ForeignKey(LayananKenaikanJabatan, on_delete=models.CASCADE)
-    kinerja = models.ForeignKey(RiwayatKinerja, on_delete=models.SET_NULL, null=True)
-
-
-# class LayananSTR(models.Model):
-#     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
-#     layanan = models.ForeignKey('JenisLayanan', on_delete=models.SET_NULL, null=True)
-#     status = models.CharField(max_length=50, default='belum', choices=STATUS)
-
-#     def __str__(self):
-#         return f'{self.layanan} - {self.status}'
 
 class LayananSIP(models.Model):
-    # ijazah, ktp, srt sehat, rekom profesi, rekom faskes, str, surat pernyataan praktik, pasfoto
     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
     layanan = models.ForeignKey('JenisLayanan', on_delete=models.SET_NULL, null=True)
-    ijazah = models.ForeignKey(RiwayatPendidikan, on_delete=models.SET_NULL, null=True) 
+    ijazah = models.ForeignKey(RiwayatPendidikan, on_delete=models.SET_NULL, null=True)
     str_profesi = models.ForeignKey(RiwayatProfesi, on_delete=models.SET_NULL, null=True)
-    rekom_profesi = models.FileField(upload_to='layanan/sip/rekom_pofesi/', validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
-    rekom_faskes = models.FileField(upload_to='layanan/sip/rekom_faskes/', validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
-    pernyataan_praktik = models.FileField(upload_to='layanan/sip/praktik/', validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
-    ket_sehat = models.FileField(upload_to='layanan/sip/sehat/', validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
-    pasfoto = models.FileField(upload_to='layanan/sip/foto/', validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
+    kecukupan_skp = models.FileField(
+        upload_to='layanan/sip/kecukupan_skp/',
+        validators=[validate_file_size],
+        help_text='Ukuran maksimal file 2.5MB',
+        blank=True
+    )
+    surat_permohonan_rekomendasi = models.FileField(
+        upload_to='layanan/sip/rekomendasi_sip/',
+        validators=[validate_file_size],
+        help_text='Ukuran maksimal file 2.5MB',
+        blank=True,
+        verbose_name='Surat Permohonan Rekomendasi SIP yang sudah ditandatangani dan bermeterai',
+    )
+    surat_rekomendasi_sip = models.FileField(
+        upload_to='layanan/sip/rekomendasi_sip/',
+        validators=[validate_file_size],
+        help_text='Ukuran maksimal file 2.5MB',
+        blank=True,
+        verbose_name='Surat Rekomendasi SIP yang Ditandatangani Pimpinan',
+    )
+    is_ktp = models.BooleanField(default=False)
+    is_foto = models.BooleanField(default=False)
+    is_read = models.BooleanField(default=False)
+
     status = models.CharField(max_length=50, default='belum', choices=STATUS)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    def cek_dokumen_profil(self):
+        profil = getattr(self.pegawai, 'profil_user', None)
+
+        self.is_ktp = bool(profil and profil.file_ktp)
+        self.is_foto = bool(profil and profil.foto)
+
+    def save(self, *args, **kwargs):
+        self.cek_dokumen_profil()
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f'{self.pegawai.full_name} ({self.layanan} - {self.status})'
-
-
+    
+    @property
+    def status_persyaratan(self):
+        return {
+            "ktp": self.is_ktp,
+            "foto": self.is_foto,
+            "ijazah": self.ijazah is not None,
+            "str": self.str_profesi is not None,
+            "skp": bool(self.kecukupan_skp),
+        }
+    
+    
 STATUS_CUTI = (
     ('draft', 'draft'),
     ('pengajuan', 'pengajuan'),

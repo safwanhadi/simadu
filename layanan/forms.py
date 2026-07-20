@@ -16,7 +16,12 @@ from .models import (
     VerifikasiCuti,
     VerifikasiDiklat,
     PelimpahanTugas,
+    LayananSIP,
+    LayananNaikPangkat,
+    LayananNaikJabatan,
+    validate_file_size,
     )
+
 from dokumen.forms import (
     RiwayatDiklatForm, 
     FormRiwayatDiklatLaporan, 
@@ -25,7 +30,6 @@ from dokumen.forms import (
     FormAlihanRiwayatDiklat,
     FormPenugasanDiklat,
     FormUsulanRiwayatDiklat,
-    
     RiwayatCutiForm,
     RiwayatPengajuanCutiForm,
 )
@@ -39,6 +43,14 @@ from dokumen.models import (
     RiwayatDiklat, 
     RiwayatInovasi,
     KlaimCutiTunda,
+    RiwayatKinerja,
+    RiwayatJabatan,
+    RiwayatPAK,
+    RiwayatPendidikan,
+    RiwayatPengangkatan,
+    RiwayatBekerja,
+    UjiKompetensi,
+    RiwayatProfesi,
 )
 from django.forms import inlineformset_factory, BaseInlineFormSet
 
@@ -47,6 +59,200 @@ class TinyMCEWidget(TinyMCE):
 		return False
 
 bootstrap_col = 'form-control col-md-12'
+select2_col = f'{bootstrap_col} select2'
+
+
+class LayananNaikPangkatForm(forms.ModelForm):
+    class Meta:
+        model = LayananNaikPangkat
+        fields = (
+            'pegawai', 'sk_kp_terakhir', 'kinerja_dua_thn', 'sk_jabfung', 'pak',
+            'pendidikan', 'pengangkatan', 'mutasi',
+        )
+        widgets = {
+            'pegawai': forms.Select(attrs={'class':select2_col}),
+            'sk_kp_terakhir': forms.Select(attrs={'class': select2_col}),
+            'kinerja_dua_thn': forms.SelectMultiple(attrs={'class': select2_col}),
+            'sk_jabfung': forms.Select(attrs={'class': select2_col}),
+            'pak': forms.SelectMultiple(attrs={'class': select2_col}),
+            'pendidikan': forms.Select(attrs={'class': select2_col}),
+            'pengangkatan': forms.Select(attrs={'class': select2_col}),
+            'mutasi': forms.Select(attrs={'class': select2_col}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        user = kwargs.pop('user', None)
+        super().__init__(*args, **kwargs)
+        if user and not user.is_pangkat_admin:
+            queryset = Users.objects.filter(pk=user.pk)
+            self.fields['pegawai'].queryset = queryset
+            self.fields['pegawai'].initial = queryset.first()
+            self.fields['pegawai'].widget = forms.HiddenInput()
+
+        self.fields['sk_kp_terakhir'].label = 'SK Kenaikan Pangkat Terakhir'
+        self.fields['kinerja_dua_thn'].label = 'SKP/Kinerja Dua Tahun Terakhir'
+        self.fields['kinerja_dua_thn'].required = True
+        self.fields['sk_jabfung'].label = 'SK Jabatan Fungsional'
+        self.fields['pak'].label = 'Penetapan Angka Kredit (PAK)'
+        self.fields['pendidikan'].label = 'Ijazah Pendidikan'
+        self.fields['pengangkatan'].label = 'SK Pengangkatan CPNS/PNS/PPPK'
+        self.fields['mutasi'].label = 'Riwayat Mutasi (jika ada)'
+
+        if not user:
+            for field_name in self.fields:
+                self.fields[field_name].queryset = self.fields[field_name].queryset.none()
+            return
+
+        self.fields['sk_kp_terakhir'].queryset = RiwayatPanggol.objects.filter(
+            pegawai=user
+        ).order_by('-tmt_gol', '-id')
+        self.fields['kinerja_dua_thn'].queryset = RiwayatKinerja.objects.filter(
+            pegawai=user
+        ).order_by('-periode_kinerja_akhir', '-id')
+        self.fields['sk_jabfung'].queryset = RiwayatJabatan.objects.filter(
+            pegawai=user
+        ).order_by('-tmt_jabatan', '-id')
+        self.fields['pak'].queryset = RiwayatPAK.objects.filter(
+            pegawai=user
+        ).order_by('-tgl_srt', '-id')
+        self.fields['pendidikan'].queryset = RiwayatPendidikan.objects.filter(
+            pegawai=user
+        ).order_by('-tgl_lulus', '-id')
+        self.fields['pengangkatan'].queryset = RiwayatPengangkatan.objects.filter(
+            pegawai=user
+        ).order_by('-tgl_srt_putusan', '-id')
+        self.fields['mutasi'].queryset = RiwayatBekerja.objects.filter(
+            pegawai=user
+        ).order_by('-tgl_mulai', '-id')
+
+    def clean_kinerja_dua_thn(self):
+        values = self.cleaned_data['kinerja_dua_thn']
+        if values.count() != 2:
+            raise forms.ValidationError('Pilih tepat dua dokumen kinerja tahunan terakhir.')
+        return values
+
+
+class RiwayatPanggolHasilLayananForm(forms.ModelForm):
+    class Meta:
+        model = RiwayatPanggol
+        fields = (
+            'panggol', 'masa_kerja_tahun', 'masa_kerja_bulan', 'tmt_gol',
+            'no_sk', 'tgl_sk', 'no_pertek_bkn', 'tgl_pertek_bkn', 'file',
+        )
+        widgets = {
+            'panggol': forms.Select(attrs={'class': select2_col}),
+            'masa_kerja_tahun': forms.NumberInput(attrs={'class': bootstrap_col, 'min': 0}),
+            'masa_kerja_bulan': forms.NumberInput(attrs={'class': bootstrap_col, 'min': 0, 'max': 11}),
+            'tmt_gol': forms.DateInput(attrs={'class': bootstrap_col, 'type': 'date'}),
+            'no_sk': forms.TextInput(attrs={'class': bootstrap_col}),
+            'tgl_sk': forms.DateInput(attrs={'class': bootstrap_col, 'type': 'date'}),
+            'no_pertek_bkn': forms.TextInput(attrs={'class': bootstrap_col}),
+            'tgl_pertek_bkn': forms.DateInput(attrs={'class': bootstrap_col, 'type': 'date'}),
+            'file': forms.FileInput(attrs={'class': 'form-control', 'accept': '.pdf,.jpg,.jpeg,.png'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['file'].required = not bool(self.instance and self.instance.pk and self.instance.file)
+
+    def clean_masa_kerja_bulan(self):
+        value = self.cleaned_data['masa_kerja_bulan']
+        if value < 0 or value > 11:
+            raise forms.ValidationError('Masa kerja bulan harus antara 0 sampai 11.')
+        return value
+
+
+class LayananNaikJabatanForm(forms.ModelForm):
+    class Meta:
+        model = LayananNaikJabatan
+        fields = (
+           'pegawai', 'kinerja_dua_thn', 'kompetensi', 'pendidikan',
+            'str_profesi', 'pak',
+        )
+        widgets = {
+            'pegawai': forms.Select(attrs={'class': select2_col}),
+            'kinerja_dua_thn': forms.SelectMultiple(attrs={'class': select2_col}),
+            'kompetensi': forms.Select(attrs={'class': select2_col}),
+            'pendidikan': forms.Select(attrs={'class': select2_col}),
+            'str_profesi': forms.Select(attrs={'class': select2_col}),
+            'pak': forms.Select(attrs={'class': select2_col}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        user = kwargs.pop('user', None)
+        super().__init__(*args, **kwargs)
+        if user and not user.is_jabatan_admin:
+            queryset = Users.objects.filter(pk=user.pk)
+            self.fields['pegawai'].queryset = queryset
+            self.fields['pegawai'].initial = queryset.first()
+            self.fields['pegawai'].widget=forms.HiddenInput()
+
+        self.fields['kinerja_dua_thn'].label = 'SKP/Kinerja Dua Tahun Terakhir'
+        self.fields['kinerja_dua_thn'].required = True
+        self.fields['kompetensi'].label = 'Sertifikat Uji Kompetensi'
+        self.fields['pendidikan'].label = 'Ijazah Pendidikan (jika diperlukan)'
+        self.fields['str_profesi'].label = 'STR Profesi (jika diperlukan)'
+        self.fields['pak'].label = 'Penetapan Angka Kredit (PAK) Terakhir'
+
+        if not user:
+            for field_name in self.fields:
+                self.fields[field_name].queryset = self.fields[field_name].queryset.none()
+            return
+
+        self.fields['kinerja_dua_thn'].queryset = RiwayatKinerja.objects.filter(
+            pegawai=user
+        ).order_by('-periode_kinerja_akhir', '-id')
+        self.fields['kompetensi'].queryset = UjiKompetensi.objects.filter(
+            pegawai=user
+        ).order_by('-tgl_sert_ujikomp', '-id')
+        self.fields['pendidikan'].queryset = RiwayatPendidikan.objects.filter(
+            pegawai=user
+        ).order_by('-tgl_lulus', '-id')
+        self.fields['str_profesi'].queryset = RiwayatProfesi.objects.filter(
+            pegawai=user
+        ).order_by('-tgl_str', '-id')
+        self.fields['pak'].queryset = RiwayatPAK.objects.filter(
+            pegawai=user
+        ).order_by('-tgl_srt', '-id')
+
+    def clean_kinerja_dua_thn(self):
+        values = self.cleaned_data['kinerja_dua_thn']
+        if values.count() != 2:
+            raise forms.ValidationError('Pilih tepat dua dokumen kinerja tahunan terakhir.')
+        return values
+
+
+class RiwayatJabatanHasilLayananForm(forms.ModelForm):
+    class Meta:
+        model = RiwayatJabatan
+        fields = (
+            'unor', 'bidang', 'sub_bidang', 'instalasi', 'jns_jabatan',
+            'jenjang_jabatan', 'nama_jabatan', 'detail_nama_jabatan',
+            'tmt_jabatan', 'tmt_pelantikan', 'no_sk', 'tgl_sk', 'file',
+        )
+        widgets = {
+            'unor': forms.Select(attrs={'class': select2_col}),
+            'bidang': forms.Select(attrs={'class': select2_col}),
+            'sub_bidang': forms.Select(attrs={'class': select2_col}),
+            'instalasi': forms.Select(attrs={'class': select2_col}),
+            'jns_jabatan': forms.Select(attrs={'class': select2_col}),
+            'jenjang_jabatan': forms.Select(attrs={'class': select2_col}),
+            'nama_jabatan': forms.Select(attrs={'class': select2_col}),
+            'detail_nama_jabatan': forms.TextInput(attrs={'class': bootstrap_col}),
+            'tmt_jabatan': forms.DateInput(attrs={'class': bootstrap_col, 'type': 'date'}),
+            'tmt_pelantikan': forms.DateInput(attrs={'class': bootstrap_col, 'type': 'date'}),
+            'no_sk': forms.TextInput(attrs={'class': bootstrap_col}),
+            'tgl_sk': forms.DateInput(attrs={'class': bootstrap_col, 'type': 'date'}),
+            'file': forms.FileInput(attrs={'class': 'form-control', 'accept': '.pdf,.jpg,.jpeg,.png'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['file'].required = not bool(
+            self.instance and self.instance.pk and self.instance.file
+        )
+
+
 # FORM LAYANAN BERKALA
 class FormLayananBerkala(forms.ModelForm):
     class Meta:
@@ -56,7 +262,10 @@ class FormLayananBerkala(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(FormLayananBerkala, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_berkala_admin:
+            queryset = Users.objects.filter(pk=self.request.user.pk)
+            self.fields['pegawai'].queryset = queryset
+            self.fields['pegawai'].initial = queryset.first()
             self.fields['riwayat'] = forms.ModelChoiceField(queryset=RiwayatGajiBerkala.objects.filter(pegawai=self.request.user))
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['layanan'].widget=forms.HiddenInput()
@@ -103,7 +312,7 @@ class FormLayananCutiExisting(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(FormLayananCutiExisting, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_cuti_admin:
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['layanan'].widget=forms.HiddenInput()
             self.fields['status'].widget=forms.HiddenInput()
@@ -122,7 +331,7 @@ class FormLayananCuti(forms.ModelForm):
     def __init__(self, status=None, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(FormLayananCuti, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_cuti_admin:
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['dokumen'].widget = forms.HiddenInput()
             self.fields['layanan'].widget = forms.HiddenInput()
@@ -147,7 +356,7 @@ STATUS_CUTI = (
 
 def get_instalasi_queryset(user):
     qs = UnitInstalasi.objects.all()
-    if user.is_superuser:
+    if user.is_cuti_admin:
         return qs
     profil = getattr(user, 'profil_admin', None)
     if profil:
@@ -459,7 +668,7 @@ class FormUsulanLayananDiklat(forms.ModelForm):
         self.request = kwargs.pop("request", None)
         super(FormUsulanLayananDiklat, self).__init__(*args, **kwargs)
         self.fields['tor'].help_text = 'Wajib jika usulan pelatihan bersifat internal'
-        if self.request and not self.request.user.is_superuser:
+        if self.request and not self.request.user.is_diklat_admin:
             self.fields['layanan'].widget=forms.HiddenInput()
 
 usulan_diklat_formset = inlineformset_factory(
@@ -522,7 +731,7 @@ class FormLayananDiklat(forms.ModelForm):
         self.request=kwargs.pop("request", None)
         super(FormLayananDiklat, self).__init__(*args, **kwargs)
         self.fields['layanan'].required = False
-        if self.request and self.request.user.is_superuser:
+        if self.request and self.request.user.is_diklat_admin:
             #tampil pada awal pengusulan (aktor superuser)
             self.fields['layanan'].widget=forms.HiddenInput()
             self.fields['status'].widget=forms.HiddenInput()
@@ -749,3 +958,151 @@ class FormLayananTindaklanjutUsulanInovasi(forms.ModelForm):
         self.fields['status'].widget=forms.HiddenInput()
 
 tindaklanjut_inovasi_formset = inlineformset_factory(RiwayatInovasi, LayananUsulanInovasi, form=FormLayananTindaklanjutUsulanInovasi, extra=0, can_delete=False)
+
+
+class LayananSIPForm(forms.ModelForm):
+    class Meta:
+        model = LayananSIP
+        fields = [
+            "pegawai",
+            "layanan",
+            "ijazah",
+            "str_profesi",
+            "kecukupan_skp",
+        ]
+
+        widgets = {
+            "layanan": forms.Select(attrs={"class": "form-control"}),
+            "ijazah": forms.Select(attrs={"class": "form-control"}),
+            "str_profesi": forms.Select(attrs={"class": "form-control"}),
+            "kecukupan_skp": forms.FileInput(attrs={"class": "form-control"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop("user", None)
+        super(LayananSIPForm, self).__init__(*args, **kwargs)
+        layanan_sip_qs = JenisLayanan.objects.filter(
+            nama__icontains="SIP"
+        )
+        self.fields["layanan"].queryset = layanan_sip_qs
+        if layanan_sip_qs.exists():
+            self.fields["layanan"].initial = layanan_sip_qs.first()
+            self.fields['layanan'].widget=forms.HiddenInput()
+
+        # self.fields['layanan'].widget = forms.HiddenInput()
+        if self.user and not self.user.is_sip_admin:
+            self.fields["pegawai"].widget = forms.HiddenInput()
+            self.fields["pegawai"].initial = self.user.pk
+
+            self.fields["ijazah"].queryset = RiwayatPendidikan.objects.filter(
+                pegawai=self.user
+            )
+            self.fields["ijazah"].help_text = "Pilih ijazah profesi yang sudah diunggah sebelumnya di Riwayat Pendidikan"
+
+            self.fields["str_profesi"].queryset = RiwayatProfesi.objects.filter(
+                pegawai=self.user
+            )
+            self.fields["str_profesi"].help_text = "Pilih STR profesi yang sudah diunggah sebelumnya di Riwayat Profesi"
+
+        else:
+            self.fields["ijazah"].queryset = RiwayatPendidikan.objects.all()
+            self.fields["str_profesi"].queryset = RiwayatProfesi.objects.all()
+
+
+class UploadPersyaratanSIPForm(forms.Form):
+    file_ktp = forms.FileField(
+        required=False,
+        label="KTP",
+        validators=[validate_file_size],
+        widget=forms.FileInput(attrs={"class": "form-control", "accept": ".pdf,.jpg,.jpeg,.png"}),
+    )
+    foto = forms.ImageField(
+        required=False,
+        label="Foto",
+        validators=[validate_file_size],
+        widget=forms.FileInput(attrs={"class": "form-control", "accept": "image/*"}),
+    )
+    file_ijazah = forms.FileField(
+        required=False,
+        label="Ijazah Profesi",
+        validators=[validate_file_size],
+        widget=forms.FileInput(attrs={"class": "form-control", "accept": ".pdf,.jpg,.jpeg,.png"}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        self.layanan_sip = kwargs.pop("layanan_sip")
+        super().__init__(*args, **kwargs)
+        profil = getattr(self.layanan_sip.pegawai, "profil_user", None)
+
+        if profil and profil.file_ktp:
+            self.fields.pop("file_ktp")
+        if profil and profil.foto:
+            self.fields.pop("foto")
+        if not self.layanan_sip.ijazah or self.layanan_sip.ijazah.file_ijazah:
+            self.fields.pop("file_ijazah")
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if not getattr(self.layanan_sip.pegawai, "profil_user", None):
+            raise forms.ValidationError("Profil pegawai belum tersedia.")
+        if not any(cleaned_data.values()):
+            raise forms.ValidationError("Pilih minimal satu dokumen untuk diunggah.")
+        return cleaned_data
+
+    def save(self):
+        profil = self.layanan_sip.pegawai.profil_user
+        profile_fields = []
+
+        if self.cleaned_data.get("file_ktp"):
+            profil.file_ktp = self.cleaned_data["file_ktp"]
+            profile_fields.append("file_ktp")
+        if self.cleaned_data.get("foto"):
+            profil.foto = self.cleaned_data["foto"]
+            profile_fields.append("foto")
+        if profile_fields:
+            profil.save(update_fields=profile_fields + ["updated_at"])
+
+        if self.cleaned_data.get("file_ijazah"):
+            ijazah = self.layanan_sip.ijazah
+            ijazah.file_ijazah = self.cleaned_data["file_ijazah"]
+            ijazah.save(update_fields=["file_ijazah", "updated_at"])
+
+        self.layanan_sip.save(update_fields=["is_ktp", "is_foto", "updated_at"])
+
+
+class UploadRekomendasiSIPForm(forms.ModelForm):
+    class Meta:
+        model = LayananSIP
+        fields = ["kecukupan_skp", "surat_permohonan_rekomendasi", "surat_rekomendasi_sip"]
+        widgets = {
+            "kecukupan_skp": forms.FileInput(
+                attrs={"class": "form-control", "accept": ".pdf,.jpg,.jpeg,.png"}
+            ),
+            "surat_permohonan_rekomendasi": forms.FileInput(
+                attrs={"class": "form-control", "accept": ".pdf,.jpg,.jpeg,.png"}
+            ),
+            "surat_rekomendasi_sip": forms.FileInput(
+                attrs={"class": "form-control", "accept": ".pdf,.jpg,.jpeg,.png"}
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        user = kwargs.pop("user", None)
+        super().__init__(*args, **kwargs)
+
+        # Pegawai membuat surat kecukupan SKP. Surat rekomendasi final
+        # hanya boleh diunggah oleh admin.
+        if user and not user.is_sip_admin:
+            self.fields.pop("surat_rekomendasi_sip")
+
+        if user and user.is_sip_admin:
+            self.fields.pop("kecukupan_skp")
+            self.fields.pop("surat_permohonan_rekomendasi")
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if not any(field_name in self.files for field_name in self.fields):
+            raise forms.ValidationError(
+                "Pilih minimal satu file yang akan diunggah atau menggantikan file lama."
+            )
+        return cleaned_data

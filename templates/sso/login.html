@@ -180,7 +180,7 @@
                             <input type="checkbox" name="remember-me" class="h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500">
                             Ingat saya
                         </label>
-                        <a href="#" class="font-medium text-teal-600 hover:text-teal-700">Lupa kata sandi?</a>
+                        <a href="{% url 'myaccount_urls:telegram_reset_help' %}" class="font-medium text-teal-600 hover:text-teal-700">Lupa kata sandi?</a>
                     </div>
 
                     <!-- Tombol Login -->
@@ -191,6 +191,13 @@
                     </button>
                 </form>
 
+                <p class="mt-5 text-center text-sm text-gray-500">
+                    Belum memiliki akun?
+                    <a href="{% url 'myaccount_urls:account_registration' %}" class="font-semibold text-teal-600 hover:text-teal-700 hover:underline">
+                        Registrasi akun pegawai
+                    </a>
+                </p>
+
                 <!-- Opsi SSO Eksternal -->
                 <div class="mt-6">
                     <div class="relative flex items-center justify-center text-xs text-gray-400 mb-4">
@@ -198,10 +205,13 @@
                     </div>
                     
                     <div class="flex gap-3">
-                        <a href="{% provider_login_url 'google' process='login' %}" id="googleBtn"
-                            class="flex-1 flex items-center justify-center gap-2 py-2.5 border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:bg-teal-50 hover:border-teal-200 transition">
+                        <form method="post" action="{% provider_login_url 'google' process='login' %}" class="flex-1">
+                            {% csrf_token %}
+                            <button type="submit" id="googleBtn"
+                            class="w-full flex items-center justify-center gap-2 py-2.5 border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:bg-teal-50 hover:border-teal-200 transition">
                                 <i class="ph ph-google-logo text-lg text-red-500"></i> Google
-                            </a>
+                            </button>
+                        </form>
                         <!-- <button type="button" class="flex-1 flex items-center justify-center gap-2 py-2.5 border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:bg-teal-50 hover:border-teal-200 transition">
                             <i class="ph ph-microsoft-outlook-logo text-lg"></i> Microsoft
                         </button> -->
@@ -210,7 +220,11 @@
 
                 <!-- Footer kecil -->
                 <p class="text-center text-xs text-gray-400 mt-8">
-                    &copy; 2026 <span class="font-semibold text-gray-500">MedisConnect RS Mandalika</span> &middot; Enkripsi AES-256
+                    &copy; {% now 'Y' %} <span class="font-semibold text-gray-500">MedisConnect RS Mandalika</span>
+                    &middot;
+                    <a href="{% url 'about_simadu' %}" class="text-teal-600 hover:text-teal-700 hover:underline">Tentang SIMADU</a>
+                    &middot;
+                    <a href="{% url 'privacy_policy' %}" class="text-teal-600 hover:text-teal-700 hover:underline">Kebijakan Privasi</a>
                 </p>
             </div>
         </div>

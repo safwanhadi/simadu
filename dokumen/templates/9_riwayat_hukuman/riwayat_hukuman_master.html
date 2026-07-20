@@ -25,16 +25,14 @@
             <div class="card-header">
                 <div class="d-flex flex-row justify-content-between">
                     <div class="d-flex flex-row mb-1">
-                        {% if update_form or request.user.is_superuser and nip %}
-                            <a href="{% url 'riwayat_urls:riwayat_hukuman' %}" class="text-dark mr-2"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
-                        {% endif %}
+                        <a href="{{ document_menu_url }}" class="text-dark mr-2" title="Kembali ke menu riwayat"><i class="fas fa-arrow-left ml-2" style="cursor: pointer; font-size:20px;"></i></a>
                         <h5>Data Riwayat Hukuman</h5>
                     </div>
                     {% if not update_form %}
                     <div>
-                        {% if not request.user.is_superuser %}
+                        {% if request.user.is_dokumen_admin and not nip %}
                         <a href="{% url 'riwayat_urls:riwayat_hukuman_urutkan' pk=dok.id %}" class="btn btn-outline-info">Urutkan Dokumen</a>
-                        {% elif nip %}
+                        {% elif request.user.is_dokumen_admin and nip %}
                         <a href="{% url 'riwayat_urls:riwayat_hukuman_urutkan' pk=dok.id %}?nip={{nip}}" class="btn btn-outline-info">Urutkan Dokumen</a>
                         {% endif %}
                         <input type="button" class="btn btn-outline-success" id="add_data" value="Tambah Data">
@@ -56,7 +54,7 @@
                     <div class="col-md-12">
                         {% if nip %}
                             {% include '9_riwayat_hukuman/riwayat_hukuman_perorang.html' %}
-                        {% elif request.user.is_superuser  %}
+                        {% elif request.user.is_dokumen_admin  %}
                             {% include '9_riwayat_hukuman/riwayat_hukuman.html' %}
                         {% endif %}
                     </div>

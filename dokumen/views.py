@@ -8,7 +8,9 @@ from django.views.generic import ListView, DetailView, DeleteView, UpdateView, C
 from django.contrib import messages
 from django.contrib.messages.views import SuccessMessageMixin
 from django.core.files.storage import default_storage
+from django.core.paginator import Paginator
 from django.db import transaction
+from django.http import Http404
 # from django.utils.text import slugify
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
@@ -16,7 +18,7 @@ from itertools import chain, zip_longest
 from functools import lru_cache
 import os
 
-from layanan.views import GajiBerkalaCheck, CheckCuti
+from layanan.views import CheckCuti
 from layanan.models import (
     JenisLayanan
 )
@@ -34,6 +36,7 @@ from .models import (
     Kompetensi,
     RiwayatGajiBerkala,
     RiwayatKinerja,
+    RiwayatPAK,
     RiwayatOrganisasi,
     RiwayatDiklat,
     RiwayatCuti,
@@ -47,6 +50,24 @@ from .models import (
     RiwayatPenugasan
     )
 from myaccount.models import ProfilSDM, Users
+from .access import (
+    DocumentAdminRequiredMixin,
+    DocumentObjectAccessMixin,
+    get_accessible_document,
+    get_selected_nip,
+    scope_document_queryset,
+)
+from .generic_views import (
+    EmployeeDocumentModule,
+)
+from .document_registry import DOCUMENT_TYPES
+from .requirements import get_required_documents
+
+# Batas struktur baru: modul di bawah ini memakai EmployeeDocumentModule.
+# Pendidikan, Panggol, Jabatan, Pengangkatan, Penempatan, Gaji Berkala,
+# Kinerja, Penghargaan, Hukuman, Diklat, Kompetensi, Organisasi, Profesi,
+# Keluarga, Inovasi (list/delete), dan Penugasan. View riwayat lainnya
+# sengaja dipertahankan dalam struktur legacy.
 from .forms import (
     RiwayatPendidikanForm,
     UrutkanDokumenSDMForm,
@@ -65,6 +86,7 @@ from .forms import (
     RiwayatGajiBerkalaForm,
     urutkan_dokumen_berkala,
     RiwayatKinerjaForm,
+    RiwayatPAKForm,
     urutkan_dokumen_kinerja,
     RiwayatPenghargaanForm,
     urutkan_dokumen_penghargaan,
@@ -126,11 +148,53 @@ class NotFoundPage(LoginRequiredMixin, View):
                 'selected':selected
             }
         return render(request, 'riwayat_404.html', context)
-    
+
+
+FILE_KEPEGAWAIAN_SPECS = (
+    ('Identitas', 'profil', 'file_ktp', 'KTP', 'fa-id-card'),
+    ('Identitas', 'profil', 'file_npwp', 'NPWP', 'fa-receipt'),
+    ('Identitas', 'profil', 'file_jkn', 'Kartu JKN', 'fa-heartbeat'),
+    ('Identitas', 'profil', 'file_taspen', 'BPJS Ketenagakerjaan/Taspen', 'fa-shield-alt'),
+    ('Pendidikan', 'pendidikan', 'file_ijazah', 'Ijazah Terakhir', 'fa-graduation-cap'),
+    ('Pendidikan', 'pendidikan', 'file_transkrip', 'Transkrip Terakhir', 'fa-list-alt'),
+    ('Kepegawaian', 'panggol', 'file', 'SK Kenaikan Pangkat Terakhir', 'fa-level-up-alt'),
+    ('Kepegawaian', 'pengangkatan_cpns', 'file_sk', 'SK CPNS', 'fa-user-check'),
+    ('Kepegawaian', 'pengangkatan', 'file_sk', 'SK Pengangkatan ASN/Non-ASN', 'fa-file-signature'),
+    ('Kepegawaian', 'pengangkatan', 'file_spmt', 'SPMT', 'fa-clipboard-check'),
+    ('Kepegawaian', 'pengangkatan', 'file_latsar', 'Sertifikat Latsar', 'fa-certificate'),
+    ('Kepegawaian', 'pengangkatan', 'file_karpeg', 'Kartu Pegawai', 'fa-id-badge'),
+    ('Kepegawaian', 'penempatan', 'file', 'SK Penempatan', 'fa-map-marker-alt'),
+    ('Kepegawaian', 'berkala', 'file', 'SK Gaji Berkala', 'fa-money-check-alt'),
+)
+
+
+def get_file_kepegawaian_links(data):
+    links = []
+    seen_urls = set()
+    for category, object_key, field_name, label, icon in FILE_KEPEGAWAIAN_SPECS:
+        instance = data.get(object_key)
+        file_field = getattr(instance, field_name, None) if instance else None
+        if not file_field:
+            continue
+        try:
+            url = file_field.url
+        except (ValueError, NotImplementedError):
+            continue
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        links.append({
+            'category': category,
+            'label': label,
+            'icon': icon,
+            'url': url,
+        })
+    return links
+
 
 def file_kepegawaian(request, nip):
     data = None
-    if request.user.is_superuser:
+    if request.user.is_dokumen_admin:
         profil = ProfilSDM.objects.filter(nip=nip).last()
         pendidikan = RiwayatPendidikan.objects.filter(pegawai__profil_user__nip=nip).last()
         panggol = RiwayatPanggol.objects.filter(pegawai__profil_user__nip=nip).last()
@@ -165,6 +229,7 @@ def file_kepegawaian(request, nip):
                 'profesi':profesi, 
                 'bekerja':bekerja, 
                 'keluarga':keluarga}
+        data['links'] = get_file_kepegawaian_links(data)
         return data
     else:
         profil = ProfilSDM.objects.filter(user=request.user).last()
@@ -201,6 +266,7 @@ def file_kepegawaian(request, nip):
                 'profesi':profesi, 
                 'bekerja':bekerja, 
                 'keluarga':keluarga}
+        data['links'] = get_file_kepegawaian_links(data)
         return data
 
 
@@ -305,15 +371,36 @@ def cek_kelengkapan():
                 data[0]['user'] = datauser
                 kelengkapan_user.append(data[0])
     return kelengkapan_user
-    
+
 # start = time.time()
 class RiwayatHomeView(LoginRequiredMixin, View):
     def get(self, request):
         user = request.user
-        nip = request.GET.get('nip')
+        nip = get_selected_nip(request)
+        if request.user.is_dokumen_admin and not nip:
+            return redirect('riwayat_urls:document_admin_dashboard')
+
+        selected_employee = get_user_bynip(nip) if nip else None
+        if request.user.is_dokumen_admin and selected_employee is None:
+            messages.error(request, 'Pegawai yang dipilih tidak ditemukan.')
+            return redirect('riwayat_urls:document_admin_dashboard')
         if nip:
             user = nip
-        jenis_dok = DokumenSDM.objects.all().order_by('id')
+        document_owner = selected_employee or request.user
+        required_documents, employment_record = get_required_documents(
+            document_owner,
+        )
+        jenis_dok = list(required_documents)
+        for document in jenis_dok:
+            configuration = DOCUMENT_TYPES.get(document.url)
+            document.is_required = getattr(document, 'is_required', False)
+            document.is_empty = bool(
+                document.is_required
+                and configuration
+                and not configuration[1].objects.filter(
+                    pegawai=document_owner,
+                ).exists()
+            )
         jabatan = 'fungsional'
         file_kepeg = file_kepegawaian(request, user)
         data_peg = Users.objects.all().exclude(is_superuser=True)
@@ -323,26 +410,80 @@ class RiwayatHomeView(LoginRequiredMixin, View):
             'file_kepeg':file_kepeg,
             'jabatan':jabatan,
             'jenis_dok':jenis_dok,
+            'employment_status': (
+                employment_record.status_pegawai
+                if employment_record else None
+            ),
+            'employment_record_missing': employment_record is None,
             'riwayat':'active',
             'page':'Riwayat',
             'selected':'riwayat',
             'title_page':'Menu'
         }
+        if request.user.is_dokumen_admin:
+            context.update({
+                'document_admin_employee': selected_employee,
+                'document_admin_document_count': None,
+            })
         return render(request, 'riwayat_home.html', context)
+
+
+class DocumentAdminDashboardView(DocumentAdminRequiredMixin, ListView):
+    model = Users
+    template_name = 'admin_dokumen/dashboard.html'
+    context_object_name = 'employee_list'
+    paginate_by = 25
+
+    def get_queryset(self):
+        queryset = (
+            Users.objects
+            .filter(is_active=True, is_superuser=False)
+            .select_related('profil_user')
+            .order_by('first_name', 'last_name', 'email')
+        )
+        query = self.request.GET.get('q', '').strip()
+        if query:
+            queryset = queryset.filter(
+                Q(first_name__icontains=query)
+                | Q(last_name__icontains=query)
+                | Q(email__icontains=query)
+                | Q(profil_user__nip__icontains=query)
+            )
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'q': self.request.GET.get('q', '').strip(),
+            'document_admin': 'active',
+            'riwayat': 'active',
+            'title_page': 'Admin Dokumen SDM',
+            'employee_count': Users.objects.filter(
+                is_active=True,
+                is_superuser=False,
+            ).count(),
+            'education_unverified_count': RiwayatPendidikan.objects.filter(
+                is_verifikasi=False,
+            ).count(),
+            'education_verified_count': RiwayatPendidikan.objects.filter(
+                is_verifikasi=True,
+            ).count(),
+        })
+        return context
 
 class RiwayatKelengkapan(LoginRequiredMixin, View):
     def get(self, request):
         data_peg = Users.objects.all().exclude(is_superuser=True)
-        get_nip_user = request.GET.get('nip')
+        get_nip_user = get_selected_nip(request)
         user = request.user
         nip = get_nip(user)
         if get_nip_user is not None:
             nip = get_nip_user
         kelengkapan = None
-        if not request.user.is_superuser or get_nip_user:
+        if not request.user.is_dokumen_admin or get_nip_user:
             nip = nip
             kelengkapan = cek_kelengkapan_user(nip)
-        elif request.user.is_superuser:
+        elif request.user.is_dokumen_admin:
             kelengkapan = cek_kelengkapan()
         context={
             'nip':get_nip_user,
@@ -378,12 +519,21 @@ def get_nip(user):
         return nip
     except Exception:
         return None
+
+
+def get_riwayat_menu_url(request, employee=None):
+    url = reverse('riwayat_urls:riwayat_view')
+    if request.user.is_dokumen_admin and employee is not None:
+        nip = get_nip(employee)
+        if nip:
+            return f'{url}?nip={nip}'
+    return url
     
 notfoundview = 'riwayat_urls:notfound_view'
 save_success_message = "Data berhasi disimpan!"
 form_not_valid_message = "Maaf pengisian form tidak valid"
 
-class UrutkanRiwayatPendidikanView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatPendidikanView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '1_riwayat_pendidikan/riwayat_pendidikan_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_pendidikan')
@@ -420,328 +570,109 @@ class UrutkanRiwayatPendidikanView(LoginRequiredMixin, SuccessMessageMixin, Upda
         return super().form_valid(form)
         
 
-class RiwayatPendidikanView(LoginRequiredMixin, View):   
-    def get(self, request):
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        data = RiwayatPendidikan.objects.all().order_by('no_urut_dokumen')
-        dok = DokumenSDM.objects.filter(nama='Riwayat Pendidikan')
-        initial = {'dokumen':dok.first()}
-        nip = None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            initial = {'pegawai':user, 'dokumen':dok.first()}
-            if nip:
-                data = RiwayatPendidikan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'pendidikan'}))
-        if selected_nip:
-            nip = selected_nip
-            user = get_user_bynip(nip)
-            data = RiwayatPendidikan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form = RiwayatPendidikanForm(initial=initial, request=request)
-        context={
-            'user':get_user_bynip(nip),
-            'data':data,
-            'form':form,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Pendidikan',
-            'nip':nip,
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'pendidikan',
-        }
-        return render(request, '1_riwayat_pendidikan/riwayat_pendidikan_master.html', context)
+pendidikan_document = EmployeeDocumentModule(
+    model=RiwayatPendidikan,
+    form_class=RiwayatPendidikanForm,
+    template_name='1_riwayat_pendidikan/riwayat_pendidikan_master.html',
+    document_url='pendidikan',
+    selected='pendidikan',
+    title_page='Pendidikan',
+    success_url_name='riwayat_urls:riwayat_pendidikan',
+    file_fields=(
+        'file_srt_penyetaraan',
+        'file_ijazah',
+        'file_transkrip',
+        'file_verifikasi',
+    ),
+)
 
-    def post(self, request):
-        form = RiwayatPendidikanForm(data=request.POST, files=request.FILES, request=request)
-        if form.is_valid():
-            form.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_pendidikan'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_pendidikan'))
+RiwayatPendidikanView = pendidikan_document.manage_view('RiwayatPendidikanView')
+RiwayatPendidikanUpdateView = pendidikan_document.update_view(
+    'RiwayatPendidikanUpdateView'
+)
+RiwayatPendidikanDeleteView = pendidikan_document.delete_view(
+    'RiwayatPendidikanDeleteView'
+)
 
 
-class RiwayatPendidikanUpdateView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
+class PanggolRulesMixin:
+    """Aturan bisnis khusus pangkat/golongan di atas reusable CRUD view."""
 
-    def get_object(self, id, request=None):
-        try:
-            data = RiwayatPendidikan.objects.get(id=id)
-            return data
-        except RiwayatPendidikan.DoesNotExist:
-            messages.error(request, 'Maaf data tidak ditemukan!')
+    def get_latest_tmt_gol(self, nip):
+        if not nip:
             return None
-    
-    def get(self, request, **kwargs):
-        id = kwargs.get('id')
-        dok = DokumenSDM.objects.filter(url='pendidikan')
-        detail = self.get_object(id, request=request)
-        form = RiwayatPendidikanForm(instance=detail, request=request)
-        context={
-            'update_form':True,
-            'form':form,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Pendidikan',
-            'form_view':'block',
-            'data_view':'none',
-            'riwayat':'active',
-        }
-        return render(request, '1_riwayat_pendidikan/riwayat_pendidikan_master.html', context)
+        return (
+            RiwayatPanggol.objects
+            .filter(
+                pegawai__profil_user__nip=nip,
+                tmt_gol__isnull=False,
+            )
+            .order_by('-tmt_gol', '-id')
+            .values_list('tmt_gol', flat=True)
+            .first()
+        )
 
-    def post(self, request, **kwargs):
-        id = kwargs.get('id')
-        #data detail digunakan menjadi data statis yang tidak terpengaruh dengan isian form input
-        data_detail = self.get_object(id)
-        #data instance akan berubah mengikuti isian form input
-        instance = self.get_object(id)
-        form = RiwayatPendidikanForm(data=request.POST, files=request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            riwayat_pendidikan = form.save(commit=False)
-            if riwayat_pendidikan.file_srt_penyetaraan and data_detail.file_srt_penyetaraan and riwayat_pendidikan.file_srt_penyetaraan != data_detail.file_srt_penyetaraan and os.path.isfile(data_detail.file_srt_penyetaraan.path):
-                os.remove(data_detail.file_srt_penyetaraan.path)
-            if riwayat_pendidikan.file_ijazah and data_detail.file_ijazah and riwayat_pendidikan.file_ijazah != data_detail.file_ijazah and os.path.isfile(data_detail.file_ijazah.path):
-                os.remove(data_detail.file_ijazah.path)
-            if riwayat_pendidikan.file_transkrip and data_detail.file_transkrip and riwayat_pendidikan.file_transkrip != data_detail.file_transkrip and os.path.isfile(data_detail.file_transkrip.path):
-                os.remove(data_detail.file_transkrip.path)
-            riwayat_pendidikan.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_pendidikan'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_update_pendidikan', kwargs={'id':id}))
+    def check_status(self, nip):
+        latest_tmt = self.get_latest_tmt_gol(nip)
+        if latest_tmt is None:
+            return True
 
+        period = self.get_document_definition()
+        elapsed = relativedelta(date.today(), latest_tmt)
+        elapsed_months = (elapsed.years * 12) + elapsed.months
+        return elapsed_months >= period.periode_min
 
-class RiwayatPendidikanDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatPendidikan
-    template_name = '1_riwayat_pendidikan/riwayat_pendidikan_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_pendidikan')
-    success_message = 'Data berhasil dihapus!'
+    def next_panggol(self, nip):
+        latest_tmt = self.get_latest_tmt_gol(nip)
+        if latest_tmt is None:
+            return None
+        return latest_tmt + relativedelta(
+            months=self.get_document_definition().periode_max,
+        )
 
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='pendidikan')
-        nip = None
-        if self.request.user.is_superuser:
-            data = RiwayatPendidikan.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatPendidikan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatPendidikanDeleteView, self).get_context_data(**kwargs)
+    def get_common_context(self, **extra):
+        context = super().get_common_context(**extra)
+        nip = context.get('nip')
         context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Pendidikan',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'pendidikan',
+            'status_panggol': self.check_status(nip),
+            'next_panggol': self.next_panggol(nip),
         })
         return context
-    
-    def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file_ijazah:
-            if os.path.isfile(self.object.file_ijazah.path):
-                os.remove(self.object.file_ijazah.path)
-        if self.object.file_transkrip:
-            if os.path.isfile(self.object.file_transkrip.path):
-                os.remove(self.object.file_transkrip.path)
-        return super().form_valid(form)
+
+    def can_create_document(self, form):
+        employee = form.cleaned_data.get('pegawai')
+        nip = self.get_employee_nip(employee) if employee else None
+        return bool(employee and nip and self.check_status(nip))
+
+    def get_creation_denied_message(self, form):
+        return 'Anda belum saatnya naik pangkat!'
 
 
-class CheckRiwayatPanggol:
-    def get_four_year_before(self, start_year) -> dict:
-        end_year = start_year - relativedelta(months=22)
-        date_interval = relativedelta(end_year, start_year)
-        return {
-            'interval_tahun': date_interval.years,
-            'interval_bulan': date_interval.months
-            }
-    def get_four_year_after(self, start_year):
-        today = date.today()
-        date_interval = relativedelta(today, start_year)
-        #convert tahun ke bulan
-        interval_year = date_interval.years * 12
-        interval_month = date_interval.months
-        interval = interval_year + interval_month
-        return {
-            'interval': interval,
-            'interval_year': date_interval.years,
-            'interval_month': date_interval.months
-            } 
-    
-    def check_status(self, nip) -> bool:
-        data = RiwayatPanggol.objects.filter(pegawai__profil_user__nip=nip).values('tmt_gol').last()
-        get_periode = DokumenSDM.objects.get(url='panggol')
-        try:
-            status = None
-            if self.get_four_year_after(data.get('tmt_gol')).get('interval') >= get_periode.periode_min:
-                status = True
-            else:
-                status = False
-            # if statement with one line = True if self.get_two_year_after(data.get('tgl_srt_gaji')).get('interval_tahun') >= 1 and self.get_two_year_after(data.get('tgl_srt_gaji')).get('interval_bulan') >= 9 else False
-            return status
-        except Exception:
-            return True
-    
-    def next_panggol(self, nip) -> date:
-        data = RiwayatPanggol.objects.filter(pegawai__profil_user__nip=nip).values('tmt_gol')
-        interval_date = DokumenSDM.objects.get(url='panggol')
-        second_last_date = data.order_by('-tmt_gol')
-        if nip and len(second_last_date) >= 2:
-            #jika TMT data pertama kosong akan tereksekusi data sebelumnya
-            if second_last_date[0].get('tmt_gol') is not None:
-                data1 = second_last_date[0].get('tmt_gol')+relativedelta(months=interval_date.periode_max)
-                return data1
-            data2 = second_last_date[1].get('tmt_gol')+relativedelta(months=interval_date.periode_max)
-            return data2
-        elif nip and len(second_last_date) == 1 and hasattr(second_last_date[0], 'tmt_gol') and second_last_date[0].get('tmt_gol') is not None:
-            data3 = second_last_date[0].get('tmt_gol')+relativedelta(months=interval_date.periode_max)
-            return data3
-        return None
+panggol_document = EmployeeDocumentModule(
+    model=RiwayatPanggol,
+    form_class=RiwayatPanggolForm,
+    template_name='2_riwayat_panggol/riwayat_panggol_master.html',
+    document_url='panggol',
+    selected='panggol',
+    title_page='Panggol',
+    success_url_name='riwayat_urls:riwayat_panggol',
+    file_fields=('file',),
+)
 
-    
-template_panggol = 'riwayat_panggol/riwayat_panggol_master.html'
+RiwayatPanggolView = panggol_document.manage_view(
+    'RiwayatPanggolView',
+    mixins=(PanggolRulesMixin,),
+)
 
-class RiwayatPanggolView(LoginRequiredMixin, CheckRiwayatPanggol, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get_user(self, id):
-        try:
-            data = Users.objects.get(id=id)
-            return data
-        except Users.DoesNotExist:
-            return None
-        
-    def get(self, request):
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        data = RiwayatPanggol.objects.all().order_by('no_urut_dokumen')
-        dok = DokumenSDM.objects.filter(url='panggol')
-        initial = {'dokumen':dok.first()}
-        nip = None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            initial = {'pegawai':user, 'dokumen':dok.first()}
-            if nip:
-                data = RiwayatPanggol.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'panggol'}))
-            
-        if selected_nip:
-            nip = selected_nip
-            data = RiwayatPanggol.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form = RiwayatPanggolForm(initial=initial, request=request)
-        context={
-            'user':get_user_bynip(nip),
-            'status_panggol':self.check_status(nip),
-            'next_panggol':self.next_panggol(nip),
-            'data':data,
-            'form':form,
-            'nip':nip,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Panggol',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'panggol'
-        }
-        return render(request, '2_riwayat_panggol/riwayat_panggol_master.html', context)
-    
-    def post(self, request):
-        form = RiwayatPanggolForm(data=request.POST, files=request.FILES, request=request)
-        pegawai = form.data.get('pegawai')
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        nip = None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-                      
-        if request.user.is_superuser and selected_nip:
-            nip = selected_nip
-        else:
-            user = self.get_user(pegawai)
-            nip = get_nip(user)
-
-        if form.is_valid():
-            if self.check_status(nip):
-                form.save()
-                messages.success(request, save_success_message)
-                return redirect(reverse('riwayat_urls:riwayat_panggol'))
-            else:
-                messages.warning(request, 'Anda belum saatnya naik pangkat!')
-                return redirect(reverse('riwayat_urls:riwayat_panggol'))
-            
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_panggol'))
+RiwayatPanggolUpdateView = panggol_document.update_view(
+    'RiwayatPanggolUpdateView'
+)
+RiwayatPanggolDeleteView = panggol_document.delete_view(
+    'RiwayatPanggolDeleteView'
+)
 
 
-class RiwayatPanggolUpdateView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get_object(self, id, request=None):
-        try:
-            data= RiwayatPanggol.objects.get(id=id)
-            return data
-        except RiwayatPanggol.DoesNotExist:
-            messages.error(request, f'Maaf data dengan id "{id}" tidak ditemukan!')
-            return None
-        
-    def get(self, request, **kwargs):
-        id=kwargs.get('id')
-        dok = DokumenSDM.objects.filter(url='panggol')
-        detail = self.get_object(id, request=request)
-        form = RiwayatPanggolForm(instance=detail, request=request)
-        context={
-            'update_form':True,
-            'form':form,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Panggol',
-            'form_view':'block',
-            'data_view':'none',
-            'riwayat':'active',
-            'selected':'panggol'
-        }
-        return render(request, '2_riwayat_panggol/riwayat_panggol_master.html', context)
-    
-    def post(self, request, **kwargs):
-        id = kwargs.get('id')
-        data_detail = self.get_object(id)
-        instance = self.get_object(id)
-        form = RiwayatPanggolForm(data=request.POST, files=request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            riwayat_panggol = form.save(commit=False)
-            if riwayat_panggol.file and data_detail.file and data_detail.file != riwayat_panggol.file and os.path.isfile(data_detail.file.path):
-                os.remove(data_detail.file.path)
-            riwayat_panggol.save()
-            # form.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_panggol'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_panggol'))
-
-
-class UrutkanRiwayatPanggolView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatPanggolView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '2_riwayat_panggol/riwayat_panggol_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_panggol')
@@ -752,17 +683,20 @@ class UrutkanRiwayatPanggolView(LoginRequiredMixin, SuccessMessageMixin, UpdateV
         return form
 
     def get_context_data(self, **kwargs):
-        nip = self.request.GET.get('nip')
+        nip = get_selected_nip(self.request)
         user = self.request.user
         if nip:
             user = get_user_bynip(nip)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_panggol(self.request.POST, instance=self.object)
         else:
-            if self.request.user.is_superuser:
-                urutkan_dokumen_form = urutkan_dokumen_panggol(instance=self.object, queryset=self.object.riwayatpanggol_set.filter(pegawai__profil_user__nip=nip))
-            else:
-                urutkan_dokumen_form = urutkan_dokumen_panggol(instance=self.object, queryset=self.object.riwayatpanggol_set.filter(pegawai=self.request.user))
+            queryset = self.object.riwayatpanggol_set.all()
+            if nip:
+                queryset = queryset.filter(pegawai__profil_user__nip=nip)
+            urutkan_dokumen_form = urutkan_dokumen_panggol(
+                instance=self.object,
+                queryset=queryset,
+            )
         context = super(UrutkanRiwayatPanggolView, self).get_context_data(**kwargs)
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
@@ -775,52 +709,20 @@ class UrutkanRiwayatPanggolView(LoginRequiredMixin, SuccessMessageMixin, UpdateV
         })
         return context
 
+    def get_success_url(self):
+        url = reverse('riwayat_urls:riwayat_panggol')
+        nip = get_selected_nip(self.request)
+        return f'{url}?nip={nip}' if nip else url
+
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
-        return super().form_valid(form)
-
-
-class RiwayatPanggolDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatPanggol
-    template_name = '2_riwayat_panggol/riwayat_panggol_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_panggol')
-    success_message = 'Data berhasil dihapus!'
-
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='panggol')
-        nip = None
-        if self.request.user.is_superuser:
-            data = RiwayatPanggol.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatPanggol.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatPanggolDeleteView, self).get_context_data(**kwargs)
-        context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Panggol',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'panggol'
-        })
-        return context
-    
-    def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file:
-            if os.path.isfile(self.object.file.path):
-                os.remove(self.object.file.path)
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
 
 
@@ -834,12 +736,12 @@ class RiwayatUjiKomView(LoginRequiredMixin, View):
         
     def get(self, request):
         user = request.user
-        selected_nip = request.GET.get('nip')
+        selected_nip = get_selected_nip(request)
         data = UjiKompetensi.objects.all().order_by('no_urut_dokumen')
         dok = DokumenSDM.objects.filter(url='ujikomp')
         initial = {'dokumen':dok.first()}
         nip = None
-        if not request.user.is_superuser:
+        if not request.user.is_dokumen_admin:
             nip = get_nip(user)
             initial = {'pegawai':user, 'dokumen':dok.first()}
             if nip:
@@ -871,12 +773,12 @@ class RiwayatUjiKomView(LoginRequiredMixin, View):
         form = UjiKompetensiForm(request.POST, request.FILES, request=request)
         pegawai = form.data.get('pegawai')
         user = request.user
-        selected_nip = request.GET.get('nip')
+        selected_nip = get_selected_nip(request)
         nip = None
-        if not request.user.is_superuser:
+        if not request.user.is_dokumen_admin:
             nip = get_nip(user)
                       
-        if request.user.is_superuser and selected_nip:
+        if request.user.is_dokumen_admin and selected_nip:
             nip = selected_nip
         else:
             user = self.get_user(pegawai)
@@ -896,180 +798,68 @@ class RiwayatUjiKomView(LoginRequiredMixin, View):
             return redirect(reverse('riwayat_urls:riwayat_panggol'))
 
 
-class CheckRiwayatJabatan:
-    def get_two_year_before(self, start_year) -> dict:
-        end_year = start_year - relativedelta(months=22)
-        date_interval = relativedelta(end_year, start_year)
-        return {
-            'interval_tahun': date_interval.years,
-            'interval_bulan': date_interval.months
-            }
-    def get_two_year_after(self, start_year):
-        today = datetime.today()
-        date_interval = relativedelta(today, start_year)
-        return {
-            'interval_tahun': date_interval.years,
-            'interval_bulan': date_interval.months
-            } 
-    
-    def check_status(self, nip) -> bool:
-        data = RiwayatJabatan.objects.filter(pegawai__profil_user__nip=nip).values('tmt_jabatan').last()
-        try:
-            status = None
-            if self.get_two_year_after(data.get('tmt_jabatan')).get('interval_tahun') >= 2:
-                status = True
-            elif self.get_two_year_after(data.get('tmt_jabatan')).get('interval_tahun') == 1 and self.get_two_year_after(data.get('tmt_jabatan')).get('interval_bulan') >= 9:
-                status = True
-            else:
-                status = False
-            # if statement with one line = True if self.get_two_year_after(data.get('tgl_srt_gaji')).get('interval_tahun') >= 1 and self.get_two_year_after(data.get('tgl_srt_gaji')).get('interval_bulan') >= 9 else False
-            return status
-        except Exception:
-            return True
-    
-    def next_jabatan(self, nip) -> date:
-        data = RiwayatJabatan.objects.filter(pegawai__profil_user__nip=nip).values('tmt_jabatan')
-        second_last_date = data.order_by('-tmt_jabatan')
-        if nip and len(second_last_date) >= 2:
-            #jika TMT data pertama kosong akan tereksekusi data sebelumnya
-            if second_last_date[0].get('tmt_jabatan') is not None:
-                data1 = second_last_date[0].get('tmt_jabatan')+relativedelta(months=24)
-                return data1
-            data2 = second_last_date[1].get('tmt_jabatan')+relativedelta(months=24)
-            return data2
-        elif nip and len(second_last_date) == 1:
-            data3 = second_last_date[0].get('tmt_jabatan')+relativedelta(months=24)
-            return data3
-        return None
-        
+class JabatanViewMixin:
+    """Filter dan state tampilan khusus Riwayat Jabatan."""
 
-class RiwayatJabatanView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
+    def get_jabatan_filter(self):
+        return (self.request.GET.get('jabatan') or '').strip()
 
-    def get_jabatan_object(self, user, request=None):
-        try:
-            data = RiwayatJabatan.objects.get(pegawai=user)
-            return data
-        except Exception:
-            if request:
-                messages.error(request, 'Maaf data riwayat jabatan tidak ditemukan!')
-            return None
-        
-    def get(self, request, **kwargs):
-        jabatan = request.GET.get('jabatan')
-        get_form = request.GET.get('form')
-        user = request.user
-        form_view = 'none'
-        data_view = 'block'
-        if get_form:
-            form_view = 'block'
-            data_view = 'none'
-        selected_nip = request.GET.get('nip')
-        dok = DokumenSDM.objects.filter(url='jabatan')
-        initial = {'dokumen':dok.first()}
-        data = RiwayatJabatan.objects.all().order_by('no_urut_dokumen').exclude(pegawai__is_superuser=True)
-        if jabatan is not None:
-            data = RiwayatJabatan.objects.filter(jns_jabatan__icontains=jabatan).exclude(pegawai__is_superuser=True)
-        nip = None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            initial = {'pegawai':user, 'dokumen':dok.first()}
-            if nip:
-                data = RiwayatJabatan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'jabatan'}))
-        if selected_nip:
-            nip = selected_nip
-            data = RiwayatJabatan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form_detail = RiwayatJabatanForm(initial=initial, request=request)
-        context={
-            'user':get_user_bynip(nip),
-            'jabatan':jabatan,
-            'data':data,
-            'form':form_detail,
-            'nip':nip,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Jabatan',
-            'form_view':form_view,
-            'data_view':data_view,
-            'riwayat':'active',
-            'selected':'jabatan'
-        }
-        return render(request, '3_riwayat_jabatan/riwayat_jabatan_master.html', context)
-    
-    def post(self, request, *args, **kwargs):
-        jabatan = request.GET.get('jabatan')
-        form_detail = RiwayatJabatanForm(data=request.POST, files=request.FILES, request=request)
-        if form_detail.is_valid():
-            form_detail.save()
-            messages.success(request, save_success_message)
-            return redirect(f"{reverse('riwayat_urls:riwayat_jabatan')}?jabatan={jabatan}")
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(f"{reverse('riwayat_urls:riwayat_jabatan')}?jabatan={jabatan}")
+    def get_document_queryset(self):
+        queryset = super().get_document_queryset().exclude(
+            pegawai__is_superuser=True,
+        )
+        if (
+            self.request.user.is_dokumen_admin
+            and not get_selected_nip(self.request)
+            and self.get_jabatan_filter()
+        ):
+            queryset = queryset.filter(
+                jns_jabatan__icontains=self.get_jabatan_filter(),
+            )
+        return queryset
+
+    def get_common_context(self, **extra):
+        context = super().get_common_context(**extra)
+        context['jabatan'] = self.get_jabatan_filter()
+        if not context.get('update_form') and self.request.GET.get('form'):
+            context['form_view'] = 'block'
+            context['data_view'] = 'none'
+        return context
+
+    def get_success_query_params(self, employee=None):
+        params = super().get_success_query_params(employee)
+        jabatan = self.get_jabatan_filter()
+        if jabatan:
+            params['jabatan'] = jabatan
+        return params
 
 
-class RiwayatJabatanUpdateView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
+jabatan_document = EmployeeDocumentModule(
+    model=RiwayatJabatan,
+    form_class=RiwayatJabatanForm,
+    template_name='3_riwayat_jabatan/riwayat_jabatan_master.html',
+    document_url='jabatan',
+    selected='jabatan',
+    title_page='Jabatan',
+    success_url_name='riwayat_urls:riwayat_jabatan',
+    file_fields=('file', 'file_pemberhentian'),
+)
 
-    def get_object(self, id, request=None):
-        try:
-            data = RiwayatJabatan.objects.get(id=id)
-            return data
-        except RiwayatJabatan.DoesNotExist:
-            messages.error(request, f'Maaf data pegawai tidak ditemukan!')
-            return None
-        
-    def get(self, request, **kwargs):
-        id = kwargs.get('id')
-        jabatan = kwargs.get('jabatan')
-        selected_nip = request.GET.get('nip')
-        dok = DokumenSDM.objects.filter(url='jabatan')
-        if request.user.is_superuser:
-            nip = selected_nip
-        detail_jabatan = self.get_object(id, request)
-        form = RiwayatJabatanForm(instance=detail_jabatan, request=request)
-
-        context={
-            'update_form':True,
-            'jabatan':jabatan,
-            'form':form,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Jabatan',
-            'form_view':'block',
-            'data_view':'none',
-            'riwayat':'active',
-            'selected':'jabatan'
-        }
-        return render(request, '3_riwayat_jabatan/riwayat_jabatan_master.html', context)
-    
-    def post(self, request, **kwargs):
-        id = kwargs.get('id')
-        jabatan = kwargs.get('jabatan')
-        riwayat = self.get_object(id, request)
-        instance = self.get_object(id, request)
-        form = RiwayatJabatanForm(data=request.POST, files=request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            data_jabatan = form.save(commit=False)
-            if data_jabatan.file and riwayat.file and data_jabatan.file != riwayat.file and os.path.isfile(riwayat.file.path):
-                os.remove(riwayat.file.path)
-            if data_jabatan.file_pemberhentian and riwayat.file_pemberhentian and data_jabatan.file_pemberhentian != riwayat.file_pemberhentian and os.path.isfile(riwayat.file_pemberhentian.path):
-                os.remove(riwayat.file_pemberhentian.path)
-            data_jabatan.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_jabatan'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_jabatan'))
+RiwayatJabatanView = jabatan_document.manage_view(
+    'RiwayatJabatanView',
+    mixins=(JabatanViewMixin,),
+)
+RiwayatJabatanUpdateView = jabatan_document.update_view(
+    'RiwayatJabatanUpdateView',
+    mixins=(JabatanViewMixin,),
+)
+RiwayatJabatanDeleteView = jabatan_document.delete_view(
+    'RiwayatJabatanDeleteView',
+    mixins=(JabatanViewMixin,),
+)
 
 
-class UrutkanRiwayatJabatanView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatJabatanView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '3_riwayat_jabatan/riwayat_jabatan_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_jabatan')
@@ -1080,13 +870,25 @@ class UrutkanRiwayatJabatanView(LoginRequiredMixin, SuccessMessageMixin, UpdateV
         return form
 
     def get_context_data(self, **kwargs):
+        nip = get_selected_nip(self.request)
+        user = self.request.user
+        if nip:
+            user = get_user_bynip(nip)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_jabatan(self.request.POST, instance=self.object)
         else:
-            urutkan_dokumen_form = urutkan_dokumen_jabatan(instance=self.object, queryset=self.object.riwayatjabatan_set.filter(pegawai=self.request.user))
+            queryset = self.object.riwayatjabatan_set.all()
+            if nip:
+                queryset = queryset.filter(pegawai__profil_user__nip=nip)
+            urutkan_dokumen_form = urutkan_dokumen_jabatan(
+                instance=self.object,
+                queryset=queryset,
+            )
         context = super(UrutkanRiwayatJabatanView, self).get_context_data(**kwargs)
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
+            'user': user,
+            'nip': nip,
             'page':'Home',
             'sub_page':'Riwayat',
             'title_page':'Jabatan',
@@ -1094,187 +896,81 @@ class UrutkanRiwayatJabatanView(LoginRequiredMixin, SuccessMessageMixin, UpdateV
             'selected':'jabatan'
         })
         return context
+
+    def get_success_url(self):
+        url = reverse('riwayat_urls:riwayat_jabatan')
+        nip = get_selected_nip(self.request)
+        return f'{url}?nip={nip}' if nip else url
 
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
 
 
-class RiwayatJabatanDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatJabatan
-    template_name = '3_riwayat_jabatan/riwayat_jabatan_master.html'
-    success_message = 'Data berhasil dihapus!'
+pengangkatan_document = EmployeeDocumentModule(
+    model=RiwayatPengangkatan,
+    form_class=RiwayatPengangkatanForm,
+    template_name='4_riwayat_pengangkatan/riwayat_pengangkatan_master.html',
+    document_url='pengangkatan',
+    selected='pengangkatan',
+    title_page='Pengangkatan',
+    success_url_name='riwayat_urls:riwayat_pengangkatan',
+    file_fields=(
+        'file_sk',
+        'file_spmt',
+        'file_latsar',
+        'file_karpeg',
+    ),
+)
 
-    def get_success_url(self) -> str:
-        jabatan = self.request.GET.get('jabatan')
-        return f"{reverse_lazy('riwayat_urls:riwayat_jabatan')}?jabatan={jabatan}"
-
-    def get_context_data(self, **kwargs):
-        jabatan = self.request.GET.get('jabatan')
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='jabatan')
-        nip = None
-        if self.request.user.is_superuser and jabatan:
-            data = RiwayatJabatan.objects.filter(jns_jabatan__icontains=jabatan).order_by('no_urut_dokumen')
-        elif self.request.user.is_superuser:
-            data = RiwayatJabatan.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatJabatan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatJabatanDeleteView, self).get_context_data(**kwargs)
-        context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Jabatan',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'jabatan'
-        })
-        return context
-    
-    def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file:
-            if os.path.isfile(self.object.file.path):
-                os.remove(self.object.file.path)
-        if self.object.file_pemberhentian:
-            if os.path.isfile(self.object.file_pemberhentian.path):
-                os.remove(self.object.file_pemberhentian.path)
-        return super().form_valid(form)
-    
-
-class RiwayatPengangkatanView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get(self, request, **kwargs):
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        data = RiwayatPengangkatan.objects.all().order_by('no_urut_dokumen')
-        dok = DokumenSDM.objects.filter(url='pengangkatan')
-        initial = {'dokumen':dok.first()}
-        nip=None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            initial = {'pegawai':user, 'dokumen':dok.first()}
-            if nip:
-                data = RiwayatPengangkatan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'pengangkatan'}))
-        
-        if selected_nip:
-            nip = selected_nip        
-            data = RiwayatPengangkatan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form = RiwayatPengangkatanForm(initial=initial, request=request)
-        context={
-            'user':get_user_bynip(nip),
-            'data':data,
-            'form':form,
-            'nip':nip,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Pengangkatan',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'pengangkatan'
-        }
-        return render(request, '4_riwayat_pengangkatan/riwayat_pengangkatan_master.html', context)
-    
-    def post(self, request):
-        form = RiwayatPengangkatanForm(request.POST, request.FILES, request=request)
-        if form.is_valid():
-            form.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_pengangkatan'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_pengangkatan'))
-    
-
-class RiwayatPengangkatanUpdateView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get_object(self, id, request=None):
-        try:
-            data = RiwayatPengangkatan.objects.get(id=id)
-            return data
-        except RiwayatPengangkatan.DoesNotExist:
-            messages.error(request, 'Maaf data tidak ditemukan!')
-            return None
-        
-    def get(self, request, **kwargs):
-        id = kwargs.get('id')
-        detail = self.get_object(id, request)
-        dok = DokumenSDM.objects.filter(url='pengangkatan')
-        form = RiwayatPengangkatanForm(instance=detail, request=request)
-        context={
-            'update_form':True,
-            'form':form,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Pengangkatan',
-            'form_view':'block',
-            'data_view':'none',
-            'riwayat':'active',
-            'selected':'pengangkatan'
-        }
-        return render(request, '4_riwayat_pengangkatan/riwayat_pengangkatan_master.html', context)
-    
-    def post(self, request, **kwargs):
-        id = kwargs.get('id')
-        data_detail = self.get_object(id, request)
-        instance = self.get_object(id, request)
-        form = RiwayatPengangkatanForm(request.POST, request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            riwayat_pengangkatan = form.save(commit=False)
-            if riwayat_pengangkatan.file_karpeg and data_detail.file_karpeg and data_detail.file_karpeg != riwayat_pengangkatan.file_karpeg and os.path.isfile(data_detail.file_karpeg.path):
-                os.remove(data_detail.file_karpeg.path)
-            if riwayat_pengangkatan.file_sk and data_detail.file_sk and data_detail.file_sk != riwayat_pengangkatan.file_sk and os.path.isfile(data_detail.file_sk.path):
-                os.remove(data_detail.file_sk.path)
-            if riwayat_pengangkatan.file_latsar and data_detail.file_latsar and data_detail.file_latsar != riwayat_pengangkatan.file_latsar and os.path.isfile(data_detail.file_latsar.path):
-                os.remove(data_detail.file_latsar.path)
-            if riwayat_pengangkatan.file_spmt and data_detail.file_spmt and data_detail.file_spmt != riwayat_pengangkatan.file_spmt and os.path.isfile(data_detail.file_spmt.path):
-                os.remove(data_detail.file_spmt.path)
-            riwayat_pengangkatan.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_pengangkatan'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_pengangkatan'))
+RiwayatPengangkatanView = pengangkatan_document.manage_view(
+    'RiwayatPengangkatanView'
+)
+RiwayatPengangkatanUpdateView = pengangkatan_document.update_view(
+    'RiwayatPengangkatanUpdateView'
+)
+RiwayatPengangkatanDeleteView = pengangkatan_document.delete_view(
+    'RiwayatPengangkatanDeleteView'
+)
 
 
-class UrutkanRiwayatPengangkatanView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatPengangkatanView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '4_riwayat_pengangkatan/riwayat_pengangkatan_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_pengangkatan')
     success_message = 'Urutan data berhasil diupdate!'
-    
+
     def get_form_class(self):
         form = UrutkanDokumenSDMForm
         return form
 
     def get_context_data(self, **kwargs):
+        nip = get_selected_nip(self.request)
+        user = self.request.user
+        if nip:
+            user = get_user_bynip(nip)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_pengangkatan(self.request.POST, instance=self.object)
         else:
-            urutkan_dokumen_form = urutkan_dokumen_pengangkatan(instance=self.object, queryset=self.object.riwayatpengangkatan_set.filter(pegawai=self.request.user))
+            queryset = self.object.riwayatpengangkatan_set.all()
+            if nip:
+                queryset = queryset.filter(pegawai__profil_user__nip=nip)
+            urutkan_dokumen_form = urutkan_dokumen_pengangkatan(
+                instance=self.object,
+                queryset=queryset,
+            )
         context = super(UrutkanRiwayatPengangkatanView, self).get_context_data(**kwargs)
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
+            'user': user,
+            'nip': nip,
             'page':'Home',
             'sub_page':'Riwayat',
             'title_page':'Pengangkatan',
@@ -1282,220 +978,141 @@ class UrutkanRiwayatPengangkatanView(LoginRequiredMixin, SuccessMessageMixin, Up
             'selected':'pengangkatan'
         })
         return context
+
+    def get_success_url(self):
+        url = reverse('riwayat_urls:riwayat_pengangkatan')
+        nip = get_selected_nip(self.request)
+        return f'{url}?nip={nip}' if nip else url
 
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
 
 
-class RiwayatPengangkatanDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatPengangkatan
-    template_name = '4_riwayat_pengangkatan/riwayat_pengangkatan_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_pengangkatan')
-    success_message = 'Data berhasil dihapus!'
+class PenempatanRulesMixin:
+    """Aturan satu penempatan aktif per pegawai dan state tampilan."""
 
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='pengangkatan')
-        nip = None
-        if self.request.user.is_superuser:
-            data = RiwayatPengangkatan.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatPengangkatan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatPengangkatanDeleteView, self).get_context_data(**kwargs)
-        context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Pengangkatan',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'pengangkatan'
-        })
-        return context
-    
-    def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file_karpeg:
-            if os.path.isfile(self.object.file_karpeg.path):
-                os.remove(self.object.file_karpeg.path)
-        if self.object.file_sk:
-            if os.path.isfile(self.object.file_sk.path):
-                os.remove(self.object.file_sk.path)
-        if self.object.file_latsar:
-            if os.path.isfile(self.object.file_latsar.path):
-                os.remove(self.object.file_latsar.path)
-        if self.object.file_spmt:
-            if os.path.isfile(self.object.file_spmt.path):
-                os.remove(self.object.file_spmt.path)
-        return super().form_valid(form)
-    
-
-class RiwayatPenempatanView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get_object(self, id):
-        try:
-            data = RiwayatPenempatan.objects.get(id=id)
-            return data
-        except RiwayatPenempatan.DoesNotExist:
-            return None
-
-    def get(self, request, **kwargs):
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        get_form = request.GET.get('f')
-        get_id = kwargs.get('id')
-        data = RiwayatPenempatan.objects.all().order_by('no_urut_dokumen').order_by('-status')
-        dok = DokumenSDM.objects.filter(url='penempatan')
-        initial = {'dokumen':dok.first()}
-        form_view = 'none'
-        data_view = 'block'
-        if bool(get_form):
-            form_view = 'block'
-            data_view = 'none'
-        nip=None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            initial = {'pegawai':user, 'dokumen':dok.first()}
-            if nip:
-                data = RiwayatPenempatan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen').order_by('-status')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'penempatan'}))
-        if selected_nip:
-            nip = selected_nip
-            data = RiwayatPenempatan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen').order_by('-status')
-        form = RiwayatPenempatanForm(initial=initial, request=request)
-        update_form = False
-        if get_id:
-            update_form = True
-            instance = self.get_object(get_id)
-            form = RiwayatPenempatanForm(instance=instance)
-        context={
-            'update_form':update_form,
-            'user':get_user_bynip(nip),
-            'data':data,
-            'form':form,
-            'nip':nip,
-            'get_id':get_id,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Penempatan',
-            'form_view':form_view,
-            'data_view':data_view,
-            'riwayat':'active',
-            'selected':'penempatan'
-        }
-        return render(request, '5_riwayat_penempatan/riwayat_penempatan_master.html', context)
-    
-    def post(self, request, **kwargs):
-        get_id = kwargs.get('id')
-        detail = self.get_object(get_id)
-        instance = self.get_object(get_id)
-        form = RiwayatPenempatanForm(request.POST, request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            riwayat_penempatan = form.save(commit=False)
-            riwayat_penempatan.pegawai = form.cleaned_data.get('pegawai')
-            if form.cleaned_data.get('status'):
-                RiwayatPenempatan.objects.filter(pegawai=riwayat_penempatan.pegawai).update(status=False)
-            if detail and riwayat_penempatan.file and detail.file and detail.file != riwayat_penempatan.file and os.path.isfile(detail.file.path):
-                os.remove(detail.file.path)
-            riwayat_penempatan.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_penempatan'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_penempatan'))
-    
-
-#Riwayat penempatan instansi sebelumnya
-class RiwayatPenempatanInstansiBeforeCreateView(SuccessMessageMixin, CreateView):
-    model = RiwayatPenempatan
-    form_class = RiwayatPenempatanLainnyaForm
-    template_name = '5_riwayat_penempatan/riwayat_penempatan_form_create_view.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_penempatan')
-    success_message = "Data berhasil disimpan!"
-
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        kwargs['pegawai'] = self.request.user
-        return kwargs
-
-    def get_initial(self):
-        initial = super().get_initial()
-        dok = DokumenSDM.objects.filter(url='penempatan').first()
-        if not self.request.user.is_superuser:
-            initial['pegawai'] = self.request.user
-        initial['dokumen'] = dok
-        initial['status'] = False
-        return initial
-
-    def get_context_data(self, **kwargs):
-        context = super(RiwayatPenempatanInstansiBeforeCreateView, self).get_context_data(**kwargs)
-        context.update({
-            'riwayat':'active',
-            'selected':'penempatan',
-        })
+    def get_common_context(self, **extra):
+        context = super().get_common_context(**extra)
+        if not context.get('update_form') and self.request.GET.get('f'):
+            context['form_view'] = 'block'
+            context['data_view'] = 'none'
         return context
 
+    def save_document(self, form):
+        document = form.save(commit=False)
+        employee = form.cleaned_data.get('pegawai')
+        document.pegawai = employee
 
-class RiwayatPenempatanInstansiBeforUpdateView(SuccessMessageMixin, UpdateView):
-    model = RiwayatPenempatan
-    form_class = RiwayatPenempatanLainnyaForm
-    template_name = '5_riwayat_penempatan/riwayat_penempatan_form_create_view.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_penempatan')
-    success_message = "Data berhasil diupdate!"
-
-    def form_valid(self, form):
-        # Get the old file
-        old_file = self.get_object().file
-        # Save the new file
-        response = super().form_valid(form)
-        # Delete the old file if a new file has been uploaded
-        if self.object.file != old_file:
-            if default_storage.isfile(old_file.name):
-                default_storage.delete(old_file.name)
-        return response
-    
-    def get_context_data(self, **kwargs):
-        context = super(RiwayatPenempatanInstansiBeforUpdateView, self).get_context_data(**kwargs)
-        context.update({
-            'riwayat':'active',
-            'selected':'penempatan',
-        })
-        return context
+        with transaction.atomic():
+            employee_documents = RiwayatPenempatan.objects.filter(
+                pegawai=employee,
+            )
+            list(employee_documents.select_for_update().values_list('pk', flat=True))
+            if document.status:
+                employee_documents.exclude(pk=document.pk).update(status=False)
+            document.save()
+            form.save_m2m()
+        return document
 
 
-class UrutkanRiwayatPenempatanView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class PenempatanLainnyaMixin(PenempatanRulesMixin):
+    def get_form(self, **kwargs):
+        if not getattr(self, 'object', None):
+            initial = kwargs.setdefault('initial', {})
+            initial.setdefault('status', False)
+        return super().get_form(**kwargs)
+
+
+penempatan_document = EmployeeDocumentModule(
+    model=RiwayatPenempatan,
+    form_class=RiwayatPenempatanForm,
+    template_name='5_riwayat_penempatan/riwayat_penempatan_master.html',
+    document_url='penempatan',
+    selected='penempatan',
+    title_page='Penempatan',
+    success_url_name='riwayat_urls:riwayat_penempatan',
+    file_fields=('file',),
+    order_by=('-status', 'no_urut_dokumen'),
+)
+
+RiwayatPenempatanView = penempatan_document.manage_view(
+    'RiwayatPenempatanView',
+    mixins=(PenempatanRulesMixin,),
+)
+RiwayatPenempatanUpdateView = penempatan_document.update_view(
+    'RiwayatPenempatanUpdateView',
+    mixins=(PenempatanRulesMixin,),
+)
+RiwayatPenempatanDeleteView = penempatan_document.delete_view(
+    'RiwayatPenempatanDeleteView'
+)
+
+
+penempatan_lainnya_document = EmployeeDocumentModule(
+    model=RiwayatPenempatan,
+    form_class=RiwayatPenempatanLainnyaForm,
+    template_name='5_riwayat_penempatan/riwayat_penempatan_form_create_view.html',
+    document_url='penempatan',
+    selected='penempatan',
+    title_page='Penempatan Instansi Luar RS',
+    success_url_name='riwayat_urls:riwayat_penempatan',
+    file_fields=('file',),
+    order_by=('-status', 'no_urut_dokumen'),
+    pk_url_kwarg='pk',
+)
+
+RiwayatPenempatanInstansiBeforeCreateView = (
+    penempatan_lainnya_document.manage_view(
+        'RiwayatPenempatanInstansiBeforeCreateView',
+        mixins=(PenempatanLainnyaMixin,),
+    )
+)
+RiwayatPenempatanInstansiBeforUpdateView = (
+    penempatan_lainnya_document.update_view(
+        'RiwayatPenempatanInstansiBeforUpdateView',
+        mixins=(PenempatanLainnyaMixin,),
+    )
+)
+
+
+class UrutkanRiwayatPenempatanView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '5_riwayat_penempatan/riwayat_penempatan_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_penempatan')
     success_message = 'Urutan data berhasil diupdate!'
-    
+
     def get_form_class(self):
         form = UrutkanDokumenSDMForm
         return form
 
     def get_context_data(self, **kwargs):
+        nip = get_selected_nip(self.request)
+        user = self.request.user
+        if nip:
+            user = get_user_bynip(nip)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_penempatan(self.request.POST, instance=self.object)
         else:
-            urutkan_dokumen_form = urutkan_dokumen_penempatan(instance=self.object, queryset=self.object.riwayat_penempatan.filter(pegawai=self.request.user))
+            queryset = self.object.riwayatpenempatan_set.all()
+            if nip:
+                queryset = queryset.filter(pegawai__profil_user__nip=nip)
+            urutkan_dokumen_form = urutkan_dokumen_penempatan(
+                instance=self.object,
+                queryset=queryset,
+            )
         context = super(UrutkanRiwayatPenempatanView, self).get_context_data(**kwargs)
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
+            'user': user,
+            'nip': nip,
             'page':'Home',
             'sub_page':'Riwayat',
             'title_page':'Penempatan',
@@ -1503,177 +1120,120 @@ class UrutkanRiwayatPenempatanView(LoginRequiredMixin, SuccessMessageMixin, Upda
             'selected':'penempatan'
         })
         return context
+
+    def get_success_url(self):
+        url = reverse('riwayat_urls:riwayat_penempatan')
+        nip = get_selected_nip(self.request)
+        return f'{url}?nip={nip}' if nip else url
 
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
     
 
-class RiwayatPenempatanDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatPenempatan
-    template_name = '5_riwayat_penempatan/riwayat_penempatan_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_penempatan')
-    success_message = "Data berhasil dihapus!"
+class BerkalaRulesMixin:
+    """Indikator jatuh tempo kenaikan gaji berkala."""
 
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='penempatan')
-        nip = None
-        if self.request.user.is_superuser:
-            data = RiwayatPenempatan.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatPenempatan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatPenempatanDeleteView, self).get_context_data(**kwargs)
+    def get_latest_tmt_gaji(self, nip):
+        if not nip:
+            return None
+        return (
+            RiwayatGajiBerkala.objects
+            .filter(
+                pegawai__profil_user__nip=nip,
+                tmt_gaji__isnull=False,
+            )
+            .order_by('-tmt_gaji', '-id')
+            .values_list('tmt_gaji', flat=True)
+            .first()
+        )
+
+    def check_status(self, nip):
+        latest_tmt = self.get_latest_tmt_gaji(nip)
+        if latest_tmt is None:
+            return True
+        elapsed = relativedelta(date.today(), latest_tmt)
+        elapsed_months = (elapsed.years * 12) + elapsed.months
+        return elapsed_months >= 21
+
+    def next_berkala(self, nip):
+        latest_tmt = self.get_latest_tmt_gaji(nip)
+        if latest_tmt is None:
+            return None
+        return latest_tmt + relativedelta(months=24)
+
+    def get_common_context(self, **extra):
+        context = super().get_common_context(**extra)
+        nip = context.get('nip')
         context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Penempatan',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'penempatan'
+            'status_berkala': self.check_status(nip),
+            'next_berkala': self.next_berkala(nip),
         })
         return context
-    
-    def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file:
-            if os.path.isfile(self.object.file.path):
-                os.remove(self.object.file.path)
-        return super().form_valid(form)
-    
-
-class RiwayatGajiBerkalaView(LoginRequiredMixin, GajiBerkalaCheck, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get(self, request, **kwargs):
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        data = RiwayatGajiBerkala.objects.all().order_by('no_urut_dokumen')
-        dok = DokumenSDM.objects.filter(url='berkala')
-        initial = {'dokumen':dok.first()}
-        nip=None
-        if not request.user.is_superuser:
-            nip = get_user(user)
-            initial = {'pegawai':user, 'dokumen':dok.first()}
-            if nip:
-                data = RiwayatGajiBerkala.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'berkala'}))
-        if selected_nip:
-            nip = selected_nip
-            data = RiwayatGajiBerkala.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form = RiwayatGajiBerkalaForm(initial=initial, request=request)
-        context={
-            'user':get_user_bynip(nip),
-            'data':data,
-            'form':form,
-            'nip':nip,
-            'dok':dok.first(),
-            'status_berkala':self.check_status(nip),
-            'next_berkala':self.next_berkala(nip),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Gaji Berkala',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'berkala'
-        }
-        return render(request, '6_riwayat_berkala/riwayat_berkala_master.html', context)
-    
-    def post(self, request):
-        form = RiwayatGajiBerkalaForm(data=request.POST, files=request.FILES, request=request)
-        if form.is_valid():
-            form.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_berkala'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_berkala'))
 
 
-class RiwayatGajiBerkalaUpdateView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
+berkala_document = EmployeeDocumentModule(
+    model=RiwayatGajiBerkala,
+    form_class=RiwayatGajiBerkalaForm,
+    template_name='6_riwayat_berkala/riwayat_berkala_master.html',
+    document_url='berkala',
+    selected='berkala',
+    title_page='Gaji Berkala',
+    success_url_name='riwayat_urls:riwayat_berkala',
+    file_fields=('file',),
+)
 
-    def get_object(self, id, request=None):
-        try:
-            data = RiwayatGajiBerkala.objects.get(id=id)
-            return data
-        except RiwayatGajiBerkala.DoesNotExist:
-            messages.error(request, 'Maaf riwayat gaji berkala belum ada!')
-            return None
-        
-    def get(self, request, **kwargs):
-        id = kwargs.get('id')
-        detail = self.get_object(id, request)
-        dok = DokumenSDM.objects.filter(url='berkala')
-        form = RiwayatGajiBerkalaForm(instance=detail, request=request)
-        context={
-            'update_form':True,
-            'form':form,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Gaji Berkala',
-            'form_view':'block',
-            'data_view':'none',
-            'riwayat':'active',
-            'selected':'berkala'
-        }
-        return render(request, '6_riwayat_berkala/riwayat_berkala_master.html', context)
-    
-    def post(self, request, **kwargs):
-        id=kwargs.get('id')
-        data_detail = self.get_object(id)
-        instance = self.get_object(id)
-        form = RiwayatGajiBerkalaForm(data=request.POST, files=request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            riwayat_berkala = form.save(commit=False)
-            if riwayat_berkala.file and data_detail.file and data_detail.file != riwayat_berkala.file and os.path.isfile(data_detail.file.path):
-                os.remove(data_detail.file.path)
-            riwayat_berkala.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_berkala'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_berkala'))
-   
+RiwayatGajiBerkalaView = berkala_document.manage_view(
+    'RiwayatGajiBerkalaView',
+    mixins=(BerkalaRulesMixin,),
+)
+RiwayatGajiBerkalaUpdateView = berkala_document.update_view(
+    'RiwayatGajiBerkalaUpdateView',
+    mixins=(BerkalaRulesMixin,),
+)
+RiwayatGajiBerkalaDeleteView = berkala_document.delete_view(
+    'RiwayatGajiBerkalaDeleteView',
+    mixins=(BerkalaRulesMixin,),
+)
 
-class UrutkanRiwayatGajiBerkalaView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+
+class UrutkanRiwayatGajiBerkalaView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '6_riwayat_berkala/riwayat_berkala_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_berkala')
     success_message = 'Urutan data berhasil diupdate!'
-    
+
     def get_form_class(self):
         form = UrutkanDokumenSDMForm
         return form
 
     def get_context_data(self, **kwargs):
-        nip = self.request.GET.get('nip')
+        nip = get_selected_nip(self.request)
+        user = self.request.user
+        if nip:
+            user = get_user_bynip(nip)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_berkala(self.request.POST, instance=self.object)
         else:
+            queryset = self.object.gaji_berkala.all()
             if nip:
-                urutkan_dokumen_form = urutkan_dokumen_berkala(instance=self.object, queryset=self.object.gaji_berkala.filter(pegawai__profil_user__nip=nip))
-            else :
-                urutkan_dokumen_form = urutkan_dokumen_berkala(instance=self.object, queryset=self.object.gaji_berkala.filter(pegawai=self.request.user))
+                queryset = queryset.filter(pegawai__profil_user__nip=nip)
+            urutkan_dokumen_form = urutkan_dokumen_berkala(
+                instance=self.object,
+                queryset=queryset,
+            )
         context = super(UrutkanRiwayatGajiBerkalaView, self).get_context_data(**kwargs)
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
+            'user': user,
+            'nip': nip,
             'page':'Home',
             'sub_page':'Riwayat',
             'title_page':'Berkala',
@@ -1682,174 +1242,111 @@ class UrutkanRiwayatGajiBerkalaView(LoginRequiredMixin, SuccessMessageMixin, Upd
         })
         return context
 
+    def get_success_url(self):
+        url = reverse('riwayat_urls:riwayat_berkala')
+        nip = get_selected_nip(self.request)
+        return f'{url}?nip={nip}' if nip else url
+
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
-    
 
-class RiwayatGajiBerkalaDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatGajiBerkala
-    template_name = '6_riwayat_berkala/riwayat_berkala_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_berkala')
-    success_message = "Data berhasil dihapus!"
 
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='berkala')
-        nip = None
-        if self.request.user.is_superuser:
-            data = RiwayatGajiBerkala.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatGajiBerkala.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatGajiBerkalaDeleteView, self).get_context_data(**kwargs)
-        context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok.first(),
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Gaji Berkala',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'berkala'
-        })
+class KinerjaContextMixin:
+    card_title = 'Riwayat Kinerja'
+
+    def get_common_context(self, **extra):
+        context = super().get_common_context(**extra)
+        context['card_title'] = self.card_title
+        context['title_page'] = 'Riwayat Kinerja'
         return context
-    
+
+
+class KinerjaSaveMixin:
+    def save_document(self, form):
+        form.instance.dokumen = self.get_document_definition()
+        return super().save_document(form)
+
+
+class KinerjaCreateMixin(KinerjaSaveMixin, KinerjaContextMixin):
+    card_title = 'Tambah Riwayat Kinerja'
+
     def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file:
-            if os.path.isfile(self.object.file.path):
-                os.remove(self.object.file.path)
-        return super().form_valid(form)
+        response = super().form_valid(form)
+        if self.request.GET.get('popup') == '1':
+            return render(
+                self.request,
+                'riwayat_pendukung/popup_success.html',
+                {
+                    'object': self.object,
+                    'field_id': self.request.GET.get(
+                        'field',
+                        'id_kinerja_dua_thn',
+                    ),
+                    'title_page': 'Tambah Riwayat Kinerja',
+                    'success_message': (
+                        'Kinerja sudah dimasukkan ke pilihan pada form usulan.'
+                    ),
+                },
+            )
+        return response
 
 
-class RiwayatKinerjaView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get(self, request, **kwargs):
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        data = RiwayatKinerja.objects.all().order_by('no_urut_dokumen')
-        dok = DokumenSDM.objects.filter(url='kinerja').first()
-        initial = {'dokumen':dok}
-        nip=None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            initial = {'pegawai':user, 'dokumen':dok}
-            if nip:
-                data = RiwayatKinerja.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'kinerja'}))
-        if selected_nip:
-            nip = selected_nip
-            data = RiwayatKinerja.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form = RiwayatKinerjaForm(initial=initial, request=request)
-        context={
-            'user':get_user_bynip(nip),
-            'data':data,
-            'form':form,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Kinerja',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'kinerja'
-        }
-        return render(request, '7_riwayat_kinerja/riwayat_kinerja_master.html', context)
-    
-    def post(self, request):
-        form = RiwayatKinerjaForm(data=request.POST, files=request.FILES, request=request)
-        if form.is_valid():
-            form.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_kinerja'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_kinerja'))
+class KinerjaUpdateMixin(KinerjaSaveMixin, KinerjaContextMixin):
+    card_title = 'Ubah Riwayat Kinerja'
 
 
-class RiwayatKinerjaUpdateView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get_object(self, id, request=None):
-        try:
-            data = RiwayatKinerja.objects.get(id=id)
-            return data
-        except RiwayatKinerja.DoesNotExist:
-            messages.error(request, 'Maaf data detail kinerja tidak ditemukan!')
-            return None
-
-    def get(self, request, **kwargs):
-        id = kwargs.get('id')
-        dok = DokumenSDM.objects.filter(url='kinerja').first()
-        instance = self.get_object(id, request)
-        form = RiwayatKinerjaForm(instance=instance, request=request)
-        context={
-            'update_form':True,
-            'form':form,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Kinerja',
-            'form_view':'block',
-            'data_view':'none',
-            'riwayat':'active',
-            'selected':'kinerja'
-        }
-        return render(request, '7_riwayat_kinerja/riwayat_kinerja_master.html', context)
-    
-    def post(self, request, **kwargs):
-        id = kwargs.get('id')
-        data_detail = self.get_object(id)
-        instance = self.get_object(id)
-        form = RiwayatKinerjaForm(data=request.POST, files=request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            riwayat_kinerja = form.save(commit=False)
-            if riwayat_kinerja.file and data_detail.file and data_detail.file != riwayat_kinerja.file and os.path.isfile(data_detail.file.path):
-                os.remove(data_detail.file.path)
-            riwayat_kinerja.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_kinerja'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_kinerja'))
+kinerja_document = EmployeeDocumentModule(
+    model=RiwayatKinerja,
+    form_class=RiwayatKinerjaForm,
+    template_name='riwayat_kinerja/form.html',
+    document_url='kinerja',
+    selected='kinerja',
+    title_page='Riwayat Kinerja',
+    success_url_name='riwayat_urls:riwayat_kinerja',
+    file_fields=('file',),
+    order_by=('-periode_kinerja_akhir', '-id'),
+    select_related=('pegawai', 'kuadran_kinerja', 'nama_penilai'),
+)
 
 
-class UrutkanRiwayatKinerjaView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatKinerjaView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '7_riwayat_kinerja/riwayat_kinerja_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_kinerja')
     success_message = 'Urutan data berhasil diupdate!'
-    
+
     def get_form_class(self):
         form = UrutkanDokumenSDMForm
         return form
 
     def get_context_data(self, **kwargs):
         context = super(UrutkanRiwayatKinerjaView, self).get_context_data(**kwargs)
-        nip = self.request.GET.get('nip')
+        nip = get_selected_nip(self.request)
+        user = self.request.user
+        if nip:
+            user = get_user_bynip(nip)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_kinerja(self.request.POST, instance=self.object)
         else:
+            queryset = self.object.riwayatkinerja_set.all()
             if nip:
-                urutkan_dokumen_form = urutkan_dokumen_kinerja(instance=self.object, queryset=self.object.riwayatkinerja_set.filter(pegawai__profil_user__nip=nip))
-            else:
-                urutkan_dokumen_form = urutkan_dokumen_kinerja(instance=self.object, queryset=self.object.riwayatkinerja_set.filter(pegawai=self.request.user))
+                queryset = queryset.filter(pegawai__profil_user__nip=nip)
+            urutkan_dokumen_form = urutkan_dokumen_kinerja(
+                instance=self.object,
+                queryset=queryset,
+            )
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
+            'user': user,
+            'nip': nip,
             'page':'Home',
             'sub_page':'Riwayat',
             'title_page':'Kinerja',
@@ -1857,153 +1354,47 @@ class UrutkanRiwayatKinerjaView(LoginRequiredMixin, SuccessMessageMixin, UpdateV
             'selected':'kinerja'
         })
         return context
+
+    def get_success_url(self):
+        url = reverse('riwayat_urls:riwayat_kinerja')
+        nip = get_selected_nip(self.request)
+        return f'{url}?nip={nip}' if nip else url
 
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
 
 
-class RiwayatKinerjaDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatKinerja
-    template_name = '7_riwayat_kinerja/riwayat_kinerja_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_kinerja')
-    success_message = "Data berhasil dihapus!"
+penghargaan_document = EmployeeDocumentModule(
+    model=RiwayatPenghargaan,
+    form_class=RiwayatPenghargaanForm,
+    template_name='8_riwayat_penghargaan/riwayat_penghargaan_master.html',
+    document_url='penghargaan',
+    selected='penghargaan',
+    title_page='Penghargaan',
+    success_url_name='riwayat_urls:riwayat_penghargaan',
+    file_fields=('file',),
+)
 
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='kinerja').first()
-        nip = None
-        if self.request.user.is_superuser:
-            data = RiwayatKinerja.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatKinerja.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatKinerjaDeleteView, self).get_context_data(**kwargs)
-        context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Kinerja',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'kinerja'
-        })
-        return context
-    
-    def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file:
-            if os.path.isfile(self.object.file.path):
-                os.remove(self.object.file.path)
-        return super().form_valid(form)
-    
-
-class RiwayatPenghargaanView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get(self, request, **kwargs):
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        data = RiwayatPenghargaan.objects.all().order_by('no_urut_dokumen')
-        dok = DokumenSDM.objects.filter(url='penghargaan').first()
-        initial = {'dokumen':dok}
-        nip=None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            initial = {'pegawai':user, 'dokumen':dok}
-            if nip:
-                data = RiwayatPenghargaan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'penghargaan'}))
-        if selected_nip:
-            nip = selected_nip
-            data = RiwayatPenghargaan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form = RiwayatPenghargaanForm(initial=initial, request=request)
-        context={
-            'user':get_user_bynip(nip),
-            'data':data,
-            'form':form,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Penghargaan',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'penghargaan'
-        }
-        return render(request, '8_riwayat_penghargaan/riwayat_penghargaan_master.html', context)
-    
-    def post(self, request):
-        form = RiwayatPenghargaanForm(data=request.POST, files=request.FILES, request=request)
-        if form.is_valid():
-            form.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_penghargaan'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_penghargaan'))
-    
-
-class RiwayatPenghargaanUpdateView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get_object(self, id):
-        try:
-            data = RiwayatPenghargaan.objects.get(id=id)
-            return data
-        except RiwayatPenghargaan.DoesNotExist:
-            return None
-        
-    def get(self, request, **kwargs):
-        id = kwargs.get('id')
-        dok = DokumenSDM.objects.filter(url='penghargaan').first()
-        instance = self.get_object(id)
-        form = RiwayatPenghargaanForm(instance=instance, request=request)
-        context={
-            'update_form':True,
-            'form':form,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Penghargaan',
-            'form_view':'block',
-            'data_view':'none',
-            'riwayat':'active',
-            'penghargaan':'penghargaan'
-        }
-        return render(request, '8_riwayat_penghargaan/riwayat_penghargaan_master.html', context)
-    
-    def post(self, request, **kwargs):
-        id = kwargs.get('id')
-        data_detail = self.get_object(id)
-        instance = self.get_object(id)
-        form = RiwayatPenghargaanForm(data=request.POST, files=request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            riwayat_penghargaan = form.save(commit=False)
-            if riwayat_penghargaan.file and data_detail.file and data_detail.file != riwayat_penghargaan.file and os.path.isfile(data_detail.file.path):
-                os.remove(data_detail.file.path)
-            riwayat_penghargaan.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_penghargaan'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_penghargaan'))
+RiwayatPenghargaanView = penghargaan_document.manage_view(
+    'RiwayatPenghargaanView'
+)
+RiwayatPenghargaanUpdateView = penghargaan_document.update_view(
+    'RiwayatPenghargaanUpdateView'
+)
+RiwayatPenghargaanDeleteView = penghargaan_document.delete_view(
+    'RiwayatPenghargaanDeleteView'
+)
 
 
-class UrutkanRiwayatPenghargaanView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatPenghargaanView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '8_riwayat_penghargaan/riwayat_penghargaan_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_penghargaan')
@@ -2014,17 +1405,23 @@ class UrutkanRiwayatPenghargaanView(LoginRequiredMixin, SuccessMessageMixin, Upd
         return form
 
     def get_context_data(self, **kwargs):
-        nip = self.request.GET.get('nip')
+        nip = get_selected_nip(self.request)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_penghargaan(self.request.POST, instance=self.object)
         else:
+            queryset = self.object.riwayatpenghargaan_set.all()
             if nip:
-                urutkan_dokumen_form = urutkan_dokumen_penghargaan(instance=self.object, queryset=self.object.riwayatpenghargaan_set.filter(pegawai__profil_user__nip=nip))
-            else:    
-                urutkan_dokumen_form = urutkan_dokumen_penghargaan(instance=self.object, queryset=self.object.riwayatpenghargaan_set.filter(pegawai=self.request.user))
+                queryset = queryset.filter(pegawai__profil_user__nip=nip)
+            urutkan_dokumen_form = urutkan_dokumen_penghargaan(
+                instance=self.object,
+                queryset=queryset,
+            )
         context = super(UrutkanRiwayatPenghargaanView, self).get_context_data(**kwargs)
+        user = get_user_bynip(nip) if nip else None
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
+            'user': user,
+            'nip': nip,
             'page':'Home',
             'sub_page':'Riwayat',
             'title_page':'Penghargaan',
@@ -2033,173 +1430,69 @@ class UrutkanRiwayatPenghargaanView(LoginRequiredMixin, SuccessMessageMixin, Upd
         })
         return context
 
+    def get_success_url(self):
+        url = reverse('riwayat_urls:riwayat_penghargaan')
+        nip = get_selected_nip(self.request)
+        return f'{url}?nip={nip}' if nip else url
+
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
-    
+hukuman_document = EmployeeDocumentModule(
+    model=RiwayatHukuman,
+    form_class=RiwayatHukumanForm,
+    template_name='9_riwayat_hukuman/riwayat_hukuman_master.html',
+    document_url='hukuman',
+    selected='hukuman',
+    title_page='Hukuman',
+    success_url_name='riwayat_urls:riwayat_hukuman',
+    file_fields=('file',),
+)
 
-class RiwayatPenghargaanDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatPenghargaan
-    template_name = '8_riwayat_penghargaan/riwayat_penghargaan_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_penghargaan')
-    success_message = "Data berhasil dihapus!"
-
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='penghargaan').first()
-        nip = None
-        if self.request.user.is_superuser:
-            data = RiwayatPenghargaan.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatPenghargaan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatPenghargaanDeleteView, self).get_context_data(**kwargs)
-        context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Penghargaan',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'penghargaan':'penghargaan'
-        })
-        return context
-    
-    def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file:
-            if os.path.isfile(self.object.file.path):
-                os.remove(self.object.file.path)
-        return super().form_valid(form)
-    
-
-class RiwayatHukumanView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get(self, request, **kwargs):
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        data = RiwayatHukuman.objects.all().order_by('no_urut_dokumen')
-        dok = DokumenSDM.objects.filter(url='hukuman').first()
-        initial = {'dokumen':dok}
-        nip=None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            initial = {'pegawai':user, 'dokumen':dok}
-            if nip:
-                data = RiwayatHukuman.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'hukuman'}))
-        if selected_nip:
-            nip = selected_nip
-            data = RiwayatHukuman.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form = RiwayatHukumanForm(initial=initial, request=request)
-        context={
-            'user':get_user_bynip(nip),
-            'data':data,
-            'form':form,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Hukuman',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'hukuman'
-        }
-        return render(request, '9_riwayat_hukuman/riwayat_hukuman_master.html', context)
-    
-    def post(self, request, **kwargs):
-        form = RiwayatHukumanForm(data=request.POST, files=request.FILES, request=request)
-        if form.is_valid():
-            form.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_hukuman'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_hukuman'))
-    
-
-class RiwayatHukumanUpdateView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get_object(self, id):
-        try:
-            data = RiwayatHukuman.objects.get(id=id)
-            return data
-        except RiwayatHukuman.DoesNotExist:
-            return None
-        
-    def get(self, request, **kwargs):
-        id = kwargs.get('id')
-        dok = DokumenSDM.objects.filter(url='hukuman').first()
-        instance = self.get_object(id)
-        form = RiwayatHukumanForm(instance=instance, request=request)
-        context={
-            'update_form':True,
-            'form':form,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Hukuman',
-            'form_view':'block',
-            'data_view':'none',
-            'riwayat':'active',
-            'selected':'hukuman'
-        }
-        return render(request, '9_riwayat_hukuman/riwayat_hukuman_master.html', context)
-    
-    def post(self, request, **kwargs):
-        id = kwargs.get('id')
-        data_detail = self.get_object(id)
-        instance = self.get_object(id)
-        form = RiwayatHukumanForm(data=request.POST, files=request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            riwayat_hukuman = form.save(commit=False)
-            if riwayat_hukuman.file and data_detail.file and data_detail.file != riwayat_hukuman.file and os.path.isfile(data_detail.file.path):
-                os.remove(data_detail.file.path)
-            riwayat_hukuman.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_hukuman'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_hukuman'))
+RiwayatHukumanView = hukuman_document.manage_view('RiwayatHukumanView')
+RiwayatHukumanUpdateView = hukuman_document.update_view(
+    'RiwayatHukumanUpdateView'
+)
+RiwayatHukumanDeleteView = hukuman_document.delete_view(
+    'RiwayatHukumanDeleteView'
+)
 
 
-class UrutkanRiwayatHukumanView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatHukumanView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '9_riwayat_hukuman/riwayat_hukuman_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_hukuman')
     success_message = 'Urutan data berhasil diupdate!'
-    
+
     def get_form_class(self):
         form = UrutkanDokumenSDMForm
         return form
 
     def get_context_data(self, **kwargs):
-        nip = self.request.GET.get('nip')
+        nip = get_selected_nip(self.request)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_hukuman(self.request.POST, instance=self.object)
         else:
+            queryset = self.object.riwayathukuman_set.all()
             if nip:
-                urutkan_dokumen_form = urutkan_dokumen_hukuman(instance=self.object, queryset=self.object.riwayathukuman_set.filter(pegawai__profil_user__nip=nip))
-            else:
-                urutkan_dokumen_form = urutkan_dokumen_hukuman(instance=self.object, queryset=self.object.riwayathukuman_set.filter(pegawai=self.request.user))
+                queryset = queryset.filter(pegawai__profil_user__nip=nip)
+            urutkan_dokumen_form = urutkan_dokumen_hukuman(
+                instance=self.object,
+                queryset=queryset,
+            )
         context = super(UrutkanRiwayatHukumanView, self).get_context_data(**kwargs)
+        user = get_user_bynip(nip) if nip else None
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
+            'user': user,
+            'nip': nip,
             'page':'Home',
             'sub_page':'Riwayat',
             'title_page':'Hukuman',
@@ -2207,53 +1500,21 @@ class UrutkanRiwayatHukumanView(LoginRequiredMixin, SuccessMessageMixin, UpdateV
             'selected':'hukuman'
         })
         return context
+
+    def get_success_url(self):
+        url = reverse('riwayat_urls:riwayat_hukuman')
+        nip = get_selected_nip(self.request)
+        return f'{url}?nip={nip}' if nip else url
 
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
-        return super().form_valid(form)
-    
-
-class RiwayatHukumanDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatHukuman
-    template_name = '9_riwayat_hukuman/riwayat_hukuman_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_hukuman')
-    success_message = "Data berhasil dihapus!"
-
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='hukuman').first()
-        nip = None
-        if self.request.user.is_superuser:
-            data = RiwayatHukuman.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatHukuman.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatHukumanDeleteView, self).get_context_data(**kwargs)
-        context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Hukuman',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'hukuman'
-        })
-        return context
-    
-    def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file:
-            if os.path.isfile(self.object.file.path):
-                os.remove(self.object.file.path)
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
     
 
@@ -2263,12 +1524,12 @@ class RiwayatCutiView(LoginRequiredMixin, CheckCuti, View):
 
     def get(self, request, **kwargs):
         user = request.user
-        selected_nip = request.GET.get('nip')
+        selected_nip = get_selected_nip(request)
         data = RiwayatCuti.objects.all().order_by('no_urut_dokumen')
         dok = DokumenSDM.objects.filter(url='cuti').first()
         initial = {'dokumen':dok}
         nip=None
-        if not request.user.is_superuser:
+        if not request.user.is_dokumen_admin:
             nip = get_nip(user)
             initial = {'pegawai':user, 'dokumen':dok}
             if nip:
@@ -2314,7 +1575,7 @@ class RiwayatCutiUpdateView(LoginRequiredMixin, View):
 
     def get_object(self, id, request=None):
         try:
-            data = RiwayatCuti.objects.get(id=id)
+            data = get_accessible_document(RiwayatCuti, self.request.user, id=id)
             return data
         except RiwayatCuti.DoesNotExist:
             messages.error(request, 'detail data yang akan diedit tidak ditemukan!')
@@ -2344,7 +1605,7 @@ class RiwayatCutiUpdateView(LoginRequiredMixin, View):
         action = request.GET.get('delete')
         data_detail = self.get_object(id)
         instance = self.get_object(id)
-        if request.user.is_superuser and action == 'delete':
+        if request.user.is_dokumen_admin and action == 'delete':
             data_detail.delete()
             return redirect(reverse('riwayat_urls:riwayat_cuti'))
         form = RiwayatCutiForm(data=request.POST, files=request.FILES, instance=instance, request=request)
@@ -2360,7 +1621,7 @@ class RiwayatCutiUpdateView(LoginRequiredMixin, View):
             return redirect(reverse('riwayat_urls:riwayat_cuti'))
 
 
-class UrutkanRiwayatCutiView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatCutiView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '10_riwayat_cuti/riwayat_cuti_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_cuti')
@@ -2371,7 +1632,7 @@ class UrutkanRiwayatCutiView(LoginRequiredMixin, SuccessMessageMixin, UpdateView
         return form
 
     def get_context_data(self, **kwargs):
-        nip = self.request.GET.get('nip')
+        nip = get_selected_nip(self.request)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_cuti(self.request.POST, instance=self.object)
         else:
@@ -2485,7 +1746,7 @@ class RiwayatCutiMonitoringListView(LoginRequiredMixin, ListView):
             .order_by('status_priority', '-created_at')
         )
 
-        if self.request.user.is_superuser:
+        if self.request.user.is_dokumen_admin:
             return base_queryset
 
         if not self.request.user.is_staff:
@@ -2515,43 +1776,74 @@ class RiwayatCutiMonitoringListView(LoginRequiredMixin, ListView):
         return context
     
         
+def get_diklat_employee_queryset(user):
+    """Pegawai yang boleh dipantau pada modul Diklat."""
+    queryset = Users.objects.all()
+    if user.is_dokumen_admin:
+        return queryset
+    if not user.is_staff:
+        return queryset.filter(pk=user.pk)
+
+    active_placement = user.riwayat_penempatan.filter(status=True).last()
+    if active_placement is None:
+        return queryset.none()
+
+    placement = active_placement.penempatan
+    return queryset.filter(
+        Q(riwayat_penempatan__penempatan_level3__sub_bidang=placement)
+        | Q(riwayat_penempatan__penempatan_level2__bidang=placement)
+        | Q(riwayat_penempatan__penempatan_level1__unor=placement)
+    ).distinct()
+
+
+class DiklatSaveMixin:
+    def save_document(self, form):
+        form.instance.dokumen = self.get_document_definition()
+        return super().save_document(form)
+
+
+diklat_document = EmployeeDocumentModule(
+    model=RiwayatDiklat,
+    form_class=RiwayatDiklatForm,
+    template_name='11_riwayat_diklat/riwayat_diklat_form.html',
+    document_url='diklat',
+    selected='diklat',
+    title_page='Diklat',
+    success_url_name='riwayat_urls:riwayat_diklat',
+    file_fields=('file', 'file_laporan'),
+)
+
+
 class RiwayatDiklatListView(LoginRequiredMixin, ListView):
     login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
     model = Users
     template_name = '11_riwayat_diklat/riwayat_diklat_list_pegawai.html'
     context_object_name = 'data'
+    paginate_by = 25
     
     def get_queryset(self):
-        queryset=self.model.objects.none()
-        data = self.model.objects.filter(riwayatdiklat__isnull=False)
-        if self.request.user.is_superuser:
-            queryset = data.values('id', 'riwayatdiklat__tgl_mulai__year', 'first_name', 'last_name', 'profil_user__nip').annotate(
-                frekuensi_diklat = Count('riwayatdiklat', distinct=True),
-                jam_diklat = Sum('riwayatdiklat__jam_pelajaran', distinct=True)
-            ).distinct()
-            return queryset
-        if self.request.user.is_staff:
-            queryset = data.filter(riwayat_penempatan__penempatan_level3__sub_bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan
-            ).values('id', 'riwayatdiklat__tgl_mulai__year', 'first_name', 'last_name', 'profil_user__nip').annotate(
-                frekuensi_diklat=Count('riwayatdiklat', distinct=True),
-                jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True) 
-            ).distinct()|data.filter(riwayat_penempatan__penempatan_level2__bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan
-            ).values('id', 'riwayatdiklat__tgl_mulai__year', 'first_name', 'last_name', 'profil_user__nip').annotate(
-                frekuensi_diklat=Count('riwayatdiklat', distinct=True),
-                jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True)
-            ).distinct()|data.filter(riwayat_penempatan__penempatan_level1__unor=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan
-            ).values('id', 'riwayatdiklat__tgl_mulai__year', 'first_name', 'last_name', 'profil_user__nip').annotate(
-                frekuensi_diklat=Count('riwayatdiklat', distinct=True),
-                jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True)
-            ).distinct()
-            return queryset
-        else:
-            queryset = data.filter(pk=self.request.user.pk).values('id', 'riwayatdiklat__tgl_mulai__year', 'first_name', 'last_name', 'profil_user__nip').annotate(
-                frekuensi_diklat=Count('riwayatdiklat', distinct=True),
-                jam_diklat = Sum('riwayatdiklat__jam_pelajaran', distinct=True)
-            )
-        return queryset
+        queryset = get_diklat_employee_queryset(self.request.user)
+        selected_nip = get_selected_nip(self.request)
+        if selected_nip:
+            queryset = queryset.filter(profil_user__nip=selected_nip)
+        return queryset.filter(
+            riwayatdiklat__isnull=False,
+        ).values(
+            'id',
+            'riwayatdiklat__tgl_mulai__year',
+            'first_name',
+            'last_name',
+            'profil_user__nip',
+        ).annotate(
+            frekuensi_diklat=Count('riwayatdiklat', distinct=True),
+            jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True),
+        ).distinct()
+
+    def get_paginate_by(self, queryset):
+        if self.request.user.is_dokumen_admin and not get_selected_nip(self.request):
+            return self.paginate_by
+        return None
     
     
     def get_context_data(self, **kwargs):
@@ -2563,15 +1855,24 @@ class RiwayatDiklatListView(LoginRequiredMixin, ListView):
         context['data_view']='block'
         context['riwayat']='active'
         context['selected']='diklat'
+        context['server_side_document_pagination'] = bool(
+            self.request.user.is_dokumen_admin
+            and not get_selected_nip(self.request)
+        )
         return context
     
 
-class RiwayatDiklatDetailView(LoginRequiredMixin, DeleteView):
+class RiwayatDiklatDetailView(LoginRequiredMixin, DetailView):
     login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
     model = Users
     template_name = '11_riwayat_diklat/riwayat_diklat_list_perorang.html'
     context_object_name = 'data'
+
+    def get_queryset(self):
+        return get_diklat_employee_queryset(self.request.user).select_related(
+            'profil_user',
+        ).prefetch_related('riwayatdiklat_set')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -2583,118 +1884,25 @@ class RiwayatDiklatDetailView(LoginRequiredMixin, DeleteView):
         context['riwayat']='active'
         context['selected']='diklat'
         return context
-            
 
-class RiwayatDiklatCreateView(LoginRequiredMixin, CreateView):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-    model = RiwayatDiklat
-    form_class = RiwayatDiklatForm
-    template_name = '11_riwayat_diklat/riwayat_diklat_form.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_diklat')
-    
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        kwargs['request']=self.request
-        return kwargs
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['page']='Home'
-        context['sub_page']='Riwayat'
-        context['title_page']='Diklat'
-        context['form_view']='none'
-        context['data_view']='block'
-        context['riwayat']='active'
-        context['selected']='diklat'
-        return context
-    
-    def form_invalid(self, form):
-        messages.error(self.request, 'Maaf terjadi kesalahan, harap hubungi admin!')
-        print('error: ', form.errors)
-        return super().form_invalid(form)
-                
-class RiwayatDiklatView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
 
-    def get(self, request, **kwargs):
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        data = RiwayatDiklat.objects.all().order_by('no_urut_dokumen')
-        dok = DokumenSDM.objects.filter(url='diklat').first()
-        users = Users.objects.all()
-        initial = {'dokumen':dok}
-        nip=None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            initial = {'pegawai':user, 'dokumen':dok}
-            if nip:
-                data = RiwayatDiklat.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'diklat'}))
-        if selected_nip:
-            nip = selected_nip
-            data = RiwayatDiklat.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form = RiwayatDiklatForm(initial=initial, request=request)
-        context={
-            'user':get_user_bynip(nip),
-            'data':users,
-            'form':form,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Diklat',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'diklat'
-        }
-        return render(request, '11_riwayat_diklat/riwayat_diklat_master.html', context)
-    
-    def post(self, request, **kwargs):
-        form = RiwayatDiklatForm(data=request.POST, files=request.FILES, request=request)
-        if form.is_valid():
-            form.save() #save dimodifikasi untuk menyimpan pelatihan yang bersifat kompetensi ke dalam MODEL KOMPETENSI
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_diklat'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_diklat'))
+RiwayatDiklatCreateView = diklat_document.create_view(
+    'RiwayatDiklatCreateView',
+    mixins=(DiklatSaveMixin,),
+)
 
 
 class RiwayatDiklatPegawaiView(LoginRequiredMixin, ListView):
     model = RiwayatDiklat
     template_name = '11_riwayat_diklat/riwayat_diklat_pegawai.html'
     context_object_name = 'data'
-    
+
     def get_queryset(self):
-        user = self.request.user
-        nip = get_nip(user)
-        if self.request.user.is_superuser:
-            data = Users.objects.all().annotate(
-                frekuensi_diklat=Count('riwayatdiklat'),
-                jam_diklat=Sum('riwayatdiklat__jam_pelajaran')
-            )
-        elif self.request.user.is_staff:
-            data = Users.objects.filter(riwayat_penempatan__penempatan_level3__sub_bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan).annotate(
-                frekuensi_diklat=Count('riwayatdiklat', distinct=True),
-                jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True) 
-            ).distinct()|Users.objects.filter(riwayat_penempatan__penempatan_level2__bidang=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan).annotate(
-                frekuensi_diklat=Count('riwayatdiklat', distinct=True),
-                jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True)
-            ).distinct()|Users.objects.filter(riwayat_penempatan__penempatan_level1__unor=self.request.user.riwayat_penempatan.filter(status=True).last().penempatan).annotate(
-                frekuensi_diklat=Count('riwayatdiklat', distinct=True),
-                jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True)
-            ).distinct()
-        else:
-            data = Users.objects.filter(profil_user__nip=nip).annotate(
-                frekuensi_diklat=Count('riwayatdiklat'),
-                jam_diklat=Sum('riwayatdiklat__jam_pelajaran')
-            )
-        return data
-    
+        return get_diklat_employee_queryset(self.request.user).annotate(
+            frekuensi_diklat=Count('riwayatdiklat', distinct=True),
+            jam_diklat=Sum('riwayatdiklat__jam_pelajaran', distinct=True),
+        )
+
     def get_context_data(self, **kwargs):
         context = super(RiwayatDiklatPegawaiView, self).get_context_data(**kwargs)
         context.update({
@@ -2705,78 +1913,42 @@ class RiwayatDiklatPegawaiView(LoginRequiredMixin, ListView):
             'selected':'diklat'
         })
         return context
-    
-    
-class RiwayatDiklatUpdateView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
 
-    def get_object(self, id, request=None):
-        try:
-            data = RiwayatDiklat.objects.get(id=id)
-            return data
-        except RiwayatDiklat.DoesNotExist:
-            messages.error(request, 'Mohon maaf detail data yang akan diupdate tidak ditemukan!')
 
-    def get(self, request, **kwargs):
-        id = kwargs.get('id')
-        dok = DokumenSDM.objects.filter(url='diklat').first()
-        instance = self.get_object(id, request)
-        form = RiwayatDiklatForm(instance=instance, request=request)
-        context={
-            'update_form':True,
-            'form':form,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Diklat',
-            'form_view':'block',
-            'data_view':'none',
-            'riwayat':'active',
-            'selected':'diklat'
-        }
-        return render(request, '11_riwayat_diklat/riwayat_diklat_master.html', context)
-    
-    def post(self, request, **kwargs):
-        id=kwargs.get('id')
-        data_detail = self.get_object(id)
-        instance = self.get_object(id)
-        form = RiwayatDiklatForm(data=request.POST, files=request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            # riwayat_diklat = form.save(commit=False)
-            # if riwayat_diklat and riwayat_diklat.file and data_detail.file and data_detail.file != riwayat_diklat.file and os.path.isfile(data_detail.file.path):
-            #     os.remove(data_detail.file.path)
-            # riwayat_diklat.save()
-            form.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_diklat'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_diklat'))
-        
+RiwayatDiklatUpdateView = diklat_document.update_view(
+    'RiwayatDiklatUpdateView',
+    mixins=(DiklatSaveMixin,),
+)
 
-class UrutkanRiwayatDiklatView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+
+class UrutkanRiwayatDiklatView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '11_riwayat_diklat/riwayat_diklat_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_diklat')
     success_message = 'Urutan data berhasil diupdate!'
-    
+
     def get_form_class(self):
         form = UrutkanDokumenSDMForm
         return form
 
     def get_context_data(self, **kwargs):
-        nip = self.request.GET.get('nip')
+        nip = get_selected_nip(self.request)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_diklat(self.request.POST, instance=self.object)
         else:
+            queryset = self.object.riwayatdiklat_set.all()
             if nip:
-                urutkan_dokumen_form = urutkan_dokumen_diklat(instance=self.object, queryset=self.object.riwayatdiklat_set.filter(pegawai__profil_user__nip=nip))
-            else:    
-                urutkan_dokumen_form = urutkan_dokumen_diklat(instance=self.object, queryset=self.object.riwayatdiklat_set.filter(pegawai=self.request.user))
+                queryset = queryset.filter(pegawai__profil_user__nip=nip)
+            urutkan_dokumen_form = urutkan_dokumen_diklat(
+                instance=self.object,
+                queryset=queryset.distinct(),
+            )
         context = super(UrutkanRiwayatDiklatView, self).get_context_data(**kwargs)
+        user = get_user_bynip(nip) if nip else None
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
+            'user': user,
+            'nip': nip,
             'page':'Home',
             'sub_page':'Riwayat',
             'title_page':'Diklat',
@@ -2784,154 +1956,53 @@ class UrutkanRiwayatDiklatView(LoginRequiredMixin, SuccessMessageMixin, UpdateVi
             'selected':'diklat'
         })
         return context
+
+    def get_success_url(self):
+        url = reverse('riwayat_urls:riwayat_diklat')
+        nip = get_selected_nip(self.request)
+        return f'{url}?nip={nip}' if nip else url
 
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
+
+
+RiwayatDiklatDeleteView = diklat_document.delete_view(
+    'RiwayatDiklatDeleteView',
+    template_name='11_riwayat_diklat/riwayat_diklat_master.html',
+)
     
 
-class RiwayatDiklatDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatDiklat
-    template_name = '11_riwayat_diklat/riwayat_diklat_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_diklat')
-    success_message = "Data berhasil dihapus!"
+kompetensi_document = EmployeeDocumentModule(
+    model=Kompetensi,
+    form_class=KompetensiForm,
+    template_name='18_riwayat_kompetensi/riwayat_kompetensi_master.html',
+    document_url='kompetensi',
+    selected='kompetensi',
+    title_page='Kompetensi',
+    success_url_name='riwayat_urls:riwayat_kompetensi',
+    file_fields=('file_sert',),
+)
 
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='diklat').first()
-        nip = None
-        if self.request.user.is_superuser:
-            data = RiwayatDiklat.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatDiklat.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatDiklatDeleteView, self).get_context_data(**kwargs)
-        context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Diklat',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'diklat'
-        })
-        return context
-    
-    def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file:
-            if os.path.isfile(self.object.file.path):
-                os.remove(self.object.file.path)
-        return super().form_valid(form)
-    
-
-class RiwayatKompetensiView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get(self, request, *args, **kwargs):
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        data = Kompetensi.objects.all().order_by('no_urut_dokumen')
-        dok = DokumenSDM.objects.filter(url='kompetensi').first()
-        initial = {'dokumen':dok}
-        nip=None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            initial = {'pegawai':get_user_bynip(nip), 'dokumen':dok}
-            if nip:
-                data = Kompetensi.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'kompetensi'}))
-        if selected_nip:
-            nip = selected_nip
-            data = Kompetensi.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form = KompetensiForm(initial=initial, request=request)
-        context={
-            'user':get_user_bynip(nip),
-            'data':data,
-            'form':form,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Kompetensi',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'kompetensi'
-        }
-        return render(request, '18_riwayat_kompetensi/riwayat_kompetensi_master.html', context)
-    
-    def post(self, request, **kwargs):
-        form = KompetensiForm(data=request.POST, files=request.FILES, request=request)
-        if form.is_valid():
-            form.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_kompetensi'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_kompetensi'))
-        
-
-class RiwayatKomptensiUpdateView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get_object(self, id, request=None):
-        try:
-            data = Kompetensi.objects.get(id=id)
-            return data
-        except Kompetensi.DoesNotExist:
-            messages.error(request, 'Mohon maaf detail data yang akan diupdate tidak ditemukan!')
-            return None
-        
-    def get(self, request, **kwargs):
-        id=kwargs.get('id')
-        dok = DokumenSDM.objects.filter(url='kompetensi').first()
-        instance = self.get_object(id, request)
-        form = KompetensiForm(instance=instance, request=request)
-        context={
-            'update_form':True,
-            'form':form,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Kompetensi',
-            'form_view':'block',
-            'data_view':'none',
-            'riwayat':'active',
-            'selected':'kompetensi'
-        }
-        return render(request, '18_riwayat_kompetensi/riwayat_kompetensi_master.html', context)
-    
-    def post(self, request, **kwargs):
-        id=kwargs.get('id')
-        data_detail = self.get_object(id)
-        instance = self.get_object(id)
-        form = KompetensiForm(data=request.POST, files=request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            riwayat_kompetensi = form.save(commit=False)
-            if riwayat_kompetensi.file_sert and data_detail.file_sert and data_detail.file_sert != riwayat_kompetensi.file_sert and os.path.isfile(data_detail.file_sert.path):
-                os.remove(data_detail.file_sert.path)
-            riwayat_kompetensi.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_kompetensi'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_kompetensi'))
+RiwayatKompetensiView = kompetensi_document.manage_view(
+    'RiwayatKompetensiView'
+)
+RiwayatKomptensiUpdateView = kompetensi_document.update_view(
+    'RiwayatKomptensiUpdateView'
+)
+RiwayatKompetensiDeleteView = kompetensi_document.delete_view(
+    'RiwayatKompetensiDeleteView'
+)
 
 
-class UrutkanRiwayatKompetensiView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatKompetensiView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '18_riwayat_kompetensi/riwayat_kompetensi_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_kompetensi')
@@ -2942,17 +2013,23 @@ class UrutkanRiwayatKompetensiView(LoginRequiredMixin, SuccessMessageMixin, Upda
         return form
 
     def get_context_data(self, **kwargs):
-        nip = self.request.GET.get('nip')
+        nip = get_selected_nip(self.request)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_kompetensi(self.request.POST, instance=self.object)
         else:
+            queryset = self.object.kompetensi_set.all()
             if nip:
-                urutkan_dokumen_form = urutkan_dokumen_kompetensi(instance=self.object, queryset=self.object.kompetensi_set.filter(pegawai__profil_user__nip=nip))
-            else:
-                urutkan_dokumen_form = urutkan_dokumen_kompetensi(instance=self.object, queryset=self.object.kompetensi_set.filter(pegawai=self.request.user))
+                queryset = queryset.filter(pegawai__profil_user__nip=nip)
+            urutkan_dokumen_form = urutkan_dokumen_kompetensi(
+                instance=self.object,
+                queryset=queryset,
+            )
         context = super(UrutkanRiwayatKompetensiView, self).get_context_data(**kwargs)
+        user = get_user_bynip(nip) if nip else None
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
+            'user': user,
+            'nip': nip,
             'page':'Home',
             'sub_page':'Riwayat',
             'title_page':'Kompetensi',
@@ -2960,174 +2037,74 @@ class UrutkanRiwayatKompetensiView(LoginRequiredMixin, SuccessMessageMixin, Upda
             'selected':'kompetensi'
         })
         return context
+
+    def get_success_url(self):
+        url = reverse('riwayat_urls:riwayat_kompetensi')
+        nip = get_selected_nip(self.request)
+        return f'{url}?nip={nip}' if nip else url
 
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
 
 
-class RiwayatKompetensiDeleteView(SuccessMessageMixin, DeleteView):
-    model = Kompetensi
-    template_name = '18_riwayat_kompetensi/riwayat_kompetensi_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_kompetensi')
-    success_message = "Data berhasil dihapus!"
+organisasi_document = EmployeeDocumentModule(
+    model=RiwayatOrganisasi,
+    form_class=RiwayatOrganisasiForm,
+    template_name='12_riwayat_organisasi/riwayat_organisasi_master.html',
+    document_url='organisasi',
+    selected='organisasi',
+    title_page='Organisasi',
+    success_url_name='riwayat_urls:riwayat_organisasi',
+    file_fields=('file',),
+)
 
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='kompetensi').first()
-        nip = None
-        if self.request.user.is_superuser:
-            data = Kompetensi.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = Kompetensi.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatKompetensiDeleteView, self).get_context_data(**kwargs)
-        context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok,
-            'sub_page':'Riwayat',
-            'title_page':'Kompetensi',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'kompetensi'
-        })
-        return context
-    
-    def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file_sert:
-            if os.path.isfile(self.object.file_sert.path):
-                os.remove(self.object.file_sert.path)
-        return super().form_valid(form)
-
-
-class RiwayatOrganisasiView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get(self, request, **kwargs):
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        data = RiwayatOrganisasi.objects.all().order_by('no_urut_dokumen')
-        dok = DokumenSDM.objects.filter(url='organisasi').first()
-        initial = {'dokumen':dok}
-        nip=None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            initial = {'pegawai':get_user_bynip(nip), 'dokumen':dok}
-            if nip:
-                data = RiwayatOrganisasi.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'organisasi'}))
-        if selected_nip:
-            nip = selected_nip
-            data = RiwayatOrganisasi.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form = RiwayatOrganisasiForm(initial=initial, request=request)
-        context={
-            'user':get_user_bynip(nip),
-            'data':data,
-            'form':form,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Organisasi',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'organisasi'
-        }
-        return render(request, '12_riwayat_organisasi/riwayat_organisasi_master.html', context)
-    
-    def post(self, request, **kwargs):
-        form = RiwayatOrganisasiForm(data=request.POST, files=request.FILES, request=request)
-        if form.is_valid():
-            form.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_organisasi'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_organisasi'))
-
-
-class RiwayatOrganisasiUpdateView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get_object(self, id, request=None):
-        try:
-            data = RiwayatOrganisasi.objects.get(id=id)
-            return data
-        except RiwayatOrganisasi.DoesNotExist:
-            messages.error(request, 'Mohon maaf detail data yang akan diupdate tidak ditemukan!')
-            return None
-        
-    def get(self, request, **kwargs):
-        id=kwargs.get('id')
-        dok = DokumenSDM.objects.filter(url='organisasi').first()
-        instance = self.get_object(id, request)
-        form = RiwayatOrganisasiForm(instance=instance, request=request)
-        context={
-            'update_form':True,
-            'form':form,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Organisasi',
-            'form_view':'block',
-            'data_view':'none',
-            'riwayat':'active',
-            'selected':'organisasi'
-        }
-        return render(request, '12_riwayat_organisasi/riwayat_organisasi_master.html', context)
-    
-    def post(self, request, **kwargs):
-        id=kwargs.get('id')
-        data_detail = self.get_object(id)
-        instance = self.get_object(id)
-        form = RiwayatOrganisasiForm(data=request.POST, files=request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            riwayat_organisasi = form.save(commit=False)
-            if riwayat_organisasi.file and data_detail.file and data_detail.file != riwayat_organisasi.file and os.path.isfile(data_detail.file.path):
-                os.remove(data_detail.file.path)
-            riwayat_organisasi.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_organisasi'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_organisasi'))
+RiwayatOrganisasiView = organisasi_document.manage_view(
+    'RiwayatOrganisasiView'
+)
+RiwayatOrganisasiUpdateView = organisasi_document.update_view(
+    'RiwayatOrganisasiUpdateView'
+)
+RiwayatOrganisasiDeleteView = organisasi_document.delete_view(
+    'RiwayatOrganisasiDeleteView'
+)
     
 
-class UrutkanRiwayatOrganisasiView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatOrganisasiView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '12_riwayat_organisasi/riwayat_organisasi_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_organisasi')
     success_message = 'Urutan data berhasil diupdate!'
-    
+
     def get_form_class(self):
         form = UrutkanDokumenSDMForm
         return form
 
     def get_context_data(self, **kwargs):
-        nip = self.request.GET.get('nip')
+        nip = get_selected_nip(self.request)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_organisasi(self.request.POST, instance=self.object)
         else:
+            queryset = self.object.riwayatorganisasi_set.all()
             if nip:
-                urutkan_dokumen_form = urutkan_dokumen_organisasi(instance=self.object, queryset=self.object.riwayatorganisasi_set.filter(pegawai__profil_user__nip=nip))
-            else:
-                urutkan_dokumen_form = urutkan_dokumen_organisasi(instance=self.object, queryset=self.object.riwayatorganisasi_set.filter(pegawai=self.request.user))    
+                queryset = queryset.filter(pegawai__profil_user__nip=nip)
+            urutkan_dokumen_form = urutkan_dokumen_organisasi(
+                instance=self.object,
+                queryset=queryset,
+            )
         context = super(UrutkanRiwayatOrganisasiView, self).get_context_data(**kwargs)
+        user = get_user_bynip(nip) if nip else None
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
+            'user': user,
+            'nip': nip,
             'page':'Home',
             'sub_page':'Riwayat',
             'title_page':'Organisasi',
@@ -3135,193 +2112,72 @@ class UrutkanRiwayatOrganisasiView(LoginRequiredMixin, SuccessMessageMixin, Upda
             'selected':'organisasi'
         })
         return context
+
+    def get_success_url(self):
+        url = reverse('riwayat_urls:riwayat_organisasi')
+        nip = get_selected_nip(self.request)
+        return f'{url}?nip={nip}' if nip else url
 
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
-    
 
-class RiwayatOrganisasiDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatOrganisasi
-    template_name = '12_riwayat_organisasi/riwayat_organisasi_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_organisasi')
-    success_message = "Data berhasil dihapus!"
 
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='organisasi')
-        nip = None
-        if self.request.user.is_superuser:
-            data = RiwayatOrganisasi.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatOrganisasi.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatOrganisasiDeleteView, self).get_context_data(**kwargs)
-        context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Organisasi',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'organisasi'
-        })
+class ProfesiContextMixin:
+    def get_common_context(self, **extra):
+        context = super().get_common_context(**extra)
+        context['data_str'] = context['data']
+        context['str'] = True
         return context
-    
+
+
+class ProfesiDeleteMixin(ProfesiContextMixin):
     def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file:
-            if os.path.isfile(self.object.file.path):
-                os.remove(self.object.file.path)
-        return super().form_valid(form)
+        child_files = [
+            (sip.file_sip.storage, sip.file_sip.name)
+            for sip in self.object.riwayatsipprofesi_set.all()
+            if sip.file_sip and sip.file_sip.name
+        ]
+        response = super().form_valid(form)
+        for storage, name in child_files:
+            transaction.on_commit(
+                lambda storage=storage, name=name: storage.delete(name),
+                robust=True,
+            )
+        return response
 
 
-class RiwayatProfesiView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
+profesi_document = EmployeeDocumentModule(
+    model=RiwayatProfesi,
+    form_class=RiwayatProfesiForm,
+    template_name='13_riwayat_profesi/riwayat_profesi_master.html',
+    document_url='profesi',
+    selected='profesi',
+    title_page='Profesi',
+    success_url_name='riwayat_urls:riwayat_profesi',
+    file_fields=('file_str',),
+    select_related=('pegawai', 'profesi'),
+)
 
-    def get(self, request, **kwargs):
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        data = RiwayatProfesi.objects.all().order_by('no_urut_dokumen')
-        dok = DokumenSDM.objects.filter(url='profesi').first()
-        initial = {'dokumen':dok}
-        nip=None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            initial = {'pegawai':user, 'dokumen':dok}
-            if nip:
-                data = RiwayatProfesi.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'profesi'}))
-        if selected_nip:
-            nip = selected_nip
-            data = RiwayatProfesi.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form = RiwayatProfesiForm(initial=initial, request=request)
-        context={
-            'user':get_user_bynip(nip),
-            'data_str':data,
-            'form':form,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Profesi',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'str':True,
-            'selected':'profesi'
-        }
-        return render(request, '13_riwayat_profesi/riwayat_profesi_master.html', context)
-    
-    def post(self, request, **kwargs):
-        form = RiwayatProfesiForm(data=request.POST, files=request.FILES, request=request)
-        if form.is_valid():
-            form.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_profesi'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_profesi'))
-    
-
-class RiwayatProfesiUpdateView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get_object(self, id, request=None):
-        try:
-            data = RiwayatProfesi.objects.get(id=id)
-            return data
-        except RiwayatProfesi.DoesNotExist:
-            # messages.error(request, 'Mohon maaf detail data yang akan diupdate tidak ditemukan!')
-            return None
-        
-    def get(self, request, **kwargs):
-        id=kwargs.get('id')
-        dok = DokumenSDM.objects.filter(url='profesi').first()
-        instance=self.get_object(id, request)
-        form = RiwayatProfesiForm(instance=instance, request=request)
-        context={
-            'update_form':True,
-            'form':form,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Profesi',
-            'form_view':'block',
-            'data_view':'none',
-            'riwayat':'active',
-            'selected':'profesi'
-        }
-        return render(request, '13_riwayat_profesi/riwayat_profesi_master.html', context)
-    
-    def post(self, request, **kwargs):
-        id=kwargs.get('id')
-        data_detail = self.get_object(id)
-        instance = self.get_object(id)
-        form = RiwayatProfesiForm(data=request.POST, files=request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            riwayat_profesi = form.save(commit=False)
-            if riwayat_profesi.file_str and data_detail.file_str and data_detail.file_str != riwayat_profesi.file_str and os.path.isfile(data_detail.file_str.path):
-                os.remove(data_detail.file_str.path)
-            riwayat_profesi.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_profesi'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_profesi'))
-        
-
-class RiwayatProfesiDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatProfesi
-    template_name = '13_riwayat_profesi/riwayat_profesi_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_profesi')
-    success_message = "Data berhasil dihapus!"
-
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='profesi').first()
-        nip = None
-        if self.request.user.is_superuser:
-            data = RiwayatProfesi.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatProfesi.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatProfesiDeleteView, self).get_context_data(**kwargs)
-        context.update({
-            'data_str':data,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Profesi',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'profesi'
-        })
-        return context
-    
-    def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file_str:
-            if os.path.isfile(self.object.file_str.path):
-                os.remove(self.object.file_str.path)
-        for child in self.object.riwayatsipprofesi_set.all():
-            if child.file_sip and os.path.isfile(child.file_sip.path):
-                os.remove(child.file_sip.path)
-        return super().form_valid(form)
+RiwayatProfesiView = profesi_document.manage_view(
+    'RiwayatProfesiView',
+    mixins=(ProfesiContextMixin,),
+)
+RiwayatProfesiUpdateView = profesi_document.update_view(
+    'RiwayatProfesiUpdateView',
+    mixins=(ProfesiContextMixin,),
+)
+RiwayatProfesiDeleteView = profesi_document.delete_view(
+    'RiwayatProfesiDeleteView',
+    mixins=(ProfesiDeleteMixin,),
+)
 
 
 class RiwayatSIPProfesiView(LoginRequiredMixin, View):
@@ -3329,16 +2185,16 @@ class RiwayatSIPProfesiView(LoginRequiredMixin, View):
     redirect_field_name = 'next'
 
     def get_str_object(self, id):
-        try:
-            data = RiwayatProfesi.objects.get(id=id)
-            return data
-        except RiwayatProfesi.DoesNotExist:
-            return None
+        return get_accessible_document(
+            RiwayatProfesi,
+            self.request.user,
+            pk=id,
+        )
         
     def get(self, request, **kwargs):
         id_str = kwargs.get('id')
         str_obj = self.get_str_object(id_str)
-        data = RiwayatSIPProfesi.objects.filter(riwayat_profesi=str_obj)
+        data = str_obj.riwayatsipprofesi_set.all().order_by('no_urut_dokumen')
         initial = {'riwayat_profesi':str_obj}
         form = RiwayatSIPProfesiForm(initial=initial)
         context={
@@ -3359,9 +2215,12 @@ class RiwayatSIPProfesiView(LoginRequiredMixin, View):
     
     def post(self, request, **kwargs):
         id = kwargs.get('id')
+        str_obj = self.get_str_object(id)
         form = RiwayatSIPProfesiForm(data=request.POST, files=request.FILES)
         if form.is_valid():
-            form.save()
+            sip = form.save(commit=False)
+            sip.riwayat_profesi = str_obj
+            sip.save()
             messages.success(request, save_success_message)
             return redirect(reverse('riwayat_urls:riwayat_sipprofesi', kwargs={'id':id}))
         else:
@@ -3374,23 +2233,25 @@ class RiwayatSIPProfesiUpdateView(LoginRequiredMixin, View):
     redirect_field_name = 'next'
 
     def get_str_object(self, id):
-        try:
-            data = RiwayatProfesi.objects.get(id=id)
-            return data
-        except RiwayatProfesi.DoesNotExist:
-            return None
+        return get_accessible_document(
+            RiwayatProfesi,
+            self.request.user,
+            pk=id,
+        )
 
-    def get_object(self, id):
-        try:
-            data = RiwayatSIPProfesi.objects.get(id=id)
-            return data
-        except RiwayatSIPProfesi.DoesNotExist:
-            return None
+    def get_object(self, id, id_str):
+        return get_accessible_document(
+            RiwayatSIPProfesi,
+            self.request.user,
+            pk=id,
+            riwayat_profesi_id=id_str,
+        )
     
     def get(self, request, **kwargs):
         id = kwargs.get('id')
         id_str = kwargs.get('id_str')
-        instance = self.get_object(id)
+        self.get_str_object(id_str)
+        instance = self.get_object(id, id_str)
         form = RiwayatSIPProfesiForm(instance=instance)
         context={
             'update_form':True,
@@ -3411,22 +2272,49 @@ class RiwayatSIPProfesiUpdateView(LoginRequiredMixin, View):
         id = kwargs.get('id')
         id_str = kwargs.get('id_str')
         str_obj = self.get_str_object(id_str)
-        data_detail = self.get_object(id)
-        instance=self.get_object(id)
+        instance = self.get_object(id, id_str)
+        old_file = None
+        if instance.file_sip and instance.file_sip.name:
+            old_file = (instance.file_sip.storage, instance.file_sip.name)
         form = RiwayatSIPProfesiForm(data=request.POST, files=request.FILES, instance=instance)
         if form.is_valid():
             riwayat_sipprofesi = form.save(commit=False)
-            if riwayat_sipprofesi.file_sip and data_detail.file_sip and data_detail.file_sip != riwayat_sipprofesi.file_sip and os.path.isfile(data_detail.file_sip.path):
-                os.remove(data_detail.file_sip.path)
-            riwayat_sipprofesi.save()
+            riwayat_sipprofesi.riwayat_profesi = str_obj
+            with transaction.atomic():
+                riwayat_sipprofesi.save()
+                if (
+                    old_file
+                    and old_file[1] != riwayat_sipprofesi.file_sip.name
+                ):
+                    transaction.on_commit(
+                        lambda storage=old_file[0], name=old_file[1]: storage.delete(name),
+                        robust=True,
+                    )
             messages.success(request, save_success_message)
             return redirect(reverse('riwayat_urls:riwayat_sipprofesi', kwargs={'id':str_obj.id}))
         else:
             messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_sipprofesi', kwargs={'ud':str_obj.id}))
+            return render(
+                request,
+                '13_riwayat_profesi/riwayat_profesi_master.html',
+                {
+                    'update_form': True,
+                    'form': form,
+                    'id_str': id_str,
+                    'page': 'Home',
+                    'sub_page': 'Riwayat',
+                    'title_page': 'Profesi',
+                    'form_view': 'block',
+                    'data_view': 'none',
+                    'riwayat': 'active',
+                    'sip': True,
+                    'selected': 'profesi',
+                },
+                status=400,
+            )
 
 
-class UrutkanRiwayatSIPProfesiView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatSIPProfesiView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = RiwayatProfesi
     template_name = '13_riwayat_profesi/riwayat_sip_urutkan_dokumen.html'
     success_message = 'Urutan data berhasil diupdate!'
@@ -3460,18 +2348,24 @@ class UrutkanRiwayatSIPProfesiView(LoginRequiredMixin, SuccessMessageMixin, Upda
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
     
 
-class RiwayatSIPDeleteView(SuccessMessageMixin, DeleteView):
+class RiwayatSIPDeleteView(DocumentObjectAccessMixin, SuccessMessageMixin, DeleteView):
     model = RiwayatSIPProfesi
     template_name = '13_riwayat_profesi/riwayat_profesi_master.html'
     success_message = "Data berhasil dihapus!"
+
+    def get_queryset(self):
+        return super().get_queryset().filter(
+            riwayat_profesi_id=self.kwargs['id_str'],
+        )
 
     def get_success_url(self, **kwargs) -> str:
         success_url = reverse_lazy('riwayat_urls:riwayat_sipprofesi', kwargs={'id':self.kwargs.get('id_str')})
@@ -3479,7 +2373,9 @@ class RiwayatSIPDeleteView(SuccessMessageMixin, DeleteView):
     
     def get_context_data(self, **kwargs):
         id_str = self.kwargs.get('id_str')
-        data = RiwayatSIPProfesi.objects.filter(riwayat_profesi__id=id_str).order_by('no_urut_dokumen')
+        data = self.object.riwayat_profesi.riwayatsipprofesi_set.all().order_by(
+            'no_urut_dokumen',
+        )
         context = super(RiwayatSIPDeleteView, self).get_context_data(**kwargs)
         context.update({
             'data_sip':data,
@@ -3496,11 +2392,17 @@ class RiwayatSIPDeleteView(SuccessMessageMixin, DeleteView):
         return context
     
     def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file_sip:
-            if os.path.isfile(self.object.file_sip.path):
-                os.remove(self.object.file_sip.path)
-        return super().form_valid(form)
+        file_data = None
+        if self.object.file_sip and self.object.file_sip.name:
+            file_data = (self.object.file_sip.storage, self.object.file_sip.name)
+        with transaction.atomic():
+            response = super().form_valid(form)
+            if file_data:
+                transaction.on_commit(
+                    lambda storage=file_data[0], name=file_data[1]: storage.delete(name),
+                    robust=True,
+                )
+        return response
 
 
 class RiwayatBekerjaView(LoginRequiredMixin, View):
@@ -3509,12 +2411,12 @@ class RiwayatBekerjaView(LoginRequiredMixin, View):
 
     def get(self, request, **kwargs):
         user = request.user
-        selected_nip = request.GET.get('nip')
+        selected_nip = get_selected_nip(request)
         data = RiwayatBekerja.objects.all().order_by('no_urut_dokumen')
         dok = DokumenSDM.objects.filter(url='bekerja').first()
         initial = {'dokumen':dok}
         nip=None
-        if not request.user.is_superuser:
+        if not request.user.is_dokumen_admin:
             nip = get_nip(user)
             initial = {'pegawai':user, 'dokumen':dok}
             if nip:
@@ -3524,6 +2426,11 @@ class RiwayatBekerjaView(LoginRequiredMixin, View):
         if selected_nip:
             nip = selected_nip
             data = RiwayatBekerja.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
+        page_obj = None
+        if request.user.is_dokumen_admin and not selected_nip:
+            paginator = Paginator(data, 25)
+            page_obj = paginator.get_page(request.GET.get('page'))
+            data = page_obj.object_list
         form = RiwayatBekerjaForm(initial=initial, request=request)
         context={
             'data':data,
@@ -3538,6 +2445,13 @@ class RiwayatBekerjaView(LoginRequiredMixin, View):
             'riwayat':'active',
             'selected':'bekerja'
         }
+        if page_obj is not None:
+            context.update({
+                'paginator': page_obj.paginator,
+                'page_obj': page_obj,
+                'is_paginated': page_obj.has_other_pages(),
+                'server_side_document_pagination': True,
+            })
         return render(request, '14_riwayat_bekerja/riwayat_bekerja_master.html', context)
     
     def post(self, request, **kwargs):
@@ -3557,7 +2471,7 @@ class RiwayatBekerjaUpdateView(LoginRequiredMixin, View):
 
     def get_object(self, id, request=None):
         try:
-            data = RiwayatBekerja.objects.get(id=id)
+            data = get_accessible_document(RiwayatBekerja, self.request.user, id=id)
             return data
         except RiwayatBekerja.DoesNotExist:
             messages.error(request, 'Mohon maaf detail data yang akan diupdate tidak ditemukan!')
@@ -3599,7 +2513,7 @@ class RiwayatBekerjaUpdateView(LoginRequiredMixin, View):
             return redirect(reverse('riwayat_urls:riwayat_bekerja'))
 
 
-class UrutkanRiwayatBekerjaView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatBekerjaView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '14_riwayat_bekerja/riwayat_bekerja_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_bekerja')
@@ -3610,7 +2524,7 @@ class UrutkanRiwayatBekerjaView(LoginRequiredMixin, SuccessMessageMixin, UpdateV
         return form
 
     def get_context_data(self, **kwargs):
-        nip = self.request.GET.get('nip')
+        nip = get_selected_nip(self.request)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_bekerja(self.request.POST, instance=self.object)
         else:
@@ -3640,7 +2554,7 @@ class UrutkanRiwayatBekerjaView(LoginRequiredMixin, SuccessMessageMixin, UpdateV
         return super().form_valid(form)
 
 
-class RiwayatBekerjaDeleteView(SuccessMessageMixin, DeleteView):
+class RiwayatBekerjaDeleteView(DocumentObjectAccessMixin, SuccessMessageMixin, DeleteView):
     model = RiwayatBekerja
     template_name = '14_riwayat_bekerja/riwayat_bekerja_master.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_bekerja')
@@ -3650,7 +2564,7 @@ class RiwayatBekerjaDeleteView(SuccessMessageMixin, DeleteView):
         user = self.request.user
         dok = DokumenSDM.objects.filter(url='bekerja').first()
         nip = None
-        if self.request.user.is_superuser:
+        if self.request.user.is_dokumen_admin:
             data = RiwayatBekerja.objects.all().order_by('no_urut_dokumen')
         else:
             nip = get_nip(user)
@@ -3678,161 +2592,77 @@ class RiwayatBekerjaDeleteView(SuccessMessageMixin, DeleteView):
         return super().form_valid(form)
 
 
-class RiwayatKeluargaView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get(self, request, **kwargs):
-        user = request.user
-        get_form = request.GET.get('form')
-        user = request.user
-        form_view = 'none'
-        data_view = 'block'
-        if get_form == 'block':
-            form_view = 'block'
-            data_view = 'none'
-        selected_nip = request.GET.get('nip')
-        data = RiwayatKeluarga.objects.all().order_by('no_urut_dokumen')
-        dok = DokumenSDM.objects.filter(url='keluarga').first()
-        initial = {'dokumen':dok}
-        nip=None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            initial = {'pegawai':user, 'dokumen':dok}
-            if nip:
-                data = RiwayatKeluarga.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'keluarga'}))
-        if selected_nip:
-            nip = selected_nip
-            data = RiwayatKeluarga.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form = RiwayatKeluargaForm(initial=initial)
-        context={
-            'user':get_user_bynip(nip),
-            'data':data,
-            'form':form,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Keluarga',
-            'form_view':form_view,
-            'data_view':data_view,
-            'riwayat':'active',
-            'selected':'keluarga'
-        }
-        return render(request, '15_riwayat_keluarga/riwayat_keluarga_master.html', context)
-    
-    def post(self, request, **kwargs):
-        form = RiwayatKeluargaForm(data=request.POST, files=request.FILES, request=request)
-        if form.is_valid():
-            form.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_keluarga'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_keluarga'))
-
-
-class RiwayatKeluargaUpdateView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get_object(self, id, request=None):
-        try:
-            data = RiwayatKeluarga.objects.get(id=id)
-            return data
-        except RiwayatKeluarga.DoesNotExist:
-            return None
-        
-    def get(self, request, **kwargs):
-        id =kwargs.get('id')
-        dok = DokumenSDM.objects.filter(url='keluarga').first()
-        get_form = request.GET.get('form')
-        form_view = 'block'
-        data_view = 'none'
-        if get_form == 'block':
-            form_view = 'block'
-            data_view = 'none'
-        instance = self.get_object(id, request)
-        form = RiwayatKeluargaForm(instance=instance, request=request)
-        context={
-            'update_form':True,
-            'form':form,
-            'detail':instance,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Keluarga',
-            'form_view':form_view,
-            'data_view':data_view,
-            'riwayat':'active',
-            'selected':'keluarga'
-        }
-        return render(request, '15_riwayat_keluarga/riwayat_keluarga_master.html', context)
-    
-    def post(self, request, **kwargs):
-        id = kwargs.get('id')
-        data_detail = self.get_object(id)
-        instance=self.get_object(id)
-        form = RiwayatKeluargaForm(data=request.POST, files=request.FILES, instance=instance, request=request)
-        if form.is_valid():
-            riwayat_keluarga = form.save(commit=False)
-            if riwayat_keluarga.file and data_detail.file and data_detail.file != riwayat_keluarga.file and os.path.isfile(data_detail.file.path):
-                os.remove(data_detail.file.path)
-            riwayat_keluarga.save()
-            messages.success(request, save_success_message)
-            return redirect(reverse('riwayat_urls:riwayat_keluarga'))
-        else:
-            messages.error(request, form_not_valid_message)
-            return redirect(reverse('riwayat_urls:riwayat_keluarga'))
-        
-
-class RiwayatKeluargaDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatKeluarga
-    template_name = '15_riwayat_keluarga/riwayat_keluarga_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_keluarga')
-    success_message = "Data berhasil dihapus!"
-
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='keluarga').first()
-        nip = None
-        if self.request.user.is_superuser:
-            data = RiwayatKeluarga.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatKeluarga.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatKeluargaDeleteView, self).get_context_data(**kwargs)
-        context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Keluarga',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'keluarga'
-        })
+class KeluargaContextMixin:
+    def get_common_context(self, **extra):
+        context = super().get_common_context(**extra)
+        if self.request.GET.get('form') == 'block' and not extra.get('update_form'):
+            context['form_view'] = 'block'
+            context['data_view'] = 'none'
+        if extra.get('update_form') and getattr(self, 'object', None) is not None:
+            context['detail'] = self.object
         return context
-    
+
+
+class KeluargaDeleteMixin(KeluargaContextMixin):
     def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file:
-            if os.path.isfile(self.object.file.path):
-                os.remove(self.object.file.path)
-        return super().form_valid(form)
+        pasangan_files = [
+            (pasangan.file_akte_nikah.storage, pasangan.file_akte_nikah.name)
+            for pasangan in self.object.pasangan_set.all()
+            if pasangan.file_akte_nikah and pasangan.file_akte_nikah.name
+        ]
+        with transaction.atomic():
+            self.object.orangtua_set.all().delete()
+            self.object.pasangan_set.all().delete()
+            self.object.anak_set.all().delete()
+            response = super().form_valid(form)
+            for storage, name in pasangan_files:
+                transaction.on_commit(
+                    lambda storage=storage, name=name: storage.delete(name),
+                    robust=True,
+                )
+        return response
+
+
+keluarga_document = EmployeeDocumentModule(
+    model=RiwayatKeluarga,
+    form_class=RiwayatKeluargaForm,
+    template_name='15_riwayat_keluarga/riwayat_keluarga_master.html',
+    document_url='keluarga',
+    selected='keluarga',
+    title_page='Keluarga',
+    success_url_name='riwayat_urls:riwayat_keluarga',
+    file_fields=('file',),
+    select_related=('pegawai',),
+)
+
+RiwayatKeluargaView = keluarga_document.manage_view(
+    'RiwayatKeluargaView',
+    mixins=(KeluargaContextMixin,),
+)
+RiwayatKeluargaUpdateView = keluarga_document.update_view(
+    'RiwayatKeluargaUpdateView',
+    mixins=(KeluargaContextMixin,),
+)
+RiwayatKeluargaDeleteView = keluarga_document.delete_view(
+    'RiwayatKeluargaDeleteView',
+    mixins=(KeluargaDeleteMixin,),
+)
 
 
 class RiwayatAnggotaKeluargaView(LoginRequiredMixin, View):
     login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
+    @staticmethod
+    def normalize_status(status):
+        status = (status or '').lower()
+        if status not in {'orang-tua', 'pasangan', 'anak'}:
+            raise Http404('Jenis anggota keluarga tidak valid.')
+        return status
+
     def get_object(self, id, request=None):
         try:
-            data=RiwayatKeluarga.objects.get(id=id)
+            data = get_accessible_document(RiwayatKeluarga, self.request.user, id=id)
             return data
         except RiwayatKeluarga.DoesNotExist:
             messages.error(request, 'Mohon maaf detail riwayat keluarga tidak ditemukan!')
@@ -3840,29 +2670,28 @@ class RiwayatAnggotaKeluargaView(LoginRequiredMixin, View):
         
     def get(self, request, **kwargs):
         keluarga_id = kwargs.get('keluarga_id')
-        get_status:str = kwargs.get('status')
+        get_status: str = kwargs.get('status')
         get_form = request.GET.get('form')
         form_view = 'none'
         data_view = 'block'
         if get_form == 'block':
             form_view = 'block'
             data_view = 'none'
-        status = 'pasangan'
-        if get_status:
-            status = get_status.lower()
-        initial = {'keluarga':self.get_object(keluarga_id, request)}
+        status = self.normalize_status(get_status)
+        keluarga = self.get_object(keluarga_id, request)
+        initial = {'keluarga': keluarga}
         if status == 'pasangan':
-            data = Pasangan.objects.filter(keluarga=keluarga_id)
+            data = Pasangan.objects.filter(keluarga=keluarga)
             form = RiwayatKeluargaPasanganForm(initial=initial)
         elif status == 'anak':
-            data = Anak.objects.filter(keluarga=keluarga_id)
+            data = Anak.objects.filter(keluarga=keluarga)
             form = RiwayatKeluargaAnakForm(initial=initial)
         else:
-            data = OrangTua.objects.filter(keluarga=keluarga_id)
+            data = OrangTua.objects.filter(keluarga=keluarga)
             form = RiwayatKeluargaOrangTuaForm(initial=initial)
 
         context={
-            'pegawai':self.get_object(keluarga_id),
+            'pegawai': keluarga,
             'keluarga_id':keluarga_id,
             'data':data,
             'form':form,
@@ -3873,13 +2702,15 @@ class RiwayatAnggotaKeluargaView(LoginRequiredMixin, View):
             'form_view':form_view,
             'data_view':data_view,
             'riwayat':'active',
-            'selected':'keluarga'
+            'selected':'keluarga',
+            'document_menu_url': get_riwayat_menu_url(request, keluarga.pegawai),
         }
         return render(request, '16_riwayat_anggota_keluarga/riwayat_anggota_keluarga_master.html', context)
     
     def post(self, request, **kwargs):
         keluarga_id = kwargs.get('keluarga_id')
-        status = kwargs.get('status')
+        status = self.normalize_status(kwargs.get('status'))
+        keluarga = self.get_object(keluarga_id, request)
         if status == 'orang-tua':
             form = RiwayatKeluargaOrangTuaForm(data=request.POST, files=request.FILES)
         elif status == 'pasangan':
@@ -3888,10 +2719,9 @@ class RiwayatAnggotaKeluargaView(LoginRequiredMixin, View):
             form = RiwayatKeluargaAnakForm(data=request.POST, files=request.FILES)
 
         if form.is_valid():
-            if status == 'pasangan':
-                form.save()
-            else:
-                form.save()
+            anggota = form.save(commit=False)
+            anggota.keluarga = keluarga
+            anggota.save()
             messages.success(request, save_success_message)
             return redirect(reverse('riwayat_urls:riwayat_anggota_keluarga', kwargs={'status':status, 'keluarga_id':keluarga_id}))
         messages.error(request, form_not_valid_message)
@@ -3902,25 +2732,23 @@ class RiwayatAnggotaKeluargaUpdateView(LoginRequiredMixin, View):
     login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
 
+    normalize_status = staticmethod(RiwayatAnggotaKeluargaView.normalize_status)
+
     def get_object(self, id, request=None):
         try:
-            data=RiwayatKeluarga.objects.get(id=id)
+            data = get_accessible_document(RiwayatKeluarga, self.request.user, id=id)
             return data
         except RiwayatKeluarga.DoesNotExist:
             messages.error(request, 'Mohon maaf detail riwayat keluarga tidak ditemukan!')
             return None
         
-    def get_instance(self, id, status):
-        try:
-            if status == 'pasangan':
-                data = Pasangan.objects.get(id=id)
-            elif status == 'anak':
-                data = Anak.objects.get(id=id)
-            else:
-                data = OrangTua.objects.get(id=id)
-            return data
-        except Exception:
-            return None
+    def get_instance(self, id, status, keluarga_id):
+        lookup = {'pk': id, 'keluarga_id': keluarga_id}
+        if status == 'pasangan':
+            return get_accessible_document(Pasangan, self.request.user, **lookup)
+        if status == 'anak':
+            return get_accessible_document(Anak, self.request.user, **lookup)
+        return get_accessible_document(OrangTua, self.request.user, **lookup)
         
     def get(self, request, **kwargs):
         id = kwargs.get('id')
@@ -3932,10 +2760,9 @@ class RiwayatAnggotaKeluargaUpdateView(LoginRequiredMixin, View):
         if get_form == 'block':
             form_view = 'block'
             data_view = 'none'
-        status = 'pasangan'
-        if get_status:
-            status = get_status.lower()
-        instance = self.get_instance(id, status)
+        status = self.normalize_status(get_status)
+        keluarga = self.get_object(keluarga_id, request)
+        instance = self.get_instance(id, status, keluarga_id)
         if status == 'pasangan':
             form = RiwayatKeluargaPasanganForm(instance=instance)
         elif status == 'anak':
@@ -3945,7 +2772,7 @@ class RiwayatAnggotaKeluargaUpdateView(LoginRequiredMixin, View):
 
         context={
             'update_form':True,
-            'pegawai':self.get_object(keluarga_id),
+            'pegawai': keluarga,
             'keluarga_id':keluarga_id,
             'form':form,
             'status':status,
@@ -3955,16 +2782,18 @@ class RiwayatAnggotaKeluargaUpdateView(LoginRequiredMixin, View):
             'form_view':form_view,
             'data_view':data_view,
             'riwayat':'active',
-            'selected':'keluarga'
+            'selected':'keluarga',
+            'document_menu_url': get_riwayat_menu_url(request, keluarga.pegawai),
         }
         return render(request, '16_riwayat_anggota_keluarga/riwayat_anggota_keluarga_master.html', context)
     
     def post(self, request, **kwargs):
         id = kwargs.get('id')
         keluarga_id = kwargs.get('keluarga_id')
-        status = kwargs.get('status')
-        data_detail = self.get_instance(id, status)
-        instance = self.get_instance(id, status)
+        status = self.normalize_status(kwargs.get('status'))
+        keluarga = self.get_object(keluarga_id, request)
+        data_detail = self.get_instance(id, status, keluarga_id)
+        instance = self.get_instance(id, status, keluarga_id)
         if status == 'orang-tua':
             form = RiwayatKeluargaOrangTuaForm(data=request.POST, files=request.FILES, instance=instance)
         elif status == 'pasangan':
@@ -3975,18 +2804,21 @@ class RiwayatAnggotaKeluargaUpdateView(LoginRequiredMixin, View):
         if form.is_valid():
             if status == 'pasangan':
                 riwayat_pasangan = form.save(commit=False)
+                riwayat_pasangan.keluarga = keluarga
                 if riwayat_pasangan.file_akte_nikah and data_detail.file_akte_nikah and data_detail.file_akte_nikah != riwayat_pasangan.file_akte_nikah and os.path.isfile(data_detail.file_akte_nikah.path):
                     os.remove(data_detail.file_akte_nikah.path)
                 riwayat_pasangan.save()
             else:
-                form.save()
+                anggota = form.save(commit=False)
+                anggota.keluarga = keluarga
+                anggota.save()
             messages.success(request, save_success_message)
             return redirect(reverse('riwayat_urls:riwayat_anggota_keluarga', kwargs={'status':status, 'keluarga_id':keluarga_id}))
         messages.error(request, form_not_valid_message)
         return redirect(reverse('riwayat_urls:riwayat_anggota_keluarga', kwargs={'status':status, 'keluarga_id':keluarga_id}))
 
 
-class RiwayatOrangTuaDeleteView(SuccessMessageMixin, DeleteView):
+class RiwayatOrangTuaDeleteView(DocumentObjectAccessMixin, SuccessMessageMixin, DeleteView):
     model = OrangTua
     template_name = '16_riwayat_anggota_keluarga/riwayat_anggota_keluarga_master.html'
     success_message = "Data berhasil dihapus!"
@@ -4016,82 +2848,40 @@ class RiwayatOrangTuaDeleteView(SuccessMessageMixin, DeleteView):
         return context
 
 
-class RiwayatInovasiView(LoginRequiredMixin, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-
-    def get(self, request, *args, **kwargs):
-        user = request.user
-        selected_nip = request.GET.get('nip')
-        dok = DokumenSDM.objects.filter(url='inovasi').first()
-        data = RiwayatInovasi.objects.all().order_by('no_urut_dokumen')
-        nip=None
-        if not request.user.is_superuser:
-            nip = get_nip(user)
-            if nip:
-                data = RiwayatInovasi.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'inovasi'}))
-        if selected_nip:
-            nip = selected_nip
-            data = RiwayatInovasi.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        form = None
-        context={
-            'user':get_user_bynip(nip),
-            'data':data,
-            'form':form,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Inovasi',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'inovasi'
-        }
-        return render(request, '17_riwayat_inovasi/riwayat_inovasi_master.html', context)
-    
-
-class RiwayatInovasiDeleteView(SuccessMessageMixin, DeleteView):
-    model = RiwayatInovasi
-    template_name = '17_riwayat_inovasi/riwayat_inovasi_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_inovasi')
-    success_message = "Data berhasil dihapus!"
-
-    def get_context_data(self, **kwargs):
-        user = self.request.user
-        dok = DokumenSDM.objects.filter(url='inovasi').first()
-        nip = None
-        if self.request.user.is_superuser:
-            data = RiwayatInovasi.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            data = RiwayatInovasi.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context = super(RiwayatInovasiDeleteView, self).get_context_data(**kwargs)
+class InovasiContextMixin:
+    def get_common_context(self, **extra):
+        context = super().get_common_context(**extra)
         context.update({
-            'data':data,
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Inovasi',
-            'form_view':'none',
-            'data_view':'block',
-            'riwayat':'active',
-            'selected':'inovasi'
+            'form': None,
+            'form_view': 'none',
+            'data_view': 'block',
         })
         return context
-    
-    def form_valid(self, form):
-        # Delete the associated file
-        if self.object.file_sk:
-            if os.path.isfile(self.object.file_sk.path):
-                os.remove(self.object.file_sk.path)
-        return super().form_valid(form)
 
 
-class UrutkanRiwayatInovasiView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+inovasi_document = EmployeeDocumentModule(
+    model=RiwayatInovasi,
+    form_class=None,
+    template_name='17_riwayat_inovasi/riwayat_inovasi_master.html',
+    document_url='inovasi',
+    selected='inovasi',
+    title_page='Inovasi',
+    success_url_name='riwayat_urls:riwayat_inovasi',
+    file_fields=('makalah', 'file_sk'),
+    select_related=('pegawai', 'bidang'),
+)
+
+RiwayatInovasiView = inovasi_document.list_view(
+    'RiwayatInovasiView',
+    mixins=(InovasiContextMixin,),
+)
+RiwayatInovasiDeleteView = inovasi_document.delete_view(
+    'RiwayatInovasiDeleteView',
+    mixins=(InovasiContextMixin,),
+)
+
+
+class UrutkanRiwayatInovasiView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '17_riwayat_inovasi/riwayat_inovasi_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_inovasi')
@@ -4102,17 +2892,23 @@ class UrutkanRiwayatInovasiView(LoginRequiredMixin, SuccessMessageMixin, UpdateV
         return form
 
     def get_context_data(self, **kwargs):
-        nip = self.request.GET.get('nip')
+        nip = get_selected_nip(self.request)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_inovasi(self.request.POST, instance=self.object)
         else:
+            queryset = self.object.riwayatinovasi_set.all()
             if nip:
-                urutkan_dokumen_form = urutkan_dokumen_inovasi(instance=self.object, queryset=self.object.riwayatinovasi_set.filter(pegawai__profil_user__nip=nip))
-            else:
-                urutkan_dokumen_form = urutkan_dokumen_inovasi(instance=self.object, queryset=self.object.riwayatinovasi_set.filter(pegawai=self.request.user))
+                queryset = queryset.filter(pegawai__profil_user__nip=nip)
+            urutkan_dokumen_form = urutkan_dokumen_inovasi(
+                instance=self.object,
+                queryset=queryset,
+            )
         context = super(UrutkanRiwayatInovasiView, self).get_context_data(**kwargs)
+        user = get_user_bynip(nip) if nip else None
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
+            'user': user,
+            'nip': nip,
             'page':'Home',
             'sub_page':'Riwayat',
             'title_page':'Inovasi',
@@ -4121,135 +2917,83 @@ class UrutkanRiwayatInovasiView(LoginRequiredMixin, SuccessMessageMixin, UpdateV
         })
         return context
 
+    def get_success_url(self):
+        url = reverse('riwayat_urls:riwayat_inovasi')
+        nip = get_selected_nip(self.request)
+        return f'{url}?nip={nip}' if nip else url
+
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
     
 
-class RiwayatPenugasanListView(LoginRequiredMixin, ListView):
-    model=RiwayatPenugasan
-    template_name='19_riwayat_penugasan/riwayat_penugasan_master.html'
-
-    def get_queryset(self):
-        user = self.request.user
-        queryset = RiwayatPenugasan.objects.all().order_by('no_urut_dokumen')
-        nip = get_nip(user)
-        if nip and not user.is_superuser:
-            queryset = RiwayatPenugasan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        return queryset
-
-    def get_context_data(self, **kwargs):
-        context = super(RiwayatPenugasanListView, self).get_context_data(**kwargs)
-        dok = DokumenSDM.objects.filter(url='penugasan').first()
-        selected_nip = self.request.GET.get('nip')
-        user = self.request.user
-        nip = get_nip(user)
-        if self.request.user.is_superuser:
-            nip = selected_nip
-        context.update({
-            'nip':nip,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Penugasan',
-            'riwayat':'active',
-            'selected':'penugasan'
-        })
+class PenugasanContextMixin:
+    def get_common_context(self, **extra):
+        context = super().get_common_context(**extra)
+        context['object_list'] = context['data']
         return context
 
 
-class RiwayatPenugasanCreateView(SuccessMessageMixin, LoginRequiredMixin, CreateView):
-    model = RiwayatPenugasan
-    template_name='19_riwayat_penugasan/riwayat_penugasan_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_penugasan')
-    form_class = RiwayatPenugasanForm
-    success_message = 'Data berhasil disimpan!'
-
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        dok = DokumenSDM.objects.filter(url='penugasan').first()
+class PenugasanFormMixin(PenugasanContextMixin):
+    def get_form(self, **kwargs):
+        employee = self.get_selected_employee()
+        initial_values = {'dokumen': self.get_document_definition()}
+        if employee is not None:
+            initial_values['pegawai'] = employee
+        if getattr(self, 'object', None) is not None:
+            kwargs.setdefault('instance', self.object)
         kwargs['user'] = self.request.user
-        if self.request.user.is_superuser:
-            kwargs['initial_values'] = {'dokumen':dok}
-        else:
-            kwargs['initial_values'] = {'pegawai':self.request.user, 'dokumen':dok }
-        return kwargs
+        kwargs['initial_values'] = initial_values
+        return self.form_class(**kwargs)
 
-    def get_context_data(self, **kwargs):
-        context = super(RiwayatPenugasanCreateView, self).get_context_data(**kwargs)
-        dok = DokumenSDM.objects.filter(url='penugasan').first()
-        context.update({
-            'add_form':True,
-            'dok':dok,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Penugasan',
-            'riwayat':'active',
-            'selected':'penugasan'
-        })
+    def get_common_context(self, **extra):
+        context = super().get_common_context(**extra)
+        context['add_form'] = True
         return context
 
-
-class RiwayatPenugasanUpdateView(SuccessMessageMixin, LoginRequiredMixin, UpdateView):
-    model = RiwayatPenugasan
-    template_name='19_riwayat_penugasan/riwayat_penugasan_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_penugasan')
-    form_class = RiwayatPenugasanForm
-    success_message = 'Data berhasil diupdate!'
-
-    def get_context_data(self, **kwargs):
-        context = super(RiwayatPenugasanUpdateView, self).get_context_data(**kwargs)
-        dok = DokumenSDM.objects.filter(url='penugasan').first()
-        context.update({
-            'update_form':True,
-            'dok':dok,
-            'add_form':True,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Penugasan',
-            'riwayat':'active',
-            'selected':'penugasan'
-        })
-        return context
-    
-
-class RiwayatPenugasanDeleteView(SuccessMessageMixin, LoginRequiredMixin, DeleteView):
-    model = RiwayatPenugasan
-    template_name='19_riwayat_penugasan/riwayat_penugasan_master.html'
-    success_url = reverse_lazy('riwayat_urls:riwayat_penugasan')
-    success_message = 'Data berhasil dihapus!'
-
-    def get_context_data(self, **kwargs):
-        context = super(RiwayatPenugasanDeleteView, self).get_context_data(**kwargs)
-        dok = DokumenSDM.objects.filter(url='penugasan').first()
-        user = self.request.user
-        nip = None
-        object_list = None
-        if self.request.user.is_superuser:
-            object_list = RiwayatPenugasan.objects.all().order_by('no_urut_dokumen')
-        else:
-            nip = get_nip(user)
-            object_list = RiwayatPenugasan.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        context.update({
-            'nip':nip,
-            'dok':dok,
-            'object_list':object_list,
-            'page':'Home',
-            'sub_page':'Riwayat',
-            'title_page':'Penugasan',
-            'riwayat':'active',
-            'selected':'penugasan'
-        })
-        return context
+    def save_document(self, form):
+        form.instance.dokumen = self.get_document_definition()
+        return super().save_document(form)
 
 
-class UrutkanRiwayatPenugasanView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+penugasan_document = EmployeeDocumentModule(
+    model=RiwayatPenugasan,
+    form_class=RiwayatPenugasanForm,
+    template_name='19_riwayat_penugasan/riwayat_penugasan_master.html',
+    document_url='penugasan',
+    selected='penugasan',
+    title_page='Penugasan',
+    success_url_name='riwayat_urls:riwayat_penugasan',
+    file_fields=('file_spt',),
+    pk_url_kwarg='pk',
+    select_related=('pegawai', 'jabatan', 'panggol'),
+)
+
+RiwayatPenugasanListView = penugasan_document.list_view(
+    'RiwayatPenugasanListView'
+)
+RiwayatPenugasanCreateView = penugasan_document.create_view(
+    'RiwayatPenugasanCreateView',
+    mixins=(PenugasanFormMixin,),
+)
+RiwayatPenugasanUpdateView = penugasan_document.update_view(
+    'RiwayatPenugasanUpdateView',
+    mixins=(PenugasanFormMixin,),
+)
+RiwayatPenugasanDeleteView = penugasan_document.delete_view(
+    'RiwayatPenugasanDeleteView',
+    mixins=(PenugasanContextMixin,),
+)
+
+
+class UrutkanRiwayatPenugasanView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '19_riwayat_penugasan/riwayat_penugasan_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_penugasan')
@@ -4260,33 +3004,45 @@ class UrutkanRiwayatPenugasanView(LoginRequiredMixin, SuccessMessageMixin, Updat
         return form
 
     def get_context_data(self, **kwargs):
-        nip = self.request.GET.get('nip')
+        nip = get_selected_nip(self.request)
         if self.request.POST:
             urutkan_dokumen_form = urutkan_dokumen_penugasan(self.request.POST, instance=self.object)
         else:
+            queryset = self.object.riwayatpenugasan_set.all()
             if nip:
-                urutkan_dokumen_form = urutkan_dokumen_penugasan(instance=self.object, queryset=self.object.riwayatpenugasan_set.filter(pegawai__profil_user__nip=nip))
-            else:
-                urutkan_dokumen_form = urutkan_dokumen_penugasan(instance=self.object, queryset=self.object.riwayatpenugasan_set.filter(pegawai=self.request.user))
+                queryset = queryset.filter(pegawai__profil_user__nip=nip)
+            urutkan_dokumen_form = urutkan_dokumen_penugasan(
+                instance=self.object,
+                queryset=queryset,
+            )
         context = super(UrutkanRiwayatPenugasanView, self).get_context_data(**kwargs)
+        user = get_user_bynip(nip) if nip else None
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
+            'user': user,
+            'nip': nip,
             'page':'Home',
             'sub_page':'Riwayat',
-            'title_page':'Bekerja',
+            'title_page':'Penugasan',
             'riwayat':'active',
-            'selected':'bekerja'
+            'selected':'penugasan'
         })
         return context
+
+    def get_success_url(self):
+        url = reverse('riwayat_urls:riwayat_penugasan')
+        nip = get_selected_nip(self.request)
+        return f'{url}?nip={nip}' if nip else url
 
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.object
-                urutkan_dokumen_form.save()
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
 
 
@@ -4326,3 +3082,323 @@ class GetListRiwayatSDM(View):
             'data':list_dok
         }
         return render(request, 'listdata.html', context)
+
+
+class RiwayatUjiKompetensiListView(LoginRequiredMixin, ListView):
+    model = UjiKompetensi
+    template_name = 'riwayat_ujikom/list.html'
+    context_object_name = 'data'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = UjiKompetensi.objects.select_related(
+            'pegawai', 'kompetensi', 'kompetensi__jenis_sdm'
+        ).order_by('-tgl_sert_ujikomp', '-id')
+        if self.request.user.is_dokumen_admin:
+            return queryset
+        return queryset.filter(pegawai=self.request.user)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'card_title': 'Riwayat Uji Kompetensi',
+            'title_page': 'Riwayat Uji Kompetensi',
+            'riwayat': 'active',
+            'selected': 'ujikomp',
+            'server_side_document_pagination': True,
+        })
+        return context
+
+
+class RiwayatUjiKompetensiCreateView(LoginRequiredMixin, CreateView):
+    model = UjiKompetensi
+    form_class = UjiKompetensiForm
+    template_name = 'riwayat_ujikom/form.html'
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['request'] = self.request
+        return kwargs
+
+    def get_initial(self):
+        initial = super().get_initial()
+        if not self.request.user.is_dokumen_admin:
+            initial['pegawai'] = self.request.user
+        return initial
+
+    def form_valid(self, form):
+        if not self.request.user.is_dokumen_admin:
+            form.instance.pegawai = self.request.user
+        response = super().form_valid(form)
+        if self.request.GET.get('popup') == '1':
+            return render(self.request, 'riwayat_pendukung/popup_success.html', {
+                'object': self.object,
+                'field_id': self.request.GET.get('field', 'id_kompetensi'),
+                'title_page': 'Tambah Riwayat Uji Kompetensi',
+                'success_message': 'Uji kompetensi sudah dimasukkan ke pilihan pada form usulan.',
+            })
+        messages.success(self.request, 'Riwayat uji kompetensi berhasil ditambahkan.')
+        return response
+
+    def get_success_url(self):
+        return reverse('riwayat_urls:riwayat_ujikom')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'card_title': 'Tambah Riwayat Uji Kompetensi',
+            'title_page': 'Riwayat Uji Kompetensi',
+            'riwayat': 'active',
+            'selected': 'ujikomp',
+        })
+        return context
+
+
+class RiwayatUjiKompetensiUpdateView(LoginRequiredMixin, UpdateView):
+    model = UjiKompetensi
+    form_class = UjiKompetensiForm
+    template_name = 'riwayat_ujikom/form.html'
+
+    def get_queryset(self):
+        queryset = UjiKompetensi.objects.all()
+        if self.request.user.is_dokumen_admin:
+            return queryset
+        return queryset.filter(pegawai=self.request.user)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['request'] = self.request
+        return kwargs
+
+    def form_valid(self, form):
+        if not self.request.user.is_dokumen_admin:
+            form.instance.pegawai = self.request.user
+
+        old_file = None
+        if self.object.file_sert and 'file_sert' in self.request.FILES:
+            old_file = (self.object.file_sert.storage, self.object.file_sert.name)
+
+        with transaction.atomic():
+            response = super().form_valid(form)
+            if old_file and old_file[1] != self.object.file_sert.name:
+                transaction.on_commit(
+                    lambda storage=old_file[0], name=old_file[1]: storage.delete(name),
+                    robust=True,
+                )
+
+        messages.success(self.request, 'Riwayat uji kompetensi berhasil diperbarui.')
+        return response
+
+    def get_success_url(self):
+        return reverse('riwayat_urls:riwayat_ujikom')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'card_title': 'Ubah Riwayat Uji Kompetensi',
+            'title_page': 'Riwayat Uji Kompetensi',
+            'riwayat': 'active',
+            'selected': 'ujikomp',
+            'document_menu_url': get_riwayat_menu_url(
+                self.request,
+                self.object.pegawai,
+            ),
+        })
+        return context
+
+
+class RiwayatUjiKompetensiDeleteView(LoginRequiredMixin, DeleteView):
+    model = UjiKompetensi
+    template_name = 'riwayat_ujikom/confirm_delete.html'
+
+    def get_queryset(self):
+        queryset = UjiKompetensi.objects.all()
+        if self.request.user.is_dokumen_admin:
+            return queryset
+        return queryset.filter(pegawai=self.request.user)
+
+    def form_valid(self, form):
+        file_data = None
+        if self.object.file_sert:
+            file_data = (self.object.file_sert.storage, self.object.file_sert.name)
+
+        with transaction.atomic():
+            response = super().form_valid(form)
+            if file_data:
+                transaction.on_commit(
+                    lambda storage=file_data[0], name=file_data[1]: storage.delete(name),
+                    robust=True,
+                )
+
+        messages.success(self.request, 'Riwayat uji kompetensi berhasil dihapus.')
+        return response
+
+    def get_success_url(self):
+        return reverse('riwayat_urls:riwayat_ujikom')
+
+
+class RiwayatPAKListView(LoginRequiredMixin, ListView):
+    model = RiwayatPAK
+    template_name = 'riwayat_pak/list.html'
+    context_object_name = 'data'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = RiwayatPAK.objects.select_related('pegawai').order_by('-tgl_srt', '-id')
+        if self.request.user.is_dokumen_admin:
+            return queryset
+        return queryset.filter(pegawai=self.request.user)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'card_title': 'Riwayat Penetapan Angka Kredit (PAK)',
+            'title_page': 'Riwayat PAK',
+            'riwayat': 'active',
+            'selected': 'pak',
+            'server_side_document_pagination': True,
+        })
+        return context
+
+
+class RiwayatPAKCreateView(LoginRequiredMixin, CreateView):
+    model = RiwayatPAK
+    form_class = RiwayatPAKForm
+    template_name = 'riwayat_pak/form.html'
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['request'] = self.request
+        return kwargs
+
+    def get_initial(self):
+        initial = super().get_initial()
+        if not self.request.user.is_dokumen_admin:
+            initial['pegawai'] = self.request.user
+        return initial
+
+    def form_valid(self, form):
+        if not self.request.user.is_dokumen_admin:
+            form.instance.pegawai = self.request.user
+        form.instance.dokumen = DokumenSDM.objects.filter(url='pak').first()
+        response = super().form_valid(form)
+        if self.request.GET.get('popup') == '1':
+            return render(self.request, 'riwayat_pendukung/popup_success.html', {
+                'object': self.object,
+                'field_id': self.request.GET.get('field', 'id_pak'),
+                'title_page': 'Tambah Riwayat PAK',
+                'success_message': 'PAK sudah dimasukkan ke pilihan pada form usulan.',
+            })
+        messages.success(self.request, 'Riwayat PAK berhasil ditambahkan.')
+        return response
+
+    def get_success_url(self):
+        return reverse('riwayat_urls:riwayat_pak')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'card_title': 'Tambah Riwayat PAK',
+            'title_page': 'Riwayat PAK',
+            'riwayat': 'active',
+            'selected': 'pak',
+        })
+        return context
+
+
+class RiwayatPAKUpdateView(LoginRequiredMixin, UpdateView):
+    model = RiwayatPAK
+    form_class = RiwayatPAKForm
+    template_name = 'riwayat_pak/form.html'
+
+    def get_queryset(self):
+        queryset = RiwayatPAK.objects.all()
+        if self.request.user.is_dokumen_admin:
+            return queryset
+        return queryset.filter(pegawai=self.request.user)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['request'] = self.request
+        return kwargs
+
+    def form_valid(self, form):
+        if not self.request.user.is_dokumen_admin:
+            form.instance.pegawai = self.request.user
+        old_file = None
+        if self.object.file and 'file' in self.request.FILES:
+            old_file = (self.object.file.storage, self.object.file.name)
+        with transaction.atomic():
+            response = super().form_valid(form)
+            if old_file and old_file[1] != self.object.file.name:
+                transaction.on_commit(
+                    lambda storage=old_file[0], name=old_file[1]: storage.delete(name),
+                    robust=True,
+                )
+        messages.success(self.request, 'Riwayat PAK berhasil diperbarui.')
+        return response
+
+    def get_success_url(self):
+        return reverse('riwayat_urls:riwayat_pak')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'card_title': 'Ubah Riwayat PAK',
+            'title_page': 'Riwayat PAK',
+            'riwayat': 'active',
+            'selected': 'pak',
+            'document_menu_url': get_riwayat_menu_url(
+                self.request,
+                self.object.pegawai,
+            ),
+        })
+        return context
+
+
+class RiwayatPAKDeleteView(LoginRequiredMixin, DeleteView):
+    model = RiwayatPAK
+    template_name = 'riwayat_pak/confirm_delete.html'
+
+    def get_queryset(self):
+        queryset = RiwayatPAK.objects.all()
+        if self.request.user.is_dokumen_admin:
+            return queryset
+        return queryset.filter(pegawai=self.request.user)
+
+    def form_valid(self, form):
+        file_data = None
+        if self.object.file:
+            file_data = (self.object.file.storage, self.object.file.name)
+        with transaction.atomic():
+            response = super().form_valid(form)
+            if file_data:
+                transaction.on_commit(
+                    lambda storage=file_data[0], name=file_data[1]: storage.delete(name),
+                    robust=True,
+                )
+        messages.success(self.request, 'Riwayat PAK berhasil dihapus.')
+        return response
+
+    def get_success_url(self):
+        return reverse('riwayat_urls:riwayat_pak')
+
+
+RiwayatKinerjaListView = kinerja_document.list_view(
+    'RiwayatKinerjaListView',
+    mixins=(KinerjaContextMixin,),
+    template_name='riwayat_kinerja/list.html',
+)
+RiwayatKinerjaCreateView = kinerja_document.create_view(
+    'RiwayatKinerjaCreateView',
+    mixins=(KinerjaCreateMixin,),
+)
+RiwayatKinerjaBaruUpdateView = kinerja_document.update_view(
+    'RiwayatKinerjaBaruUpdateView',
+    mixins=(KinerjaUpdateMixin,),
+)
+RiwayatKinerjaBaruDeleteView = kinerja_document.delete_view(
+    'RiwayatKinerjaBaruDeleteView',
+    mixins=(KinerjaContextMixin,),
+    template_name='riwayat_kinerja/confirm_delete.html',
+)

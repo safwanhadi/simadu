@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-6">
+        <div class="card card-success card-outline">
+            <div class="card-body text-center">
+                <i class="fas fa-check-circle fa-4x text-success mb-3"></i>
+                <h4>Riwayat berhasil ditambahkan</h4>
+                <p class="text-muted">{{ success_message }}</p>
+                <button type="button" class="btn btn-success" onclick="window.close()">Kembali ke Form Usulan</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+    $(function () {
+        if (window.opener && !window.opener.closed && typeof window.opener.addServiceFormOption === 'function') {
+            window.opener.addServiceFormOption(
+                '{{ field_id|escapejs }}',
+                '{{ object.pk|escapejs }}',
+                '{{ object|escapejs }}'
+            );
+        }
+    });
+</script>
+{% endblock script %}

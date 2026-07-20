@@ -58,7 +58,7 @@
                                                 <td>{{item.full_name}}</td>
                                                 <td>{{item.profil_user.nip}}</td>
                                                 <td>
-                                                {% for item2 in item.riwayatpenempatan_set.all %}
+                                                {% for item2 in item.riwayat_penempatan.all %}
                                                     {% if item2.status and item2.penempatan_level4 %}
                                                     {{item2.penempatan_level4}}
                                                     {% elif item2.status and item2.penempatan_level3 %}

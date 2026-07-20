@@ -2055,3 +2055,142 @@ class TextSPTDiklatView(View):
             return redirect(reverse('file_urls:text_spt_view', kwargs={'diklat_id':id_diklat}))
         messages.error(request, 'Datata gagal disimpan!')
         return redirect(reverse('file_urls:text_spt_view', kwargs={'diklat_id':id_diklat}))
+    
+# Menggunakan metode docxtpl
+
+import os
+from django.http import FileResponse, Http404
+from django.contrib.auth.mixins import LoginRequiredMixin
+
+from layanan.models import LayananSIP
+from .services.sip_docx import (
+    generate_permohonan_rekomendasi_sip,
+    generate_surat_kecukupan_skp,
+    generate_rekomendasi_sip,
+)
+
+
+class GeneratePermohonanRekomendasiSIPView(LoginRequiredMixin, View):
+    def get(self, request, pk):
+        if request.user.is_sip_admin:
+            layanan_sip = (
+                LayananSIP.objects
+                .select_related(
+                    "pegawai",
+                    "pegawai__profil_user",
+                    "layanan",
+                    "ijazah",
+                    "str_profesi",
+                )
+                .filter(pk=pk)
+                .first()
+            )
+        else:
+            layanan_sip = (
+                LayananSIP.objects
+                .select_related(
+                    "pegawai",
+                    "pegawai__profil_user",
+                    "layanan",
+                    "ijazah",
+                    "str_profesi",
+                )
+                .filter(pk=pk, pegawai=request.user)
+                .first()
+            )
+
+        if not layanan_sip:
+            raise Http404("Data permohonan SIP tidak ditemukan.")
+
+        file_path = generate_permohonan_rekomendasi_sip(layanan_sip)
+
+        return FileResponse(
+            open(file_path, "rb"),
+            as_attachment=True,
+            filename=os.path.basename(file_path),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+
+class GenerateSuratKecukupanSKPView(LoginRequiredMixin, View):
+    def get(self, request, pk):
+        if request.user.is_sip_admin:
+            layanan_sip = (
+                LayananSIP.objects
+                .select_related(
+                    "pegawai",
+                    "pegawai__profil_user",
+                    "layanan",
+                    "ijazah",
+                    "str_profesi",
+                )
+                .filter(pk=pk)
+                .first()
+            )
+        else:
+            layanan_sip = (
+                LayananSIP.objects
+            .select_related(
+                "pegawai",
+                "pegawai__profil_user",
+                "layanan",
+                "ijazah",
+                "str_profesi",
+            )
+            .filter(pk=pk, pegawai=request.user)
+            .first()
+        )
+
+        if not layanan_sip:
+            raise Http404("Data permohonan SIP tidak ditemukan.")
+
+        file_path = generate_surat_kecukupan_skp(layanan_sip)
+
+        return FileResponse(
+            open(file_path, "rb"),
+            as_attachment=True,
+            filename=os.path.basename(file_path),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        
+        
+class GenerateRekomendasiSIPView(LoginRequiredMixin, View):
+    def get(self, request, pk):
+        if request.user.is_sip_admin:
+            layanan_sip = (
+                LayananSIP.objects
+                .select_related(
+                    "pegawai",
+                    "pegawai__profil_user",
+                    "layanan",
+                    "ijazah",
+                    "str_profesi",
+                )
+                .filter(pk=pk)
+                .first()
+            )
+        else:
+            layanan_sip = (
+                LayananSIP.objects
+                .select_related(
+                    "pegawai",
+                    "pegawai__profil_user",
+                    "layanan",
+                    "ijazah",
+                    "str_profesi",
+                )
+                .filter(pk=pk, pegawai=request.user)
+                .first()
+            )
+
+        if not layanan_sip:
+            raise Http404("Data permohonan SIP tidak ditemukan.")
+
+        file_path = generate_rekomendasi_sip(layanan_sip)
+
+        return FileResponse(
+            open(file_path, "rb"),
+            as_attachment=True,
+            filename=os.path.basename(file_path),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )

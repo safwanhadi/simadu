@@ -1,0 +1,47 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Reset Password melalui Telegram | SIMADU</title>
+    <link rel="icon" type="image/png" href="{% static 'dist/img/favicon_rsmandalika.png' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config={theme:{extend:{fontFamily:{sans:['Plus Jakarta Sans','system-ui','sans-serif']},colors:{brand:{50:'#eefafa',100:'#d6f2f2',600:'#0d7c7c',700:'#0a6666',800:'#095252',900:'#073f3f'}}}}}</script>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-brand-50 via-white to-brand-100 font-sans text-slate-700 antialiased">
+    <main class="flex min-h-screen items-center justify-center px-4 py-10">
+        <section class="w-full max-w-2xl overflow-hidden rounded-3xl border border-brand-100 bg-white shadow-[0_28px_80px_rgba(9,82,82,.16)]">
+            <div class="bg-gradient-to-br from-brand-800 to-brand-600 px-7 py-7 text-white sm:px-10">
+                <a href="{% url 'about_simadu' %}" class="inline-flex items-center gap-3">
+                    <span class="flex h-11 w-11 items-center justify-center rounded-xl bg-white/15 ring-1 ring-white/20"><img src="{% static 'dist/img/logo_rsmandalika.png' %}" alt="Logo RS Mandalika" class="h-8 w-8 object-contain"></span>
+                    <span><strong class="block text-lg">SIMADU BERDANSA</strong><span class="block text-xs text-brand-100">Rumah Sakit Mandalika</span></span>
+                </a>
+            </div>
+            <div class="px-7 py-10 text-center sm:px-12">
+                <span class="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-sky-50 text-sky-500 ring-8 ring-sky-50/60"><i class="ph ph-telegram-logo text-4xl"></i></span>
+                <p class="mt-8 text-xs font-bold uppercase tracking-[.18em] text-brand-600">Pemulihan akun</p>
+                <h1 class="mt-3 text-3xl font-extrabold text-slate-900">Reset password melalui Telegram</h1>
+                <p class="mx-auto mt-5 max-w-xl text-sm leading-7 text-slate-600">Bot akan memverifikasi nomor Telegram Anda dengan nomor telepon pada profil SIMADU, lalu mengirim tautan aman untuk membuat password baru.</p>
+                <div class="mx-auto mt-8 max-w-xl rounded-2xl border border-brand-100 bg-brand-50 p-5 text-left">
+                    <ol class="space-y-3 text-sm leading-6 text-slate-600">
+                        <li class="flex gap-3"><span class="font-bold text-brand-700">1.</span><span>Buka bot SIMADU melalui tombol di bawah.</span></li>
+                        <li class="flex gap-3"><span class="font-bold text-brand-700">2.</span><span>Tekan Start dan bagikan nomor telepon Anda sendiri.</span></li>
+                        <li class="flex gap-3"><span class="font-bold text-brand-700">3.</span><span>Buka tautan reset yang dikirim bot dan buat password baru.</span></li>
+                    </ol>
+                </div>
+                {% if telegram_reset_url %}
+                <a href="{{ telegram_reset_url }}" rel="noopener noreferrer" class="mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-sky-500 px-7 py-3.5 text-sm font-bold text-white shadow-lg shadow-sky-500/20 transition hover:-translate-y-0.5 hover:bg-sky-600"><i class="ph ph-telegram-logo text-xl"></i> Lanjutkan di Telegram</a>
+                {% else %}
+                <div class="mt-8 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">Bot Telegram belum diaktifkan. Silakan hubungi Tim IT Rumah Sakit Mandalika.</div>
+                {% endif %}
+                <p class="mt-6 text-xs leading-5 text-slate-400">SIMADU dan bot tidak pernah meminta password Anda melalui chat.</p>
+                <a href="{% url 'myaccount_urls:login_view' %}" class="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:underline"><i class="ph ph-arrow-left"></i> Kembali ke halaman masuk</a>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

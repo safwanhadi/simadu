@@ -1,0 +1,71 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registrasi Akun Pegawai | SIMADU</title>
+    <link rel="icon" type="image/png" href="{% static 'dist/img/favicon_rsmandalika.png' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
+        .field input:not([type="checkbox"]) { width: 100%; border: 1px solid #d1d5db; border-radius: .75rem; padding: .75rem 1rem; outline: none; }
+        .field input:not([type="checkbox"]):focus { border-color: #0d7c7c; box-shadow: 0 0 0 4px rgba(13,124,124,.12); }
+        .field ul { margin-top: .4rem; color: #6b7280; font-size: .75rem; padding-left: 1rem; list-style: disc; }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-teal-50 to-cyan-50 px-4 py-10">
+    <main class="mx-auto max-w-3xl overflow-hidden rounded-3xl border border-teal-100 bg-white shadow-2xl">
+        <header class="bg-gradient-to-br from-teal-700 to-teal-600 px-7 py-8 text-white md:px-10">
+            <div class="flex items-center gap-4">
+                <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-white/20">
+                    <img src="{% static 'dist/img/logo_rsmandalika.png' %}" alt="Logo RS Mandalika" class="h-8 w-8">
+                </div>
+                <div>
+                    <p class="text-sm text-teal-100">SIMADU BERDANSA</p>
+                    <h1 class="text-2xl font-extrabold">Registrasi Akun Pegawai</h1>
+                </div>
+            </div>
+            <p class="mt-5 max-w-2xl text-sm leading-6 text-teal-50">
+                Lengkapi data berikut. Akun tidak langsung aktif dan baru dapat digunakan setelah diverifikasi oleh Admin Akun RS Mandalika.
+            </p>
+        </header>
+
+        <section class="px-7 py-8 md:px-10">
+            {% if form.non_field_errors %}
+            <div class="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{{ form.non_field_errors }}</div>
+            {% endif %}
+
+            <form method="post" class="grid gap-5 md:grid-cols-2">
+                {% csrf_token %}
+                {% for field in form %}
+                <div class="field {% if field.name == 'agree_privacy' %}md:col-span-2{% endif %}">
+                    {% if field.name == 'agree_privacy' %}
+                    <label class="flex items-start gap-3 rounded-xl border border-teal-100 bg-teal-50 p-4 text-sm text-gray-700">
+                        {{ field }}
+                        <span>Saya menyetujui <a class="font-semibold text-teal-700 underline" href="{% url 'privacy_policy' %}" target="_blank">Kebijakan Privasi SIMADU</a>.</span>
+                    </label>
+                    {% else %}
+                    <label for="{{ field.id_for_label }}" class="mb-1.5 block text-sm font-semibold text-gray-700">{{ field.label }}</label>
+                    {{ field }}
+                    {% endif %}
+                    {% if field.help_text and field.name != 'agree_privacy' %}<div class="mt-1 text-xs text-gray-500">{{ field.help_text|safe }}</div>{% endif %}
+                    {% for error in field.errors %}<p class="mt-1 text-sm text-red-600">{{ error }}</p>{% endfor %}
+                </div>
+                {% endfor %}
+
+                <div class="mt-2 flex flex-col-reverse gap-3 md:col-span-2 md:flex-row md:justify-between">
+                    <a href="{% url 'myaccount_urls:login_view' %}" class="inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold text-gray-600 hover:bg-gray-100">
+                        <i class="ph ph-arrow-left"></i> Kembali ke login
+                    </a>
+                    <button type="submit" class="inline-flex items-center justify-center gap-2 rounded-full bg-teal-700 px-7 py-3 text-sm font-bold text-white shadow-lg hover:bg-teal-800">
+                        <i class="ph ph-user-plus text-lg"></i> Kirim Registrasi
+                    </button>
+                </div>
+            </form>
+        </section>
+    </main>
+</body>
+</html>

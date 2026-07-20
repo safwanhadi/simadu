@@ -1,7 +1,7 @@
 from django.db import models
 from django.db.models import Sum
 from django.dispatch import receiver
-from django.db.models.signals import pre_save
+from django.db.models.signals import post_save, pre_save
 from django.template.defaultfilters import slugify
 from myaccount.models import Users, Gender
 from dateutil.relativedelta import relativedelta
@@ -101,12 +101,13 @@ class PangkatGolongan(models.Model):
         else:
             panggol = f'{self.pangkat}({self.golongan})'
         return panggol
-
+    
 
 class RiwayatPanggol(models.Model):
     no_urut_dokumen = models.IntegerField(default=0)
     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
     dokumen = models.ForeignKey('DokumenSDM', on_delete=models.SET_NULL, null=True)
+    usulan = models.ForeignKey('layanan.LayananNaikPangkat', on_delete=models.SET_NULL, null=True, blank=True)
     panggol = models.ForeignKey('PangkatGolongan', on_delete=models.SET_NULL, null=True)
     masa_kerja_tahun = models.IntegerField()
     masa_kerja_bulan = models.IntegerField()
@@ -170,6 +171,54 @@ STATUSPEGAWAI=(
     ('CPNS', 'CPNS'),
     ('PNS', 'PNS')
 )
+
+OPTIONAL_DOCUMENT_URLS = {'hukuman', 'penghargaan'}
+
+
+class KewajibanDokumen(models.Model):
+    dokumen = models.ForeignKey(
+        DokumenSDM,
+        on_delete=models.CASCADE,
+        related_name='kewajiban_status',
+    )
+    status_pegawai = models.CharField(max_length=10, choices=STATUSPEGAWAI)
+    wajib = models.BooleanField(
+        default=True,
+        help_text='Jika tidak wajib, menu tetap terlihat tetapi tidak ditandai merah saat kosong.',
+    )
+
+    class Meta:
+        verbose_name = 'Kewajiban Dokumen'
+        verbose_name_plural = 'Kewajiban Dokumen'
+        constraints = [
+            models.UniqueConstraint(
+                fields=('dokumen', 'status_pegawai'),
+                name='unique_kewajiban_dokumen_status',
+            ),
+        ]
+        ordering = ('dokumen__nama', 'status_pegawai')
+
+    def __str__(self):
+        sifat = 'Wajib' if self.wajib else 'Opsional'
+        return f'{self.dokumen} - {self.get_status_pegawai_display()} ({sifat})'
+
+
+@receiver(post_save, sender=DokumenSDM)
+def create_default_document_requirements(sender, instance, created, **kwargs):
+    """Dokumen baru berlaku umum; pangkat/golongan khusus PNS secara default."""
+    if not created:
+        return
+    statuses = ['PNS'] if instance.url == 'panggol' else [
+        value for value, _label in STATUSPEGAWAI
+    ]
+    KewajibanDokumen.objects.bulk_create([
+        KewajibanDokumen(
+            dokumen=instance,
+            status_pegawai=status,
+            wajib=instance.url not in OPTIONAL_DOCUMENT_URLS,
+        )
+        for status in statuses
+    ])
 
 class JenjangStruktural(models.Model):
     eselon = models.CharField(max_length=10, choices=ESELON)
@@ -471,51 +520,6 @@ class PredikatKinerja(models.Model):
         return f'{self.predikat} - {self.prosentase}%'
 
 
-# class RiwayatKonversiAK(models.Model):
-#     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
-#     dokumen = models.ForeignKey('DokumenSDM', on_delete=models.SET_NULL, null=True)
-#     jenjang = models.ForeignKey(JenjangJabatanFungsional, on_delete=models.CASCADE)
-#     periode_awal = models.DateField(blank=True)
-#     peridoe_akhir = models.DateField(blank=True)
-#     predikat = models.ForeignKey(RiwayatKinerja, on_delete=models.SET_NULL, null=True)
-
-#     @property
-#     def periode(self):
-#         data = 1
-#         if self.periode_awal == self.peridoe_akhir:
-#             data = data
-#         elif self.periode_awal < self.peridoe_akhir and self.periode_awal.year == self.peridoe_akhir.year:
-#             periode_awal = self.periode_awal.month
-#             periode_akhir = self.peridoe_akhir.month
-#             listofdata = list(range(periode_awal, periode_akhir+1))
-#             data = len(listofdata)
-#         else:
-#             data = 0
-#         return data
-
-#     @property
-#     def angka_kredit(self):
-#         if ak != 0 and self.predikat.prosentase and self.jenjang.koefesien:
-#             #Rumus (ak = (perode penilaian/jumlah bulan dalam satu tahun)*prosentase predikat kinerja * koefesien dalam setahun)
-#             ak = (self.periode/12)*self.predikat.prosentase*self.jenjang.koefesien
-#         else:
-#             ak = "Cek kembali periode penilaian atau prosentase predikat atau koefesien jenjang"
-#         return ak
-
-
-# class DetailPenetapanAK(models.Model):
-#     detail = models.CharField(max_length=100)
-
-#     def __str__(self):
-#         return self.detail
-    
-
-# class RiwayatPAK(models.Model):
-#     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
-#     dokumen = models.ForeignKey('DokumenSDM', on_delete=models.SET_NULL, null=True)
-#     penetapan_ak = models.ForeignKey(DetailPenetapanAK, on_delete=models.SET_NULL, null=True)
-
-
 class UjiKompetensi(models.Model):
     no_urut_dokumen = models.IntegerField(default=0)
     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
@@ -553,6 +557,7 @@ class RiwayatJabatan(models.Model):
     no_urut_dokumen = models.IntegerField(default=0)
     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE, null=True, blank=True)
     dokumen = models.ForeignKey('DokumenSDM', on_delete=models.SET_NULL, null=True, blank=True)
+    usulan = models.ForeignKey('layanan.LayananNaikJabatan', on_delete=models.SET_NULL, null=True, blank=True)  
     unor = models.ForeignKey('strukturorg.UnitOrganisasi', on_delete=models.SET_NULL, null=True, blank=True) #pilih salah satu antara unor/bidang/subbidang tergantung posisi jabatan
     bidang = models.ForeignKey('strukturorg.Bidang', on_delete=models.SET_NULL, null=True, blank=True)
     sub_bidang = models.ForeignKey('strukturorg.SubBidang', on_delete=models.SET_NULL, null=True, blank=True)
@@ -592,9 +597,9 @@ class RiwayatPAK(models.Model):
         return str(self.ak)
     
 HASILKINERJA = (
-    ('Diatas Ekspektasi', 'Diatas Ekspektasi'),
-    ('Sesuai Ekspektasi', 'Sesuai Ekspektasi'),
-    ('Dibawah Ekspektasi', 'Dibawah Ekspektasi')
+    ('diatas', 'Diatas Ekspektasi'),
+    ('sesuai', 'Sesuai Ekspektasi'),
+    ('dibawah', 'Dibawah Ekspektasi')
 )
 
 
@@ -614,7 +619,10 @@ class RiwayatKinerja(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.kuadran_kinerja.predikat
+        if self.kuadran_kinerja:
+            return self.kuadran_kinerja.predikat
+        periode = self.periode_kinerja_akhir or self.periode_kinerja_awal
+        return f'Kinerja {periode}' if periode else 'Riwayat Kinerja'
 
 
 class RiwayatPenghargaan(models.Model):

@@ -44,7 +44,7 @@
     </div>
 
     <!-- ALERT -->
-    {% if request.user.is_superuser %}
+    {% if request.user.is_cuti_admin %}
         <div class="alert alert-info">
             Mode monitoring: form dikunci (read-only).
         </div>
@@ -246,7 +246,7 @@
                             {% endif %}
                             
                             
-                            {% if not request.user.is_superuser %}
+                            {% if not request.user.is_cuti_admin %}
                                 <button type="submit" class="btn btn-primary">
                                     <i class="fas fa-save me-1"></i> Simpan Verifikasi
                                 </button>

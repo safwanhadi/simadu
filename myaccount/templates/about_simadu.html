@@ -1,0 +1,211 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="id" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="SIMADU BERDANSA adalah e-ticket digital dan sistem manajemen terpadu untuk mengakses sistem Rumah Sakit Mandalika melalui Single Sign-On.">
+    <title>Tentang SIMADU BERDANSA | Rumah Sakit Mandalika</title>
+    <link rel="icon" type="image/png" href="{% static 'dist/img/favicon_rsmandalika.png' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Plus Jakarta Sans', 'system-ui', 'sans-serif'] },
+                    colors: {
+                        brand: { 50: '#eefafa', 100: '#d6f2f2', 200: '#b1e5e5', 500: '#159494', 600: '#0d7c7c', 700: '#0a6666', 800: '#095252', 900: '#073f3f' }
+                    },
+                    boxShadow: { soft: '0 24px 70px rgba(9, 82, 82, .13)' }
+                }
+            }
+        }
+    </script>
+    <style>
+        .hero-grid {
+            background-image: linear-gradient(rgba(255,255,255,.055) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.055) 1px, transparent 1px);
+            background-size: 34px 34px;
+        }
+        .glass { background: rgba(255,255,255,.12); backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,.18); }
+    </style>
+</head>
+<body class="bg-white font-sans text-slate-700 antialiased">
+    <nav class="fixed inset-x-0 top-0 z-50 border-b border-white/10 bg-brand-800/95 text-white backdrop-blur-xl">
+        <div class="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 lg:px-8">
+            <a href="{% url 'about_simadu' %}" class="flex items-center gap-3" aria-label="Beranda Tentang SIMADU">
+                <span class="flex h-11 w-11 items-center justify-center rounded-xl bg-white/15 ring-1 ring-white/20">
+                    <img src="{% static 'dist/img/logo_rsmandalika.png' %}" alt="Logo Rumah Sakit Mandalika" class="h-8 w-8 object-contain">
+                </span>
+                <span>
+                    <strong class="block text-lg leading-tight">SIMADU BERDANSA</strong>
+                    <span class="block text-xs text-brand-100">Rumah Sakit Mandalika</span>
+                </span>
+            </a>
+            <div class="hidden items-center gap-8 text-sm font-medium md:flex">
+                <a href="#tentang" class="text-brand-100 transition hover:text-white">Tentang</a>
+                <a href="#fitur" class="text-brand-100 transition hover:text-white">Fitur</a>
+                <a href="#akses" class="text-brand-100 transition hover:text-white">Akses</a>
+                <a href="{% url 'privacy_policy' %}" class="text-brand-100 transition hover:text-white">Privasi</a>
+            </div>
+            <a href="{% url 'myaccount_urls:login_view' %}" class="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-bold text-brand-800 shadow-lg transition hover:-translate-y-0.5 hover:bg-brand-50">
+                <i class="ph ph-sign-in text-lg"></i>
+                <span class="hidden sm:inline">Masuk ke SIMADU</span><span class="sm:hidden">Masuk</span>
+            </a>
+        </div>
+    </nav>
+
+    <header class="hero-grid relative overflow-hidden bg-gradient-to-br from-brand-900 via-brand-800 to-brand-600 pb-24 pt-36 text-white lg:pb-32 lg:pt-44">
+        <div class="absolute -right-32 -top-28 h-96 w-96 rounded-full bg-teal-300/15 blur-3xl"></div>
+        <div class="absolute -bottom-40 -left-20 h-[30rem] w-[30rem] rounded-full bg-cyan-300/10 blur-3xl"></div>
+        <div class="relative mx-auto grid max-w-7xl items-center gap-14 px-5 lg:grid-cols-[1.05fr_.95fr] lg:px-8">
+            <div>
+                <span class="mb-6 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-[.18em] text-brand-100 backdrop-blur">
+                    <i class="ph ph-ticket text-base"></i> E-ticket Single Sign-On RS Mandalika
+                </span>
+                <h1 class="max-w-3xl text-4xl font-extrabold leading-[1.13] tracking-tight sm:text-5xl lg:text-6xl">
+                    Satu ruang kerja untuk pengelolaan SDM yang lebih terpadu.
+                </h1>
+                <p class="mt-6 max-w-2xl text-base leading-8 text-brand-100 sm:text-lg">
+                    SIMADU BERDANSA merupakan e-ticket digital untuk masuk ke berbagai sistem di Rumah Sakit
+                    Mandalika melalui layanan Single Sign-On. Satu akun memberikan akses yang lebih praktis
+                    ke aplikasi yang telah terintegrasi, sesuai peran dan kewenangan pengguna.
+                </p>
+                <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+                    <a href="{% url 'myaccount_urls:login_view' %}" class="inline-flex items-center justify-center gap-2 rounded-full bg-white px-7 py-3.5 text-sm font-bold text-brand-800 shadow-xl transition hover:-translate-y-0.5 hover:bg-brand-50">
+                        Mulai menggunakan SIMADU <i class="ph ph-arrow-right text-lg"></i>
+                    </a>
+                    <a href="#tentang" class="inline-flex items-center justify-center gap-2 rounded-full border border-white/20 bg-white/10 px-7 py-3.5 text-sm font-bold text-white transition hover:bg-white/15">
+                        Pelajari lebih lanjut
+                    </a>
+                </div>
+            </div>
+
+            <div class="relative mx-auto w-full max-w-xl">
+                <div class="glass rounded-3xl p-4 shadow-2xl sm:p-6">
+                    <div class="rounded-2xl bg-slate-50 p-4 text-slate-700 sm:p-6">
+                        <div class="mb-6 flex items-center justify-between">
+                            <div>
+                                <p class="text-xs font-semibold uppercase tracking-wider text-brand-600">Ruang kerja terpadu</p>
+                                <h2 class="mt-1 text-xl font-extrabold text-slate-900">Selamat datang di SIMADU BERDANSA</h2>
+                            </div>
+                            <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-700"><i class="ph ph-squares-four text-xl"></i></span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                                <i class="ph ph-identification-card text-2xl text-brand-600"></i>
+                                <p class="mt-3 text-sm font-bold text-slate-800">Riwayat SDM</p>
+                                <p class="mt-1 text-xs leading-5 text-slate-500">Data dan dokumen tersusun.</p>
+                            </div>
+                            <div class="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                                <i class="ph ph-handshake text-2xl text-brand-600"></i>
+                                <p class="mt-3 text-sm font-bold text-slate-800">Layanan SDM</p>
+                                <p class="mt-1 text-xs leading-5 text-slate-500">Pengajuan dalam satu alur.</p>
+                            </div>
+                            <div class="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                                <i class="ph ph-calendar-check text-2xl text-brand-600"></i>
+                                <p class="mt-3 text-sm font-bold text-slate-800">Kedisiplinan</p>
+                                <p class="mt-1 text-xs leading-5 text-slate-500">Kehadiran lebih terpantau.</p>
+                            </div>
+                            <div class="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                                <i class="ph ph-chart-line-up text-2xl text-brand-600"></i>
+                                <p class="mt-3 text-sm font-bold text-slate-800">Dashboard</p>
+                                <p class="mt-1 text-xs leading-5 text-slate-500">Informasi mudah dipahami.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="absolute -bottom-6 -left-5 hidden items-center gap-3 rounded-2xl bg-white px-4 py-3 text-slate-700 shadow-soft sm:flex">
+                    <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600"><i class="ph ph-shield-check text-xl"></i></span>
+                    <div><p class="text-xs text-slate-500">Akses terlindungi</p><p class="text-sm font-bold">Sesuai peran pengguna</p></div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <section id="tentang" class="py-20 sm:py-28">
+            <div class="mx-auto grid max-w-7xl items-center gap-12 px-5 lg:grid-cols-2 lg:px-8">
+                <div>
+                    <p class="text-sm font-bold uppercase tracking-[.16em] text-brand-600">Tentang SIMADU BERDANSA</p>
+                    <h2 class="mt-3 text-3xl font-extrabold leading-tight text-slate-900 sm:text-4xl">Mendekatkan layanan SDM kepada setiap pegawai.</h2>
+                </div>
+                <div class="space-y-5 text-base leading-8 text-slate-600">
+                    <p>SIMADU BERDANSA merupakan Sistem Manajemen Terpadu Sumber Daya Manusia sekaligus e-ticket digital yang menjadi pintu masuk ke sistem-sistem Rumah Sakit Mandalika melalui mekanisme Single Sign-On.</p>
+                    <p>Dengan Single Sign-On, pengguna cukup melakukan autentikasi satu kali untuk menuju aplikasi yang telah terintegrasi tanpa perlu berulang kali memasukkan kredensial. Akses setiap aplikasi tetap disesuaikan dengan peran dan kewenangan pengguna.</p>
+                    <p>Melalui satu akun, pengguna memperoleh akses sesuai perannya. Pegawai dapat melihat dan mengajukan layanan, sementara pengelola dapat menindaklanjuti proses secara lebih tertata dan transparan.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="fitur" class="bg-brand-50 py-20 sm:py-28">
+            <div class="mx-auto max-w-7xl px-5 lg:px-8">
+                <div class="mx-auto max-w-3xl text-center">
+                    <p class="text-sm font-bold uppercase tracking-[.16em] text-brand-600">Kemampuan utama</p>
+                    <h2 class="mt-3 text-3xl font-extrabold text-slate-900 sm:text-4xl">Kebutuhan SDM dalam satu ekosistem</h2>
+                    <p class="mt-5 leading-7 text-slate-600">Fitur tersedia berdasarkan peran dan kewenangan masing-masing pengguna.</p>
+                </div>
+                <div class="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+                    <article class="rounded-3xl border border-brand-100 bg-white p-7 shadow-sm transition hover:-translate-y-1 hover:shadow-soft">
+                        <span class="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700"><i class="ph ph-folder-user text-2xl"></i></span>
+                        <h3 class="mt-5 text-lg font-bold text-slate-900">Profil & Riwayat SDM</h3>
+                        <p class="mt-3 text-sm leading-7 text-slate-600">Mengelola profil, riwayat jabatan, pangkat, pendidikan, kompetensi, dan dokumen pendukung.</p>
+                    </article>
+                    <article class="rounded-3xl border border-brand-100 bg-white p-7 shadow-sm transition hover:-translate-y-1 hover:shadow-soft">
+                        <span class="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700"><i class="ph ph-paper-plane-tilt text-2xl"></i></span>
+                        <h3 class="mt-5 text-lg font-bold text-slate-900">Layanan Kepegawaian</h3>
+                        <p class="mt-3 text-sm leading-7 text-slate-600">Mendukung pengajuan dan pemrosesan layanan cuti, berkala, diklat, SIP, pangkat, serta jabatan.</p>
+                    </article>
+                    <article class="rounded-3xl border border-brand-100 bg-white p-7 shadow-sm transition hover:-translate-y-1 hover:shadow-soft">
+                        <span class="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700"><i class="ph ph-clock-countdown text-2xl"></i></span>
+                        <h3 class="mt-5 text-lg font-bold text-slate-900">Kehadiran & Disiplin</h3>
+                        <p class="mt-3 text-sm leading-7 text-slate-600">Membantu pengelolaan jadwal, kehadiran, rekap, dan informasi kedisiplinan pegawai.</p>
+                    </article>
+                    <article class="rounded-3xl border border-brand-100 bg-white p-7 shadow-sm transition hover:-translate-y-1 hover:shadow-soft">
+                        <span class="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700"><i class="ph ph-chart-donut text-2xl"></i></span>
+                        <h3 class="mt-5 text-lg font-bold text-slate-900">Dashboard Informasi</h3>
+                        <p class="mt-3 text-sm leading-7 text-slate-600">Menyajikan ringkasan informasi untuk membantu pemantauan dan pengambilan keputusan.</p>
+                    </article>
+                    <article class="rounded-3xl border border-brand-100 bg-white p-7 shadow-sm transition hover:-translate-y-1 hover:shadow-soft">
+                        <span class="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700"><i class="ph ph-bell-ringing text-2xl"></i></span>
+                        <h3 class="mt-5 text-lg font-bold text-slate-900">Notifikasi Proses</h3>
+                        <p class="mt-3 text-sm leading-7 text-slate-600">Memberikan informasi tindak lanjut agar pengguna mengetahui perkembangan layanan terkait.</p>
+                    </article>
+                    <article class="rounded-3xl border border-brand-100 bg-white p-7 shadow-sm transition hover:-translate-y-1 hover:shadow-soft">
+                        <span class="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700"><i class="ph ph-lock-key text-2xl"></i></span>
+                        <h3 class="mt-5 text-lg font-bold text-slate-900">Akses Berbasis Peran</h3>
+                        <p class="mt-3 text-sm leading-7 text-slate-600">Membatasi fungsi dan informasi berdasarkan tanggung jawab pengguna di dalam organisasi.</p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section id="akses" class="py-20 sm:py-28">
+            <div class="mx-auto max-w-7xl px-5 lg:px-8">
+                <div class="overflow-hidden rounded-[2rem] bg-gradient-to-br from-brand-800 to-brand-600 px-6 py-12 text-center text-white shadow-soft sm:px-12 sm:py-16">
+                    <span class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15"><i class="ph ph-user-circle-check text-3xl"></i></span>
+                    <h2 class="mx-auto mt-6 max-w-2xl text-3xl font-extrabold sm:text-4xl">Siap mengakses layanan SIMADU BERDANSA?</h2>
+                    <p class="mx-auto mt-4 max-w-2xl leading-7 text-brand-100">Gunakan akun yang telah terdaftar. Anda dapat masuk dengan kredensial SIMADU atau akun Google dengan alamat email yang sama.</p>
+                    <a href="{% url 'myaccount_urls:login_view' %}" class="mt-8 inline-flex items-center gap-2 rounded-full bg-white px-7 py-3.5 text-sm font-bold text-brand-800 transition hover:-translate-y-0.5 hover:bg-brand-50">
+                        Masuk sekarang <i class="ph ph-arrow-right text-lg"></i>
+                    </a>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="border-t border-slate-200 bg-slate-50">
+        <div class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-5 px-5 py-8 text-center text-sm text-slate-500 sm:flex-row sm:text-left lg:px-8">
+            <div class="flex items-center gap-3">
+                <img src="{% static 'dist/img/logo_rsmandalika.png' %}" alt="Logo Rumah Sakit Mandalika" class="h-9 w-9 object-contain">
+                <p>&copy; {% now 'Y' %} Rumah Sakit Mandalika</p>
+            </div>
+            <div class="flex items-center gap-5">
+                <a href="{% url 'privacy_policy' %}" class="transition hover:text-brand-700">Kebijakan Privasi</a>
+                <a href="https://mandalikahospital.ntbprov.go.id" rel="noopener noreferrer" class="transition hover:text-brand-700">Situs Rumah Sakit</a>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

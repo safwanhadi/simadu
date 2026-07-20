@@ -29,10 +29,46 @@ from myaccount.models import Users
 from dokumen.views import file_kepegawaian
 from itertools import zip_longest
 
+from .services import (
+    employees_for_jabatan,
+    installation_groups,
+    installation_standard_data,
+    installation_standard_summaries,
+    jabatan_cards,
+    workforce_summary,
+)
+
 from django.http import HttpResponse
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+
+
+def get_accessible_takah(user):
+    """Daftar pegawai yang boleh dilihat pada kartu takah dashboard."""
+    queryset = Users.objects.exclude(is_superuser=True)
+    if user.is_superuser:
+        return queryset
+    if not user.is_staff or not hasattr(user, 'profil_admin'):
+        return Users.objects.none()
+
+    profil_admin = user.profil_admin
+    scope_fields = (
+        ('instalasi', 'riwayat_penempatan__penempatan_level4'),
+        ('sub_bidang', 'riwayat_penempatan__penempatan_level3'),
+        ('bidang', 'riwayat_penempatan__penempatan_level2'),
+        ('unor', 'riwayat_penempatan__penempatan_level1'),
+    )
+    for admin_field, placement_field in scope_fields:
+        scope = getattr(profil_admin, admin_field)
+        if scope.exists():
+            return queryset.filter(
+                **{
+                    f'{placement_field}__in': scope.all(),
+                    'riwayat_penempatan__status': True,
+                }
+            ).distinct()
+    return Users.objects.none()
 
 import logging
 
@@ -133,7 +169,7 @@ class StandarSDMInstalasi(LoginRequiredMixin, View):
         data_instalasi = UnitInstalasi.objects.all().order_by('id')
         status=[]
         status_instalasi = []
-        takah = None
+        takah = get_accessible_takah(request.user)
         tgl = request.GET.get('tanggal')
         get_tanggal = get_date_from_string(tgl)
         tanggal = datetime.now().strftime("%Y-%m-%d")
@@ -155,23 +191,6 @@ class StandarSDMInstalasi(LoginRequiredMixin, View):
         #menampilkan takah pegawai di dashoard
         file_kepeg = file_kepegawaian(request, nip)
         
-        if request.user.is_superuser:
-            takah = Users.objects.all().exclude(is_superuser=True)
-        elif request.user.is_staff and hasattr(request.user, 'profil_admin'):
-            if request.user.profil_admin.instalasi.exists():
-                # query awal --> penempatan = RiwayatPenempatan.objects.filter(pegawai=OuterRef('pk'), penempatan_level4=request.user.profil_admin.instalasi).order_by('-created_at')
-                # di annotate menjadi --> takah = Users.objects.annotate(nip = Subquery(penempatan.values('pegawai__profil_user__nip')[:1])).exclude(is_superuser=True)
-                penempatan = RiwayatPenempatan.objects.filter(pegawai=OuterRef('pk'), penempatan_level4__in=request.user.profil_admin.instalasi.values_list('pk', flat=True), status=True).order_by('-created_at')
-                takah = Users.objects.annotate(nip = Subquery(penempatan.values('pegawai__profil_user__nip')[:1])).exclude(is_superuser=True)
-            elif request.user.profil_admin.sub_bidang:
-                penempatan = RiwayatPenempatan.objects.filter(pegawai=OuterRef('pk'), penempatan_level3__in=self.request.user.profil_admin.sub_bidang.values_list('pk', flat=True), status=True).order_by('-created_at')
-                takah = Users.objects.annotate(nip = Subquery(penempatan.values('pegawai__profil_user__nip')[:1])).exclude(is_superuser=True)
-            elif request.user.profil_admin.bidang:
-                penempatan = RiwayatPenempatan.objects.filter(pegawai=OuterRef('pk'), penempatan_level2__in=self.request.user.profil_admin.bidang.values_list('pk', flat=True), status=True).order_by('-created_at')
-                takah = Users.objects.annotate(nip = Subquery(penempatan.values('pegawai__profil_user__nip')[:1])).exclude(is_superuser=True)
-            elif request.user.profil_admin.unor:
-                penempatan = RiwayatPenempatan.objects.filter(pegawai=OuterRef('pk'), penempatan_level1__in=self.request.user.profil_admin.unor.values_list('pk', flat=True), status=True).order_by('-created_at')
-                takah = Users.objects.annotate(nip = Subquery(penempatan.values('pegawai__profil_user__nip')[:1])).exclude(is_superuser=True)
         data_fungsional = None
         if id_instalasi:
             get_data_fungsional = RiwayatJabatan.objects.filter(instalasi__id=id_instalasi).order_by('instalasi')
@@ -209,99 +228,6 @@ class StandarSDMInstalasi(LoginRequiredMixin, View):
             return redirect(reverse('riwayat_urls:riwayat_view'))
     
 
-def check_standar_perinstalasi(instalasi_list):
-    data_instalasi = []
-    
-    for instalasi in instalasi_list:
-        # Ambil standar kompetensi untuk instalasi ini
-        standar_kompetensi_list = StandarInstalasi.objects.filter(instalasi__instalasi=instalasi['instalasi'])
-        if not standar_kompetensi_list.exists():
-            continue
-
-        # Ambil semua user di instalasi ini
-        users = Users.objects.filter(riwayat_penempatan__penempatan_level4__instalasi=instalasi['instalasi'], riwayat_penempatan__status=True).prefetch_related(Prefetch('pegawai_old__kompetensi', queryset=Kompetensi.objects.all()))
-        total_user = users.count()
-
-        # Hitung jumlah user yang memenuhi standar wajib dan memiliki kompetensi pendukung
-        user_memenuhi_wajib = 0
-        user_memiliki_wajib_parsial = 0
-        user_memiliki_pendukung = 0
-        total_wajib_parsial_instalasi = 0
-
-        for user in users:
-            kompetensi_user_list = Kompetensi.objects.filter(pegawai=user)
-            if kompetensi_user_list.exists():
-                
-                # Cek apakah user memenuhi standar wajib
-                memenuhi_wajib = all(
-                    all(
-                        kompetensi.kompetensi in kompetensi_user_list.values_list('kompetensi__kompetensi', flat=True) for kompetensi in standar_kompetensi.kompetensi_wajib.all()
-                    ) 
-                    for standar_kompetensi in standar_kompetensi_list
-                )
-                if memenuhi_wajib:
-                    user_memenuhi_wajib += 1
-                
-                # Cek apakah user memiliki kompetensi wajib parsial
-                memiliki_wajib_parsial = any(
-                    any(
-                        kompetensi.kompetensi in standar_kompetensi.kompetensi_wajib_parsial.all() for kompetensi in kompetensi_user_list.all()
-                    )
-                    for standar_kompetensi in standar_kompetensi_list
-                    # for kompetensi_user in kompetensi_user_list
-                )
-                if memiliki_wajib_parsial:
-                    user_memiliki_wajib_parsial += 1
-                    total_wajib_parsial_instalasi = standar_kompetensi_list.annotate(
-                        jumlah=Count('kompetensi_wajib_parsial')
-                    ).aggregate(Sum('jumlah'))['jumlah__sum']
-                
-                # Cek apakah user memiliki kompetensi pendukung
-                memiliki_pendukung = any(
-                    any(
-                        kompetensi.kompetensi in kompetensi_user_list.values_list('kompetensi__kompetensi', flat=True) for kompetensi in standar_kompetensi.kompetensi_pendukung.all()
-                    )
-                    for standar_kompetensi in standar_kompetensi_list
-                )
-                if memiliki_pendukung:
-                    user_memiliki_pendukung += 1
-
-        # Tentukan status kompetensi instalasi
-        if user_memenuhi_wajib == total_user and user_memiliki_wajib_parsial >= total_wajib_parsial_instalasi:
-            if user_memiliki_pendukung > 0:
-                status = "Diatas Standar"
-            else:
-                status = "Sesuai Standar"
-        else:
-            status = "Tidak Memenuhi Standar"
-
-        data_instalasi.append({
-            'slug': instalasi['slug'],
-            'instalasi': instalasi['instalasi'],
-            'status': status,
-        })
-    return data_instalasi
-
-def get_status_kompetensi_user(user, slug):
-    try:
-        standar_list = StandarInstalasi.objects.filter(instalasi__slug=slug)
-        
-        for standar in standar_list:
-            user_kompetensi = set(user.pegawai_old.values_list("kompetensi", flat=True))
-            wajib = set(standar.kompetensi_wajib.values_list("id", flat=True))
-            pendukung = set(standar.kompetensi_pendukung.values_list("id", flat=True))
-
-            if wajib.issubset(user_kompetensi) and pendukung.intersection(user_kompetensi):
-                return "Diatas Standar"
-            elif wajib.issubset(user_kompetensi):
-                return "Sesuai Standar"
-            else:
-                return "Tidak Memenuhi Standar"
-
-    except StandarInstalasi.DoesNotExist:
-        return "Tidak ada standar kompetensi untuk instalasi ini"
-
-
 class StandarInstalasiView(LoginRequiredMixin, ListView):
     login_url = '/accounts/login/'
     redirect_field_name = 'next'
@@ -315,21 +241,32 @@ class StandarInstalasiView(LoginRequiredMixin, ListView):
         return super().dispatch(request, *args, **kwargs)
     
     def get_queryset(self):
-        return self.model.objects.all().values('slug', 'instalasi').distinct().order_by('instalasi')
+        return installation_groups()
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         instalasi_list = context['instalasi_list']
         
-        slug = self.request.GET.get('instalasi')
-        if slug:
-            users = Users.objects.filter(riwayat_penempatan__penempatan_level4__slug=slug, riwayat_penempatan__status=True)
-            for user in users:
-                user.status_kompetensi = get_status_kompetensi_user(user, slug)
-            context['users'] = users
+        installation_slug = self.request.GET.get('instalasi')
+        selected_installation = None
+        if installation_slug:
+            selected_installation = next(
+                (
+                    installation
+                    for installation in instalasi_list
+                    if installation['slug'] == installation_slug
+                ),
+                None,
+            )
+
+        if selected_installation:
+            standard_data = installation_standard_data(selected_installation)
+            context['users'] = standard_data['users']
+            context['installation_status'] = standard_data['status']
         else:
-            data_instalasi = check_standar_perinstalasi(instalasi_list)
-            context['data_instalasi'] = data_instalasi
+            context['data_instalasi'] = installation_standard_summaries(
+                instalasi_list
+            )
                 
         #untuk keperluan menampilkan chart disiplin pegawai
         inst = self.request.GET.get('inst')
@@ -341,57 +278,141 @@ class StandarInstalasiView(LoginRequiredMixin, ListView):
         if tgl:
             tanggal = datetime(get_tanggal.year, get_tanggal.month, get_tanggal.day).strftime("%Y-%m-%d")
         #menampilkan data pegawai dalam card dashboard
-        jenissdm = JenisSDM.objects.annotate(
-            jumlah = Count(F('riwayatprofesi__pegawai'), distinct=True)
-        ).distinct()
-        #menampilkan takah pegawai di dashoard
-        nip = self.request.GET.get('nip')
-        file_kepeg = file_kepegawaian(self.request, nip)
-        if self.request.user.is_superuser:
-            takah = Users.objects.all().exclude(is_superuser=True)
-        elif self.request.user.is_staff and hasattr(self.request.user, 'profil_admin'):
-            if self.request.user.profil_admin.instalasi.exists():
-                # query awal --> penempatan = Riwayat_Penempatan.objects.filter(pegawai=OuterRef('pk'), penempatan_level4=self.request.user.profil_admin.instalasi).order_by('-created_at')
-                # di annotate menjadi --> takah = Users.objects.annotate(nip = Subquery(penempatan.values('pegawai__profil_user__nip')[:1])).exclude(is_superuser=True)
-                penempatan = RiwayatPenempatan.objects.filter(pegawai=OuterRef('pk'), penempatan_level4__in=self.request.user.profil_admin.instalasi.values_list('pk', flat=True), status=True).order_by('-created_at')
-                takah = Users.objects.annotate(nip = Subquery(penempatan.values('pegawai__profil_user__nip')[:1])).exclude(is_superuser=True)
-            elif self.request.user.profil_admin.sub_bidang:
-                penempatan = RiwayatPenempatan.objects.filter(pegawai=OuterRef('pk'), penempatan_level3__in=self.request.user.profil_admin.sub_bidang.values_list('pk', flat=True), status=True).order_by('-created_at')
-                takah = Users.objects.annotate(nip = Subquery(penempatan.values('pegawai__profil_user__nip')[:1])).exclude(is_superuser=True)
-            elif self.request.user.profil_admin.bidang:
-                penempatan = RiwayatPenempatan.objects.filter(pegawai=OuterRef('pk'), penempatan_level2__in=self.request.user.profil_admin.bidang.values_list('pk', flat=True), status=True).order_by('-created_at')
-                takah = Users.objects.annotate(nip = Subquery(penempatan.values('pegawai__profil_user__nip')[:1])).exclude(is_superuser=True)
-            elif self.request.user.profil_admin.unor:
-                penempatan = RiwayatPenempatan.objects.filter(pegawai=OuterRef('pk'), penempatan_level1__in=self.request.user.profil_admin.unor.values_list('pk', flat=True), status=True).order_by('-created_at')
-                takah = Users.objects.annotate(nip = Subquery(penempatan.values('pegawai__profil_user__nip')[:1])).exclude(is_superuser=True)
-        context['nip'] = nip
+        jenissdm = list(jabatan_cards())
         context['inst'] = inst
-        context['slug'] = slug
+        context['slug'] = selected_installation['slug'] if selected_installation else None
+        context['selected_installation'] = (
+            selected_installation['instalasi'] if selected_installation else None
+        )
         context['tanggal'] = tanggal
         context['bulan'] = get_tanggal.month
         context['jenissdm'] = jenissdm
-        context['takah'] = takah
-        context['file_kepeg'] = file_kepeg
+        context['jabatan_total'] = sum(item.jumlah for item in jenissdm)
+        context['workforce_summary'] = workforce_summary()
         # context['data_instalasi'] = data_instalasi
         context['dash'] = 'active'
         context['title_page'] = 'Standar Instalasi'
         context['page'] = 'Standar Instalasi'
         return context
     
-        
+
+class ExportWorkforceProfessionExcelView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    View,
+):
+    """Ekspor ringkasan SDM aktif dan jabatan terakhir pegawai."""
+
+    def test_func(self):
+        return self.request.user.is_staff
+
+    def handle_no_permission(self):
+        return redirect('dashboard_urls:dashboard_view')
+
+    def get(self, request, *args, **kwargs):
+        summary = workforce_summary()
+        jabatan_list = list(jabatan_cards())
+
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = 'Ringkasan SDM'
+        worksheet.merge_cells('A1:D1')
+        worksheet['A1'] = 'RINGKASAN SDM AKTIF PER JABATAN TERAKHIR'
+        worksheet['A1'].font = Font(bold=True, size=14, color='FFFFFF')
+        worksheet['A1'].fill = PatternFill('solid', fgColor='1F4E78')
+        worksheet['A1'].alignment = Alignment(horizontal='center')
+
+        summary_rows = (
+            ('Total SDM aktif', summary['total_active']),
+            ('SDM tanpa penempatan aktif', summary['without_active_placement']),
+            ('SDM tanpa jabatan', summary['without_jabatan']),
+        )
+        for row_number, (label, value) in enumerate(summary_rows, start=3):
+            worksheet.cell(row=row_number, column=1, value=label).font = Font(bold=True)
+            worksheet.cell(row=row_number, column=2, value=value)
+
+        header_row = 7
+        headers = ('No', 'Jabatan', 'Kategori SDM', 'Jumlah Pegawai')
+        for column, header in enumerate(headers, start=1):
+            cell = worksheet.cell(row=header_row, column=column, value=header)
+            cell.font = Font(bold=True, color='FFFFFF')
+            cell.fill = PatternFill('solid', fgColor='4472C4')
+            cell.alignment = Alignment(horizontal='center')
+
+        thin_border = Border(
+            left=Side(style='thin', color='D9E2F3'),
+            right=Side(style='thin', color='D9E2F3'),
+            top=Side(style='thin', color='D9E2F3'),
+            bottom=Side(style='thin', color='D9E2F3'),
+        )
+        for index, jabatan in enumerate(jabatan_list, start=1):
+            row = header_row + index
+            values = (
+                index,
+                jabatan.jenis_sdm,
+                jabatan.get_kategori_sdm_display() or '-',
+                jabatan.jumlah,
+            )
+            for column, value in enumerate(values, start=1):
+                cell = worksheet.cell(row=row, column=column, value=value)
+                cell.border = thin_border
+                if column in (1, 4):
+                    cell.alignment = Alignment(horizontal='center')
+
+        total_row = header_row + len(jabatan_list) + 1
+        worksheet.merge_cells(
+            start_row=total_row,
+            start_column=1,
+            end_row=total_row,
+            end_column=3,
+        )
+        total_label = worksheet.cell(
+            row=total_row,
+            column=1,
+            value='TOTAL TERHITUNG',
+        )
+        total_label.font = Font(bold=True)
+        total_label.fill = PatternFill('solid', fgColor='D9EAD3')
+        total_label.alignment = Alignment(horizontal='right')
+        total_value = worksheet.cell(
+            row=total_row,
+            column=4,
+            value=sum(jabatan.jumlah for jabatan in jabatan_list),
+        )
+        total_value.font = Font(bold=True)
+        total_value.fill = PatternFill('solid', fgColor='D9EAD3')
+        total_value.alignment = Alignment(horizontal='center')
+
+        worksheet.freeze_panes = f'A{header_row + 1}'
+        worksheet.auto_filter.ref = f'A{header_row}:D{header_row + len(jabatan_list)}'
+        for column, width in {'A': 8, 'B': 32, 'C': 22, 'D': 18}.items():
+            worksheet.column_dimensions[column].width = width
+
+        response = HttpResponse(
+            content_type=(
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="ringkasan_sdm_jabatan_{date.today():%Y%m%d}.xlsx"'
+        )
+        workbook.save(response)
+        return response
+
+
 class DetailNakes(LoginRequiredMixin, View):
     login_url = '/accounts/login/'
     redirect_field_name = 'next'
     
-    def get_object(self, slug):
+    def get_object(self, profession_id):
         try:
-            data = JenisSDM.objects.get(slug=slug)
+            data = JenisSDM.objects.get(pk=profession_id)
             return data
         except JenisSDM.DoesNotExist:
             return None
         
     def get(self, request, *args, **kwargs):
-        slug_jenis_nakes = kwargs.get('sdm')
+        jabatan_id = kwargs.get('sdm')
         
         # # Ambil riwayat jabatan terakhir setiap pegawai berdasarkan profesi
         # latest_riwayat = RiwayatJabatan.objects.filter(nama_jabatan__slug=slug_jenis_nakes).values('pegawai').annotate(
@@ -402,19 +423,10 @@ class DetailNakes(LoginRequiredMixin, View):
         #     nama_jabatan__slug=slug_jenis_nakes,
         #     created_at__in=[entry['latest_tanggal'] for entry in latest_riwayat]
         # ).select_related("pegawai", "nama_jabatan")
-        data = RiwayatProfesi.objects.filter(
-            profesi__slug=slug_jenis_nakes
-        ).select_related("pegawai", "profesi").order_by("pegawai")
-        data = data.prefetch_related(
-            Prefetch(
-                'pegawai__riwayatpenempatan_set',
-                queryset=RiwayatPenempatan.objects.filter(status=True).order_by('-created_at'),
-                to_attr='penempatan_aktif'
-            ),
-        )
+        data = employees_for_jabatan(jabatan_id)
         
-        jenissdm = self.get_object(slug_jenis_nakes)
-        jenisnakes = JenisSDM.objects.all()
+        jenissdm = self.get_object(jabatan_id)
+        jenisnakes = jabatan_cards()
         context={
             'data':data,
             'jenissdm':jenissdm,

@@ -1,0 +1,50 @@
+{% if document_admin_employee %}
+<div class="card card-outline card-info mb-3">
+    <div class="card-header d-flex flex-wrap align-items-center">
+        <h3 class="card-title mb-0">
+            <i class="fas fa-id-card mr-1"></i> Data Pegawai
+        </h3>
+        <div class="ml-auto d-flex flex-wrap">
+        {% if document_menu_url %}
+        <a href="{{ document_menu_url }}"
+           class="btn btn-sm btn-outline-primary ml-2">
+            <i class="fas fa-th-large mr-1"></i> Menu Riwayat Pegawai
+        </a>
+        {% endif %}
+        {% if request.user.is_dokumen_admin %}
+        <a href="{% url 'riwayat_urls:document_admin_dashboard' %}"
+           class="btn btn-sm btn-outline-secondary ml-2">
+            <i class="fas fa-arrow-left mr-1"></i> Kembali ke Dashboard Admin
+        </a>
+        {% endif %}
+        </div>
+    </div>
+    <div class="card-body py-2">
+        <div class="row">
+            <div class="col-md-3 mb-2 mb-md-0">
+                <small class="text-muted d-block">Nama Pegawai</small>
+                <strong>{{ document_admin_employee.full_name|default:'-' }}</strong>
+            </div>
+            <div class="col-md-2 mb-2 mb-md-0">
+                <small class="text-muted d-block">NIP/NRK</small>
+                <strong>{{ document_admin_employee.profil_user.nip|default:'-' }}</strong>
+            </div>
+            <div class="col-md-3 mb-2 mb-md-0">
+                <small class="text-muted d-block">Email</small>
+                <strong>{{ document_admin_employee.email|default:'-' }}</strong>
+            </div>
+            <div class="col-md-2 mb-2 mb-md-0">
+                <small class="text-muted d-block">Nomor HP</small>
+                <strong>{{ document_admin_employee.profil_user.no_hp|default:'-' }}</strong>
+            </div>
+            <div class="col-md-2">
+                <small class="text-muted d-block">Dokumen Dibuka</small>
+                <strong>{{ title_page|default:'Menu Riwayat' }}</strong>
+                {% if document_admin_document_count is not None %}
+                <span class="badge badge-info ml-1">{{ document_admin_document_count }} data</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}

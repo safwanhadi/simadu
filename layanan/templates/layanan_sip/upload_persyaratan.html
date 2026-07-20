@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}{{ title_page }}{% endblock title_page %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">{{ card_title }}</h5>
+    </div>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="card-body">
+            <p>Permohonan: <strong>{{ layanan_sip.pegawai.full_name }}</strong></p>
+            <div class="alert alert-info">
+                Hanya dokumen yang belum tersedia yang ditampilkan. KTP dan foto disimpan ke profil pegawai, sedangkan ijazah disimpan ke riwayat pendidikan yang dipilih pada permohonan ini.
+            </div>
+            {{ form|crispy }}
+        </div>
+        <div class="card-footer">
+            <button type="submit" class="btn btn-primary"><i class="fas fa-upload"></i> Upload Dokumen</button>
+            <a href="{% url 'layanan_urls:layanan_sip_detail' pk=layanan_sip.pk %}" class="btn btn-secondary">Kembali</a>
+        </div>
+    </form>
+</div>
+{% endblock content %}
