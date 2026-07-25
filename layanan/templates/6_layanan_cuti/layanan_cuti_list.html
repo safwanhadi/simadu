@@ -12,7 +12,7 @@
                 <i class="fas fa-edit me-1"></i> Riwayat Cuti Saya
             </a>
         </li>
-        {% if request.user.is_staff or request.user.is_cuti_admin %}
+        {% if request.user.profil_admin.is_pejabat or request.user.is_cuti_admin %}
             <li class="nav-item">
                 <a class="nav-link {% if active_tab == 'bawahan' or not active_tab %}active{% endif %}"
                 href="{% url 'layanan_urls:layanan_cuti_bawahan_listview' %}">
@@ -45,6 +45,12 @@
             </p>
         </div>
         <div class="mt-3 mt-md-0">
+            {% if request.user.is_cuti_admin %}
+            <a href="{% url 'layanan_urls:cuti_pemutihan_admin' %}"
+               class="btn btn-outline-warning shadow-sm mr-2">
+                <i class="fas fa-broom me-2"></i>Pemutihan Status
+            </a>
+            {% endif %}
             {# Optional: tombol tambah pengajuan cuti baru #}
             <a href="{% url 'layanan_urls:layanan_cuti_create_view' %}" class="btn btn-primary shadow-sm">
                 <i class="fas fa-plus-circle me-2"></i>Pengajuan Cuti Baru
@@ -66,7 +72,8 @@
                                 <th>Periode Cuti</th>
                                 <th class="text-center">Lama</th>
                                 <th>No. Surat</th>
-                                <th>Status</th>
+                                <th>Status Pengajuan</th>
+                                <th>Status Pelaksanaan</th>
                                 <th class="text-center">Dokumen</th>
                                 <th class="text-center" style="width: 120px;">Aksi</th>
                             </tr>
@@ -144,24 +151,28 @@
                                     </td>
 
                                     <td>
-                                        {% if item.status_cuti == "Proses" %}
+                                        {% if item.usulan.status == "pengajuan" %}
                                             <span class="badge bg-warning-subtle text-warning">
                                                 <i class="fas fa-spinner fa-spin me-1"></i>
-                                                {{ item.get_status_cuti_display }}
+                                                Diajukan
                                             </span>
-                                        {% elif item.status_cuti == "Disetujui" %}
+                                        {% elif item.usulan.status == "tindaklanjut" %}
+                                            <span class="badge bg-info-subtle text-info">Sedang diverifikasi</span>
+                                        {% elif item.usulan.status == "disetujui" %}
                                             <span class="badge bg-success-subtle text-success">
-                                                <i class="fas fa-check-circle me-1"></i>
-                                                {{ item.get_status_cuti_display }}
+                                                <i class="fas fa-check-circle me-1"></i> Disetujui
                                             </span>
-                                        {% elif item.status_cuti == "Ditolak" %}
+                                        {% elif item.usulan.status == "selesai" %}
+                                            <span class="badge bg-primary-subtle text-primary">
+                                                <i class="fas fa-file-circle-check me-1"></i> Selesai
+                                            </span>
+                                        {% elif item.usulan.status == "ditolak" %}
                                             <span class="badge bg-danger-subtle text-danger">
-                                                <i class="fas fa-times-circle me-1"></i>
-                                                {{ item.get_status_cuti_display }}
+                                                <i class="fas fa-times-circle me-1"></i> Ditolak
                                             </span>
                                         {% else %}
                                             <span class="badge bg-secondary-subtle text-secondary">
-                                                {{ item.get_status_cuti_display|default:item.status_cuti }}
+                                                {{ item.usulan.get_status_display|default:"Data lama" }}
                                             </span>
                                         {% endif %}
                                         <div class="small text-muted mt-1">
@@ -169,22 +180,27 @@
                                             Update: {{ item.updated_at|date:"d/m/Y H:i" }}
                                         </div>
                                     </td>
+                                    <td>
+                                        <span class="badge bg-secondary-subtle text-secondary">
+                                            {{ item.status_pelaksanaan_display }}
+                                        </span>
+                                    </td>
 
                                     <td class="text-center text-nowrap">
                                         {% if item.file_pengajuan %}
-                                            <a href="{{ item.file_pengajuan.url }}" target="_blank"
+                                            <a href="{% url 'file_urls:cuti_file_download' pk=item.pk field_name='file_pengajuan' %}" target="_blank"
                                                class="btn btn-sm btn-outline-secondary mb-1" title="File Pengajuan">
                                                 <i class="fas fa-file-upload"></i>
                                             </a>
                                         {% endif %}
                                         {% if item.file_pendukung %}
-                                            <a href="{{ item.file_pendukung.url }}" target="_blank"
+                                            <a href="{% url 'file_urls:cuti_file_download' pk=item.pk field_name='file_pendukung' %}" target="_blank"
                                                class="btn btn-sm btn-outline-info mb-1" title="Dokumen Pendukung">
                                                 <i class="fas fa-file-alt"></i>
                                             </a>
                                         {% endif %}
                                         {% if item.file %}
-                                            <a href="{{ item.file.url }}" target="_blank"
+                                            <a href="{% url 'file_urls:cuti_file_download' pk=item.pk field_name='file' %}" target="_blank"
                                                class="btn btn-sm btn-outline-success mb-1" title="Surat Cuti">
                                                 <i class="fas fa-file-pdf"></i>
                                             </a>
@@ -192,29 +208,17 @@
                                     </td>
 
                                     <td class="text-center text-nowrap">
-                                        {% if item.status == 'draft' %}
-                                        <a style="font-size: small;" href="{% url 'layanan_urls:layanan_cuti_update_view' status='update' id=item.id %}" class="btn btn-sm btn-outline-primary me-1" title="Edit">
-                                            <i class="fas fa-edit"></i>
-                                        </a>
-                                        <!-- Tombol Delete -->
-                                        <form action="#"
-                                              method="post" class="d-inline">
-                                            {% csrf_token %}
-                                            <button type="submit" disabled
-                                                    class="btn btn-sm btn-outline-danger"
-                                                    title="Hapus"
-                                                    onclick="return confirm('Yakin ingin menghapus data ini?');">
-                                                <i class="fas fa-trash-alt"></i>
-                                            </button>
-                                        </form>
-                                        {% elif item.status == 'selesai' or item.status == 'tidak ditindaklanjut' %}
-                                        <a class="btn btn-sm btn-outline-info" href="{% url 'layanan_urls:layanan_cuti_update_view' status='riwayat' id=item.id %}?case=detail" style="font-size: small;">Detail Cuti</a>
+                                        {% if item.usulan %}
+                                        <a class="btn btn-sm btn-outline-info" href="{% url 'layanan_urls:layanan_cuti_detail' pk=item.usulan.pk %}" style="font-size: small;">Detail Cuti</a>
                                         {% endif %}
+                                        {% if item.jenis_cuti == 'Cuti Tahunan' %}
                                         <a class="btn btn-sm btn-outline-primary" href="{% url 'layanan_urls:pelimpahan_create' item.id %}" title="Pelimpahan Tugas">
                                             <i class="fas fa-people-arrows me-1"></i>
                                         </a>
+                                        {% endif %}
                                         {% if request.user.is_cuti_admin %}
-                                        {% if item.status_cuti == 'Proses' or item.status_cuti == 'Selesai' %}
+                                        <a href="{% url 'layanan_urls:layanan_cuti_delete' pk=item.pk %}" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></a>
+                                        {% if item.status_cuti == 'Belum' or item.status_cuti == 'Berlangsung' or item.status_cuti == 'Selesai' %}
                                             <a href="{% url 'layanan_urls:cuti_override_klaim_tunda' riwayat_id=item.id %}" title="Override: Gunakan Cuti Tunda"
                                                 class="btn btn-warning btn-sm">
                                                 <i class="fas fa-user-shield"></i>

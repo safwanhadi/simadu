@@ -10,13 +10,45 @@
       <div class="text-muted small">Ringkasan pengajuan cuti dan status persetujuan.</div>
     </div>
     <div class="d-flex gap-2">
-      <a href="{% url 'layanan_urls:layanan_cuti_bawahan_listview' %}" class="btn btn-light border">
+      <a href="{% if is_owner %}{% url 'layanan_urls:layanan_cuti_listview' %}{% else %}{% url 'layanan_urls:layanan_cuti_bawahan_listview' %}{% endif %}" class="btn btn-light border">
         <i class="fas fa-arrow-left me-1"></i> Kembali
       </a>
       {# Opsional: tombol dokumen pelimpahan / surat cuti dll #}
       {# <a href="#" class="btn btn-secondary"><i class="fas fa-file-pdf me-1"></i> Dokumen</a> #}
     </div>
   </div>
+
+  {% if can_request_change %}
+  <div class="d-flex justify-content-end mb-3">
+    <a href="{% url 'layanan_urls:perubahan_jadwal_cuti_create' riwayat_pk=main.pk %}" class="btn btn-outline-primary">
+      <i class="fas fa-calendar-alt me-1"></i>
+      {% if object.status == 'disetujui' or object.status == 'selesai' %}Ajukan Perubahan Jadwal{% else %}Ubah Jadwal Cuti{% endif %}
+    </a>
+  </div>
+  {% endif %}
+
+  {% if perubahan_aktif %}
+  <div class="alert alert-warning d-flex justify-content-between align-items-center">
+    <div>
+      <strong>Perubahan jadwal sedang diproses.</strong>
+      {{ perubahan_aktif.tanggal_mulai_baru|date:"d/m/Y" }} – {{ perubahan_aktif.tanggal_akhir_baru|date:"d/m/Y" }}
+      · {{ perubahan_aktif.get_status_display }}
+    </div>
+    {% if can_verify_change and perubahan_aktif.status == 'menunggu_verifikasi' %}
+    <a href="{% url 'layanan_urls:perubahan_jadwal_cuti_verifikasi' pk=perubahan_aktif.pk %}" class="btn btn-sm btn-warning">
+      Verifikasi Perubahan
+    </a>
+    {% endif %}
+    {% if is_owner %}
+    <form method="post" action="{% url 'layanan_urls:perubahan_jadwal_cuti_cancel' pk=perubahan_aktif.pk %}" class="ms-2">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Batalkan permohonan perubahan jadwal?');">
+        Batalkan
+      </button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
 
   <div class="row g-3">
     <!-- Ringkasan -->
@@ -30,27 +62,29 @@
                 {{ card_title }}
               </h6>
               <div class="text-muted small">
-                Pemohon: <strong>{{ layanan.pegawai.full_name }}</strong>
-                {% if layanan.pegawai.profil_user and layanan.pegawai.profil_user.nip %}
-                  • NIP: {{ layanan.pegawai.profil_user.nip }}
+                Pemohon: <strong>{{ object.pegawai.full_name }}</strong>
+                {% if object.pegawai.profil_user and object.pegawai.profil_user.nip %}
+                  • NIP: {{ object.pegawai.profil_user.nip }}
                 {% endif %}
               </div>
             </div>
 
             <!-- Badge status -->
             <div class="text-end">
-              {% if layanan.status == "draft" %}
-                <span class="badge bg-secondary">DRAFT</span>
-              {% elif layanan.status == "pengajuan" %}
+              {% if object.status == "pengajuan" %}
                 <span class="badge bg-warning text-dark">PENGAJUAN</span>
-              {% elif layanan.status == "tindaklanjut" %}
+              {% elif object.status == "tindaklanjut" %}
                 <span class="badge bg-info text-dark">TINDAK LANJUT</span>
-              {% elif layanan.status == "selesai" %}
-                <span class="badge bg-success">SELESAI</span>
+              {% elif object.status == "disetujui" %}
+                <span class="badge bg-success">DISETUJUI</span>
+              {% elif object.status == "selesai" %}
+                <span class="badge bg-primary">SELESAI</span>
+              {% elif object.status == "ditolak" %}
+                <span class="badge bg-danger">DITOLAK</span>
               {% else %}
-                <span class="badge bg-light text-dark border">{{ layanan.status|upper }}</span>
+                <span class="badge bg-light text-dark border">{{ object.status|upper }}</span>
               {% endif %}
-              <div class="text-muted small mt-1">Tahun: {{ layanan.tahun|default:"-" }}</div>
+              <div class="text-muted small mt-1">Tahun: {{ object.tahun|default:"-" }}</div>
             </div>
           </div>
         </div>
@@ -79,28 +113,36 @@
               </div>
 
               <div class="col-md-6">
-                <div class="small text-muted">Status Cuti</div>
-                {% if main.status_cuti == "Proses" %}
-                  <span class="badge bg-info text-dark">PROSES</span>
-                {% elif main.status_cuti == "Selesai" %}
+                <div class="small text-muted">Status Pelaksanaan Cuti</div>
+                {% if main.status_pelaksanaan_aktual == "Belum" %}
+                  <span class="badge bg-secondary">BELUM DILAKSANAKAN</span>
+                {% elif main.status_pelaksanaan_aktual == "Berlangsung" %}
+                  <span class="badge bg-info text-dark">SEDANG BERLANGSUNG</span>
+                {% elif main.status_pelaksanaan_aktual == "Selesai" %}
                   <span class="badge bg-success">SELESAI</span>
-                {% elif main.status_cuti == "Tunda" %}
-                  <span class="badge bg-secondary">TUNDA</span>
+                {% elif main.status_pelaksanaan_aktual == "Tunda" %}
+                  <span class="badge bg-warning text-dark">DITUNDA</span>
+                {% elif main.status_pelaksanaan_aktual == "Batal" %}
+                  <span class="badge bg-danger">TIDAK DILAKSANAKAN</span>
                 {% else %}
-                  <span class="badge bg-light text-dark border">{{ main.status_cuti|default:"-" }}</span>
+                  <span class="badge bg-light text-dark border">{{ main.status_pelaksanaan_display|default:"-" }}</span>
                 {% endif %}
               </div>
 
               <div class="col-md-6">
-                <div class="small text-muted">Status Persetujuan</div>
-                {% if main.status_persetujuan == "belum" %}
-                  <span class="badge bg-warning text-dark">BELUM DIPUTUSKAN</span>
-                {% elif main.status_persetujuan == "disetujui" %}
+                <div class="small text-muted">Status Pengajuan Cuti</div>
+                {% if object.status == "pengajuan" %}
+                  <span class="badge bg-warning text-dark">DIAJUKAN</span>
+                {% elif object.status == "tindaklanjut" %}
+                  <span class="badge bg-info text-dark">SEDANG DIVERIFIKASI</span>
+                {% elif object.status == "disetujui" %}
                   <span class="badge bg-success">DISETUJUI</span>
-                {% elif main.status_persetujuan == "ditolak" %}
+                {% elif object.status == "selesai" %}
+                  <span class="badge bg-primary">SELESAI</span>
+                {% elif object.status == "ditolak" %}
                   <span class="badge bg-danger">DITOLAK</span>
                 {% else %}
-                  <span class="badge bg-light text-dark border">{{ main.status_persetujuan|default:"-" }}</span>
+                  <span class="badge bg-light text-dark border">{{ object.get_status_display }}</span>
                 {% endif %}
               </div>
 
@@ -136,7 +178,7 @@
             <div class="mb-3">
               <div class="small text-muted mb-1">File Pengajuan</div>
               {% if main.file_pengajuan %}
-                <a class="btn btn-sm btn-outline-primary w-100" href="{{ main.file_pengajuan.url }}" target="_blank">
+                <a class="btn btn-sm btn-outline-primary w-100" href="{% url 'file_urls:cuti_file_download' pk=main.pk field_name='file_pengajuan' %}" target="_blank">
                   <i class="fas fa-file-alt me-1"></i> Lihat File Pengajuan
                 </a>
               {% else %}
@@ -144,10 +186,18 @@
               {% endif %}
             </div>
 
+            {% if can_upload_surat_cuti %}
+              <a href="{% url 'layanan_urls:upload_file_cuti' pk=main.pk %}"
+                 class="btn btn-success w-100 mb-3">
+                <i class="fas fa-upload me-1"></i>
+                {% if main.file %}Ganti Surat Cuti{% else %}Upload Surat Cuti{% endif %}
+              </a>
+            {% endif %}
+
             <div class="mb-3">
               <div class="small text-muted mb-1">Dokumen Pendukung</div>
               {% if main.file_pendukung %}
-                <a class="btn btn-sm btn-outline-secondary w-100" href="{{ main.file_pendukung.url }}" target="_blank">
+                <a class="btn btn-sm btn-outline-secondary w-100" href="{% url 'file_urls:cuti_file_download' pk=main.pk field_name='file_pendukung' %}" target="_blank">
                   <i class="fas fa-paperclip me-1"></i> Lihat Dokumen Pendukung
                 </a>
               {% else %}
@@ -158,7 +208,7 @@
             <div class="mb-3">
               <div class="small text-muted mb-1">Surat Cuti</div>
               {% if main.file %}
-                <a class="btn btn-sm btn-outline-success w-100" href="{{ main.file.url }}" target="_blank">
+                <a class="btn btn-sm btn-outline-success w-100" href="{% url 'file_urls:cuti_file_download' pk=main.pk field_name='file' %}" target="_blank">
                   <i class="fas fa-file-pdf me-1"></i> Lihat Surat Cuti
                 </a>
               {% else %}
@@ -195,8 +245,8 @@
                   <th>Jenis</th>
                   <th>Periode</th>
                   <th style="width: 110px;">Lama</th>
-                  <th style="width: 120px;">Status</th>
-                  <th style="width: 160px;">Persetujuan</th>
+                  <th style="width: 160px;">Status Pelaksanaan</th>
+                  <th style="width: 160px;">Status Pengajuan</th>
                 </tr>
               </thead>
               <tbody>
@@ -210,26 +260,10 @@
                     </td>
                     <td>{{ d.lama_cuti|default:0 }} hari</td>
                     <td>
-                      {% if d.status_cuti == "Proses" %}
-                        <span class="badge bg-info text-dark">PROSES</span>
-                      {% elif d.status_cuti == "Selesai" %}
-                        <span class="badge bg-success">SELESAI</span>
-                      {% elif d.status_cuti == "Tunda" %}
-                        <span class="badge bg-secondary">TUNDA</span>
-                      {% else %}
-                        <span class="badge bg-light text-dark border">{{ d.status_cuti|default:"-" }}</span>
-                      {% endif %}
+                      <span class="badge bg-light text-dark border">{{ d.status_pelaksanaan_display }}</span>
                     </td>
                     <td>
-                      {% if d.status_persetujuan == "belum" %}
-                        <span class="badge bg-warning text-dark">BELUM</span>
-                      {% elif d.status_persetujuan == "disetujui" %}
-                        <span class="badge bg-success">DISETUJUI</span>
-                      {% elif d.status_persetujuan == "ditolak" %}
-                        <span class="badge bg-danger">DITOLAK</span>
-                      {% else %}
-                        <span class="badge bg-light text-dark border">{{ d.status_persetujuan|default:"-" }}</span>
-                      {% endif %}
+                      <span class="badge bg-light text-dark border">{{ object.get_status_display }}</span>
                     </td>
                   </tr>
                 {% empty %}
@@ -247,5 +281,29 @@
     </div>
 
   </div>
+
+  {% if riwayat_perubahan %}
+  <div class="card border-0 shadow-sm mt-3">
+    <div class="card-header bg-transparent"><strong>Riwayat Perubahan Jadwal</strong></div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr><th>Diajukan</th><th>Jadwal lama</th><th>Jadwal baru</th><th>Jenis</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          {% for perubahan in riwayat_perubahan %}
+          <tr>
+            <td>{{ perubahan.created_at|date:"d/m/Y H:i" }}</td>
+            <td>{{ perubahan.tanggal_mulai_lama|date:"d/m/Y" }} – {{ perubahan.tanggal_akhir_lama|date:"d/m/Y" }}</td>
+            <td>{{ perubahan.tanggal_mulai_baru|date:"d/m/Y" }} – {{ perubahan.tanggal_akhir_baru|date:"d/m/Y" }}</td>
+            <td>{{ perubahan.get_jenis_perubahan_display }}</td>
+            <td>{{ perubahan.get_status_display }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

@@ -1,21 +1,21 @@
 from django.urls import path
-
-# from . import views_cuti
+from django.views.generic import RedirectView
 
 from .views import (
     JenisLayananView,
     LayananCutiVerifikasiView,
-    LayanananCutiInlineCreateView,
     RiwayatLayananCutiView,
     RiwayatCutiBawahanView,
     LayananCutiCreateView,
     LayananCutiDetailView,
-    LayananCutiInlineFormView,
+    UploadFileCutiView,
+    PerubahanJadwalCutiCreateView,
+    PerubahanJadwalCutiCancelView,
+    PerubahanJadwalCutiVerifikasiView,
     LayananCutiUpdateView,
-    LayananCutiTundaView,
+    LayananCutiDeleteView,
+    CutiPemutihanAdminView,
     AdminOverrideKlaimTundaForCutiView,
-    LayananCreateCutiFromCutiTunda,#using createview
-    LayananUpdateCUtiTundaView,#using updateview
     PelimpahanTugasCreateView,
     PelimpahanTugasPenerimaListView,
     PelimpahanTugasPenerimaUpdateView,
@@ -68,6 +68,32 @@ urlpatterns=[
     path("layanan-cuti/<int:id>/verifikasi/", LayananCutiVerifikasiView.as_view(), name="layanan_cuti_verifikasi"),
     path('layanan-cuti/create/', LayananCutiCreateView.as_view(), name='layanan_cuti_create_view'),
     path("layanan-cuti/<int:pk>/detail/", LayananCutiDetailView.as_view(), name="layanan_cuti_detail"),
+    path(
+        "layanan-cuti/riwayat/<int:pk>/upload-surat/",
+        UploadFileCutiView.as_view(),
+        name="upload_file_cuti",
+    ),
+    path(
+        'layanan-cuti/riwayat/<int:riwayat_pk>/ubah-jadwal/',
+        PerubahanJadwalCutiCreateView.as_view(),
+        name='perubahan_jadwal_cuti_create',
+    ),
+    path(
+        'layanan-cuti/perubahan-jadwal/<int:pk>/verifikasi/',
+        PerubahanJadwalCutiVerifikasiView.as_view(),
+        name='perubahan_jadwal_cuti_verifikasi',
+    ),
+    path(
+        'layanan-cuti/perubahan-jadwal/<int:pk>/batalkan/',
+        PerubahanJadwalCutiCancelView.as_view(),
+        name='perubahan_jadwal_cuti_cancel',
+    ),
+    path('layanan-cuti/<int:pk>/delete/', LayananCutiDeleteView.as_view(), name='layanan_cuti_delete'),
+    path(
+        'layanan-cuti/pemutihan/',
+        CutiPemutihanAdminView.as_view(),
+        name='cuti_pemutihan_admin',
+    ),
     path('pelimpahan-tugas/<int:riwayat_pk>/create/', PelimpahanTugasCreateView.as_view(), name='pelimpahan_create'),
     path("layanan-cuti/<int:riwayat_id>/override-klaim-tunda/", AdminOverrideKlaimTundaForCutiView.as_view(),name="cuti_override_klaim_tunda"),
     path('pelimpahan-tugas/penerima-list/', PelimpahanTugasPenerimaListView.as_view(), name='pelimpahan_penerima_list'),
@@ -75,12 +101,32 @@ urlpatterns=[
     path('pelimpahan-tugas/penerima-list/<int:pk>/update/', PelimpahanTugasPenerimaUpdateView.as_view(), name='pelimpahan_penerima_update'),
     path('pelimpahan-tugas/kepala-list/', PelimpahanKepalaListView.as_view(), name='pelimpahan_atasan_list'),
     path('pelimpahan-tugas/kepala-list/<int:pk>/update/', PelimpahanTugasAtasanUpdateView.as_view(), name='pelimpahan_atasan_update'),
-    path('yancuti/<str:status>/', LayananCutiInlineFormView.as_view(), name='layanan_cuti_view'),
+    path(
+        'yancuti/<str:status>/',
+        RedirectView.as_view(url='/layanan/layanan-cuti/', permanent=False),
+        name='layanan_cuti_view',
+    ),
     path('yancuti/<str:status>/<int:id>/', LayananCutiUpdateView.as_view(), name='layanan_cuti_update_view'),
-    path('pengajuan-cuti/', LayanananCutiInlineCreateView.as_view(), name='pengajuan_cuti_view'),
-    path('list-cuti-tunda/', LayananCutiTundaView.as_view(), name='layanan_cuti_tunda_view'),
-    path('cuti-tunda/<int:pk>/', LayananCreateCutiFromCutiTunda.as_view(), name='layanan_ambil_cuti_tunda_view'),
-    path('update-cuti-tunda/<int:pk>/', LayananUpdateCUtiTundaView.as_view(), name='layanan_update_cuti_tunda_view'),
+    path(
+        'pengajuan-cuti/',
+        RedirectView.as_view(pattern_name='layanan_urls:layanan_cuti_create_view', permanent=False),
+        name='pengajuan_cuti_view',
+    ),
+    path(
+        'list-cuti-tunda/',
+        RedirectView.as_view(pattern_name='layanan_urls:layanan_cuti_create_view', permanent=False),
+        name='layanan_cuti_tunda_view',
+    ),
+    path(
+        'cuti-tunda/<int:pk>/',
+        RedirectView.as_view(url='/layanan/layanan-cuti/create/', permanent=False),
+        name='layanan_ambil_cuti_tunda_view',
+    ),
+    path(
+        'update-cuti-tunda/<int:pk>/',
+        RedirectView.as_view(url='/layanan/layanan-cuti/', permanent=False),
+        name='layanan_update_cuti_tunda_view',
+    ),
     path('yanberkala/', BerkalaListView.as_view(), name='layanan_berkala_view'),
     path('yanberkala/add-layanan/<int:riwayat_id>/', createlayananberkala, name='layanan_berkala_add_view'),
     path('yanberkala/<int:id>/', LayananGajiBerkalaUpdateView.as_view(), name='layanan_berkala_update_view'),
@@ -125,31 +171,4 @@ urlpatterns=[
     path('yanjabatan/<int:pk>/', LayananNaikJabatanDetailView.as_view(), name='layanan_jabatan_detail'),
     path('yanjabatan/<int:pk>/ubah/', LayananNaikJabatanUpdateView.as_view(), name='layanan_jabatan_update'),
     path('yanjabatan/<int:pk>/proses/', LayananNaikJabatanProcessView.as_view(), name='layanan_jabatan_process'),
-    
-    # Dashboard
-    # path('', views_cuti.DashboardCutiView.as_view(), name='dashboard'),
-    
-    # # Layanan Cuti
-    # path('layanan/', views_cuti.LayananCutiListView.as_view(), name='layanan_cuti_list'),
-    # path('layanan/<int:pk>/', views_cuti.LayananCutiDetailView.as_view(), name='layanan_cuti_detail'),
-    # path('layanan/tambah/', views_cuti.LayananCutiCreateView.as_view(), name='layanan_cuti_create'),
-    # path('layanan/<int:pk>/edit/', views_cuti.LayananCutiUpdateView.as_view(), name='layanan_cuti_update'),
-    # path('layanan/<int:pk>/hapus/', views_cuti.LayananCutiDeleteView.as_view(), name='layanan_cuti_delete'),
-    
-    # # Cuti Tertunda
-    # path('cuti-tunda/tambah/', views_cuti.CutiTundaCreateView.as_view(), name='cuti_tunda_create'),
-    
-    # # Persetujuan Cuti
-    # path('persetujuan/', views_cuti.PersetujuanListView.as_view(), name='persetujuan_list'),
-    # path('persetujuan/<int:pk>/', views_cuti.PersetujuanCutiView.as_view(), name='persetujuan_cuti'),
-    
-    # # Riwayat Cuti
-    # path('riwayat/', views_cuti.RiwayatCutiListView.as_view(), name='riwayat_cuti_list'),
-    
-    # # Statistik
-    # path('statistik/', views_cuti.CutiStatsView.as_view(), name='cuti_stats'),
-    
-    # # API Endpoints
-    # path('api/sisa-cuti/', views_cuti.GetSisaCutiAPIView.as_view(), name='api_sisa_cuti'),
-    # path('api/validate-tanggal/', views_cuti.ValidateCutiDateAPIView.as_view(), name='api_validate_tanggal'),
 ]

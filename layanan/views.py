@@ -2,10 +2,11 @@ from django.conf import settings
 from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse, reverse_lazy
 from django.views import View
-from django.views.generic import ListView, UpdateView, CreateView, DetailView, FormView
+from django.contrib.messages.views import SuccessMessageMixin
+from django.views.generic import ListView, UpdateView, CreateView, DetailView, FormView, DeleteView
 from django.db import transaction
 # from django.views.generic import ListView, CreateView
-from django.db.models import Sum, F, Q, Window
+from django.db.models import Sum, F, Q, Window, Prefetch
 from django.db.models.functions import RowNumber
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
@@ -13,12 +14,17 @@ from datetime import datetime, date, timedelta
 from django.utils import timezone
 from dateutil.relativedelta import relativedelta
 from typing import Optional
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 import os
 import locale
 import logging 
 from .services import CheckCuti
 from .utils import resolve_atasan_level3_for_level4
+from .cuti_access import (
+    build_approval_chain, can_supervise_employee, can_view_leave,
+    ensure_diklat_verifier_snapshot, ensure_leave_verifier_snapshot,
+)
+from strukturorg.services import filter_structures_led_by, get_active_leader
 
 # Konfigurasi logger (opsional, tapi direkomendasikan)
 logger = logging.getLogger(__name__)
@@ -35,6 +41,9 @@ from .models import (
     VerifikasiDiklat, 
     LayananUsulanInovasi,
     PelimpahanTugas,
+    PerubahanJadwalCuti,
+    PemutihanCutiLog,
+    STATUS_PENGAJUAN_CUTI,
     LayananNaikPangkat,
     LayananNaikJabatan,
 )
@@ -52,11 +61,6 @@ from dokumen.models import (
 )
 from .serializers import LayananGajiBerkalaSerializer
 from dokumen.forms import (
-    RiwayatPengajuanCutiForm,
-    RiwayatCutiUploadSuratForm,
-    RiwayatCutiUploadDakungForm,
-    RiwayatCutiForm,
-    RiwayatCutiTundaForm,
     FormUsulanRiwayatDiklat,
     FormPenugasanDiklat,
     FormRiwayatDiklatSPT,
@@ -70,14 +74,12 @@ from dokumen.forms import (
 from .forms import (
     RiwayatGajiBerkalaForm,
     LayananCutiForm,
-    VerifikatorCutiForm,
+    UploadFileCutiForm,
     Verifikator1CutiForm,
     Verifikator2CutiForm,
     Verifikator3CutiForm, 
     FormLayananBerkala, 
     pengajuan_cuti_formset,
-    update_pengajuan_cuti_formset,
-    update_pengajuan_cuti_fullform_formset,
     FormUsulanLayananDiklat,
     usulan_diklat_formset,
     update_diklat_formset,
@@ -104,11 +106,22 @@ from .forms import (
     PelimpahanTugasCreateForm,
     PelimpahanTugasPenerimaForm,
     PelimpahanTugasAtasanForm,
+    PerubahanJadwalCutiForm,
+    PerubahanJadwalDecisionForm,
     LayananNaikPangkatForm,
     RiwayatPanggolHasilLayananForm,
     LayananNaikJabatanForm,
     RiwayatJabatanHasilLayananForm,
     )
+from .cuti_schedule import (
+    apply_nonfinal_change,
+    approve_final_change,
+    cancel_schedule_change,
+    determine_change_type,
+    finalize_pending_schedule_change,
+    reject_pending_schedule_change,
+    snapshot_verification,
+)
 
 # Create your views here.
 locale.setlocale(locale.LC_ALL, '')
@@ -364,7 +377,9 @@ class RiwayatCutiBawahanView(LoginRequiredMixin, UserPassesTestMixin, ListView):
     paginate_by = 25  # kalau mau paging
     
     def test_func(self):   
-        return self.request.user.is_staff
+        # Akses halaman boleh untuk pengguna login; queryset di bawah tetap
+        # membatasi data berdasarkan peran admin/lingkup struktur.
+        return self.request.user.is_authenticated
     
     def handle_no_permission(self):
         messages.error(
@@ -380,16 +395,26 @@ class RiwayatCutiBawahanView(LoginRequiredMixin, UserPassesTestMixin, ListView):
         base_qs = (
             RiwayatCuti.objects
             .select_related('pegawai', 'pegawai__profil_user', 'usulan')
+            .prefetch_related(Prefetch(
+                'perubahan_jadwal',
+                queryset=PerubahanJadwalCuti.objects.filter(status='menunggu_verifikasi'),
+                to_attr='perubahan_jadwal_menunggu',
+            ))
             .order_by('-updated_at')
         )
 
         if user.is_cuti_admin:
             return base_qs
 
+        snapshot_qs = base_qs.filter(
+            Q(usulan__verifikasicuti__verifikator1=user)
+            | Q(usulan__verifikasicuti__verifikator2=user)
+            | Q(usulan__verifikasicuti__verifikator3=user)
+        )
+
         profil_admin = getattr(user, 'profil_admin', None)
         if not profil_admin:
-            # bukan atasan / tidak punya scope → tidak ada bawahan
-            return RiwayatCuti.objects.none()
+            return snapshot_qs.distinct()
 
         # hanya pegawai dengan penempatan aktif
         qs = base_qs.filter(
@@ -398,39 +423,44 @@ class RiwayatCutiBawahanView(LoginRequiredMixin, UserPassesTestMixin, ListView):
 
         p = profil_admin
 
-        if p.instalasi.exists():
+        instalasi_aktif = filter_structures_led_by(p.instalasi.all(), user)
+        sub_bidang_aktif = filter_structures_led_by(p.sub_bidang.all(), user)
+        bidang_aktif = filter_structures_led_by(p.bidang.all(), user)
+        unor_aktif = filter_structures_led_by(p.unor.all(), user)
+
+        if instalasi_aktif.exists():
             # atasan unit instalasi → bawahan: semua pegawai di instalasi tsb
             qs = qs.filter(
-                pegawai__riwayat_penempatan__penempatan_level4__in=p.instalasi.all()
+                pegawai__riwayat_penempatan__penempatan_level4__in=instalasi_aktif
             )
 
-        elif p.sub_bidang.exists():
+        elif sub_bidang_aktif.exists():
             # atasan sub_bidang → semua yg langsung di sub_bidang + instalasi di bawahnya
             qs = qs.filter(
-                Q(pegawai__riwayat_penempatan__penempatan_level3__in=p.sub_bidang.all()) |
-                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__in=p.sub_bidang.all())
+                Q(pegawai__riwayat_penempatan__penempatan_level3__in=sub_bidang_aktif) |
+                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__in=sub_bidang_aktif)
             )
 
-        elif p.bidang.exists():
+        elif bidang_aktif.exists():
             # atasan bidang → semua level di bawah bidang tsb
             qs = qs.filter(
-                Q(pegawai__riwayat_penempatan__penempatan_level2__in=p.bidang.all()) |
-                Q(pegawai__riwayat_penempatan__penempatan_level3__bidang__in=p.bidang.all()) |
-                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang__in=p.bidang.all())
+                Q(pegawai__riwayat_penempatan__penempatan_level2__in=bidang_aktif) |
+                Q(pegawai__riwayat_penempatan__penempatan_level3__bidang__in=bidang_aktif) |
+                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang__in=bidang_aktif)
             )
 
-        elif p.unor.exists():
+        elif unor_aktif.exists():
             # atasan unor (level 1) → semua pegawai di unit tsb
             qs = qs.filter(
-                Q(pegawai__riwayat_penempatan__penempatan_level1__in=p.unor.all()) |
-                Q(pegawai__riwayat_penempatan__penempatan_level2__unor__in=p.unor.all()) |
-                Q(pegawai__riwayat_penempatan__penempatan_level3__bidang__unor__in=p.unor.all()) |
-                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang__unor__in=p.unor.all())
+                Q(pegawai__riwayat_penempatan__penempatan_level1__in=unor_aktif) |
+                Q(pegawai__riwayat_penempatan__penempatan_level2__unor__in=unor_aktif) |
+                Q(pegawai__riwayat_penempatan__penempatan_level3__bidang__unor__in=unor_aktif) |
+                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang__unor__in=unor_aktif)
             )
         else:
-            return RiwayatCuti.objects.none()
+            return snapshot_qs.distinct()
 
-        return qs.distinct()
+        return (qs | snapshot_qs).distinct()
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -442,6 +472,10 @@ class RiwayatCutiBawahanView(LoginRequiredMixin, UserPassesTestMixin, ListView):
             'active_tab': 'bawahan',  # untuk nav/tab
         })
         return ctx
+
+
+class CutiSubmissionError(Exception):
+    """Kesalahan bisnis yang harus membatalkan transaksi dan merender ulang form."""
 
 
 class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
@@ -477,11 +511,29 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
         profil = getattr(self.request.user, 'profil_user', None)
         return getattr(profil, 'nip', None)
 
+    def get_target_pegawai(self):
+        """Pegawai pemohon; admin boleh memilih, pengguna biasa selalu dirinya."""
+        user = self.request.user
+        if not user.is_cuti_admin:
+            return user
+
+        raw_id = (
+            self.request.POST.get('pegawai')
+            if self.request.method == 'POST'
+            else self.request.GET.get('pegawai')
+        )
+        if not raw_id:
+            return None
+        return (
+            Users.objects.filter(pk=raw_id, is_active=True)
+            .exclude(is_superuser=True)
+            .first()
+        )
+
     # ---------- form utama ----------
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         kwargs['request'] = self.request
-        kwargs['action'] = 'add'
         return kwargs
 
     def get_initial(self):
@@ -491,18 +543,21 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
 
         if not user.is_cuti_admin:
             initial['pegawai'] = user
+        else:
+            target_pegawai = self.get_target_pegawai()
+            if target_pegawai:
+                initial['pegawai'] = target_pegawai
         initial['layanan'] = layanan_default
         initial['status'] = 'pengajuan'
         initial['tahun'] = date.today().year
         return initial
 
     # ---------- formset ----------
-    def get_formset(self, tahun_pengajuan=None):
-        dokumen_default = self.get_dokumen_default()
-        user = self.request.user
-
+    def get_formset(self, tahun_pengajuan=None, target_pegawai=None):
         if tahun_pengajuan is None:
             tahun_pengajuan = date.today().year
+        if target_pegawai is None:
+            target_pegawai = self.get_target_pegawai()
 
         if self.request.method == 'POST':
             formset = pengajuan_cuti_formset(
@@ -510,25 +565,18 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
                 files=self.request.FILES,
                 form_kwargs={
                     'request': self.request,
-                    'action': 'add',
-                    'status': 'baru',
                     'tahun_pengajuan': tahun_pengajuan,
                     'check_cuti': self,
+                    'target_pegawai': target_pegawai,
                 },
             )
         else:
-            initial_riwayat = {'dokumen': dokumen_default}
-            if not user.is_cuti_admin:
-                initial_riwayat['pegawai'] = user
-
             formset = pengajuan_cuti_formset(
-                initial=[initial_riwayat],
                 form_kwargs={
                     'request': self.request,
-                    'action': 'add',
-                    'status': 'baru',
                     'tahun_pengajuan': tahun_pengajuan,
                     'check_cuti': self,
+                    'target_pegawai': target_pegawai,
                 },
             )
         return formset
@@ -541,10 +589,16 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
 
         if 'formset' not in context:
             context['formset'] = self.get_formset()
+        target_pegawai = self.get_target_pegawai()
 
         context.update({
             'nip': self.get_nip_user(),
-            'cek_sisa_cuti': self.cek_sisa_cuti(self.request.user),
+            'cek_sisa_cuti': (
+                self.cek_sisa_cuti(target_pegawai)
+                if target_pegawai
+                else 0
+            ),
+            'target_pegawai': target_pegawai,
             'title_page': 'Layanan Cuti',
             'card_title': 'Form Pengajuan Cuti',
             'cuti': 'active',
@@ -562,9 +616,21 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
         tahun_pengajuan = date.today().year
         if form.is_valid():
             tahun_pengajuan = form.cleaned_data.get('tahun') or tahun_pengajuan
-            formset = self.get_formset(tahun_pengajuan=tahun_pengajuan)
+            target_pegawai = (
+                form.cleaned_data.get('pegawai')
+                if request.user.is_cuti_admin
+                else request.user
+            )
+            formset = self.get_formset(
+                tahun_pengajuan=tahun_pengajuan,
+                target_pegawai=target_pegawai,
+            )
             if formset.is_valid():
-                return self.forms_valid(form, formset, tahun_pengajuan)
+                try:
+                    return self.forms_valid(form, formset, tahun_pengajuan)
+                except CutiSubmissionError as exc:
+                    messages.error(request, str(exc))
+                    return self.forms_invalid(form, formset)
             else:
                 return self.forms_invalid(form, formset)
         else:
@@ -572,11 +638,17 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
             return self.forms_invalid(form, formset)
 
     def get_status_pegawai(self, pegawai):
-        try:
-            pengangkatan = RiwayatPengangkatan.objects.filter(pegawai=pegawai).order_by('-id').first()
-            return pengangkatan.status_pegawai
-        except RiwayatPengangkatan.DoesNotExist:
-            return None
+        pengangkatan = RiwayatPengangkatan.objects.filter(
+            pegawai=pegawai
+        ).order_by('-id').first()
+        return pengangkatan.status_pegawai if pengangkatan else None
+
+    def simpan_snapshot_saldo_cuti(self, pegawai, tahun_pengajuan):
+        self.object.snapshot_saldo_cuti = self.buat_snapshot_saldo_cuti(
+            pegawai,
+            tahun_pengajuan,
+        )
+        self.object.save(update_fields=('snapshot_saldo_cuti', 'updated_at'))
     
     def forms_valid(self, form, formset, tahun_pengajuan: int):
         request = self.request
@@ -588,20 +660,25 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
             self.object = form.save(commit=False)
             if not request.user.is_cuti_admin:
                 self.object.pegawai = request.user
-            if not self.object.status:
-                self.object.status = "pengajuan"
-            if not self.object.tahun:
-                self.object.tahun = tahun_pengajuan
+            # Field workflow tidak boleh dipercaya dari hidden input browser.
+            layanan_default = self.get_layanan_default()
+            dokumen_default = self.get_dokumen_default()
+            if layanan_default is None or dokumen_default is None:
+                raise CutiSubmissionError(
+                    "Konfigurasi layanan/dokumen cuti belum lengkap."
+                )
+            self.object.layanan = layanan_default
+            self.object.status = "pengajuan"
+            self.object.tahun = tahun_pengajuan
             self.object.save()
+            ensure_leave_verifier_snapshot(self.object)
 
             # ============================================================
             # 2) Proses formset (RiwayatCuti)
             # ============================================================
             data_form = formset.save(commit=False)
             if not data_form:
-                messages.error(request, "Data detail cuti tidak boleh kosong.")
-                transaction.set_rollback(True)
-                return redirect(self.success_url)
+                raise CutiSubmissionError("Data detail cuti tidak boleh kosong.")
 
             cd0 = formset.cleaned_data[0]
             jenis_cuti = cd0.get("jenis_cuti")
@@ -618,42 +695,63 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
             if tgl_mulai_cuti and not tgl_akhir_cuti and lama_cuti:
                 tgl_akhir_cuti = tgl_mulai_cuti + timedelta(days=lama_cuti - 1)
 
-            target_pegawai = getattr(data_form[0], "pegawai", None) or self.object.pegawai
+            target_pegawai = self.object.pegawai
+            # Serialisasi seluruh perubahan saldo per pegawai. Ini mencegah dua
+            # request paralel menggunakan saldo tahunan/tunda yang sama.
+            target_pegawai = Users.objects.select_for_update().get(pk=target_pegawai.pk)
             sisa_cuti = self.cek_sisa_cuti(target_pegawai)
+
+            if (
+                tgl_mulai_cuti
+                and tgl_akhir_cuti
+                and self.is_memiliki_cuti_bentrok(
+                    target_pegawai,
+                    tgl_mulai_cuti,
+                    tgl_akhir_cuti,
+                )
+            ):
+                raise CutiSubmissionError(
+                    "Pegawai sudah memiliki pengajuan atau pelaksanaan cuti lain "
+                    "yang bertabrakan dengan rentang tanggal tersebut."
+                )
 
             # ============================================================
             # 3) Guard: penerima pelimpahan aktif tidak boleh ajukan cuti tahunan
             # ============================================================
             if jenis_cuti == "Cuti Tahunan" and tgl_mulai_cuti and tgl_akhir_cuti:
                 if self.is_penerima_memiliki_pelimpahan_aktif(target_pegawai, tgl_mulai_cuti, tgl_akhir_cuti):
-                    messages.error(
-                        request,
+                    raise CutiSubmissionError(
                         "Anda tidak dapat mengajukan Cuti Tahunan karena sedang menerima "
                         "pelimpahan tugas pada rentang tanggal tersebut."
                     )
-                    transaction.set_rollback(True)
-                    return redirect(self.success_url)
 
             # ============================================================
             # 4) Isi field umum tiap RiwayatCuti
             # ============================================================
             for item in data_form:
-                if not item.pegawai_id:
-                    item.pegawai = self.object.pegawai
+                item.pegawai = self.object.pegawai
+                item.dokumen = dokumen_default
+                item.status_cuti = 'Belum'
                 if not item.tahun_cuti:
                     item.tahun_cuti = self.object.tahun or tahun_pengajuan
                 item.usulan = self.object
+                if not item.tgl_akhir_cuti and tgl_akhir_cuti:
+                    item.tgl_akhir_cuti = tgl_akhir_cuti
 
             # ============================================================
             # 5) CABANG: CUTI TAHUNAN
             # ============================================================
             if jenis_cuti == "Cuti Tahunan":
                 # waktu pengajuan tetap divalidasi utk cuti tahunan (mau tunda saja / normal)
-                status_pegawai = self.get_status_pegawai(target_pegawai) if self.get_status_pegawai(target_pegawai) else "PNS"
+                status_pegawai = self.get_status_pegawai(target_pegawai)
+                if not status_pegawai:
+                    raise CutiSubmissionError(
+                        "Status kepegawaian belum tersedia. Hubungi pengelola data pegawai."
+                    )
                 if not self.cek_waktu_pengajuan_cuti(tgl_mulai_cuti, status_pegawai):
-                    messages.error(request, "Mohon maaf waktu pengajuan cuti anda terlalu mepet atau tidak sesuai!")
-                    transaction.set_rollback(True)
-                    return redirect(self.success_url)
+                    raise CutiSubmissionError(
+                        "Mohon maaf waktu pengajuan cuti Anda terlalu mepet atau tidak sesuai."
+                    )
 
                 # if lama_cuti <= 0: user boleh buat cuti dengan lama cuti 0 nanti akan divalidasi di saat verifikasi pimpinan
                 #     messages.error(request, "Lama cuti wajib diisi dan harus lebih dari 0.")
@@ -662,9 +760,10 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
                 # ---- Mode A: pakai cuti tunda SAJA (tidak ganggu jatah tahun ini) ----
                 if pakai_tunda_saja:
                     if not cuti_tunda_dipilih:
-                        messages.error(request, "Anda memilih 'pakai cuti tunda saja' tetapi belum memilih sumber cuti tunda.")
-                        transaction.set_rollback(True)
-                        return redirect(self.success_url)
+                        raise CutiSubmissionError(
+                            "Anda memilih 'pakai cuti tunda saja' tetapi belum memilih "
+                            "sumber cuti tunda."
+                        )
 
                     eligible = self.get_cuti_tunda_eligible(target_pegawai, tahun_pengajuan)
                     valid_tunda = eligible.filter(
@@ -674,13 +773,10 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
                     # total sisa tunda yang tersedia dari pilihan user
                     total_sisa_valid = sum((s.sisa_hari_tunda or 0) for s in valid_tunda)
                     if total_sisa_valid < lama_cuti:
-                        messages.error(
-                            request,
+                        raise CutiSubmissionError(
                             f"Sisa cuti tunda yang dipilih tidak mencukupi. "
                             f"Total sisa tunda: {total_sisa_valid} hari, kebutuhan: {lama_cuti} hari."
                         )
-                        transaction.set_rollback(True)
-                        return redirect(self.success_url)
 
                     # simpan riwayat cuti (main record)
                     cuti_baru_main = None
@@ -708,6 +804,10 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
 
                     # redirect ke pelimpahan tugas
                     if cuti_baru_main:
+                        self.simpan_snapshot_saldo_cuti(
+                            target_pegawai,
+                            tahun_pengajuan,
+                        )
                         messages.success(
                             request,
                             "Pengajuan Cuti Tunda berhasil disimpan (tanpa mengurangi jatah cuti tahun berjalan). "
@@ -723,10 +823,19 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
                     return redirect(self.success_url)
 
                 # ---- Mode B: cuti normal (boleh + klaim tunda untuk membantu kuota) ----
-                # validasi jatah tahun ini
-                if sisa_cuti < lama_cuti:
-                    messages.error(request, "Maaf jatah cuti tahunan anda kurang atau habis!")
-                    return redirect(self.success_url)
+                # Klaim tunda mengurangi bagian yang dibebankan pada hak tahun ini.
+                total_tunda_terpilih = 0
+                if cuti_tunda_dipilih:
+                    eligible = self.get_cuti_tunda_eligible(target_pegawai, tahun_pengajuan)
+                    valid_tunda = eligible.filter(
+                        id__in=cuti_tunda_dipilih.values_list("id", flat=True)
+                    )
+                    total_tunda_terpilih = sum(s.sisa_hari_tunda for s in valid_tunda)
+                kebutuhan_hak_tahun_ini = max(0, lama_cuti - total_tunda_terpilih)
+                if sisa_cuti < kebutuhan_hak_tahun_ini:
+                    raise CutiSubmissionError(
+                        "Maaf jatah cuti tahunan Anda kurang atau habis."
+                    )
 
                 cuti_baru_main = None
                 for idx, item in enumerate(data_form):
@@ -737,11 +846,6 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
 
                 # Klaim tunda (opsional) untuk menutup sebagian dari lama_cuti
                 if cuti_tunda_dipilih and cuti_baru_main:
-                    eligible = self.get_cuti_tunda_eligible(target_pegawai, tahun_pengajuan)
-                    valid_tunda = eligible.filter(
-                        id__in=cuti_tunda_dipilih.values_list("id", flat=True)
-                    )
-
                     remaining = lama_cuti
                     for sumber in valid_tunda.order_by("tahun_cuti", "id"):
                         if remaining <= 0:
@@ -758,6 +862,10 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
 
                 # redirect ke pelimpahan tugas
                 if cuti_baru_main:
+                    self.simpan_snapshot_saldo_cuti(
+                        target_pegawai,
+                        tahun_pengajuan,
+                    )
                     messages.success(
                         request,
                         "Pengajuan Cuti Tahunan berhasil disimpan. Silakan lengkapi dokumen pelimpahan tugas."
@@ -774,17 +882,28 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
             # ============================================================
             # 6) CABANG: CUTI LAIN
             # ============================================================
-            elif jenis_cuti in ["Cuti Alasan Penting", "Cuti melahirkan", "Cuti Sakit"]:
+            elif jenis_cuti in [
+                "Cuti Alasan Penting",
+                "Cuti melahirkan",
+                "Cuti Sakit",
+                "Cuti Besar",
+                "Cuti Diluar Tanggungan Negara",
+            ]:
                 for item in data_form:
                     item.save()
+                self.simpan_snapshot_saldo_cuti(
+                    target_pegawai,
+                    tahun_pengajuan,
+                )
                 messages.success(request, "Pengajuan cuti anda sukses, dan segera akan ditindaklanjuti oleh bagian SDM.")
                 return redirect(self.success_url)
 
             # ============================================================
             # 7) DEFAULT
             # ============================================================
-            messages.error(request, "Mohon maaf waktu pengajuan cuti anda terlalu mepet atau tidak sesuai!")
-            return redirect(self.success_url)
+            raise CutiSubmissionError(
+                "Jenis cuti yang dipilih belum didukung oleh alur digital ini."
+            )
 
     def forms_invalid(self, form, formset):
         # 1) Error dari form utama
@@ -836,7 +955,7 @@ class AdminOverrideKlaimTundaForCutiView(LoginRequiredMixin, UserPassesTestMixin
             messages.error(request, "Override hanya untuk cuti tahunan.")
             return redirect(self.get_back_url())
 
-        if self.cuti_klaim.status_cuti not in ["Proses", "Selesai"]:
+        if self.cuti_klaim.status_cuti not in ["Belum", "Berlangsung", "Selesai"]:
             messages.error(request, "Override hanya bisa untuk cuti berstatus Proses/Selesai.")
             return redirect(self.get_back_url())
 
@@ -863,16 +982,29 @@ class AdminOverrideKlaimTundaForCutiView(LoginRequiredMixin, UserPassesTestMixin
         catatan = form.cleaned_data.get("catatan_admin") or ""
 
         with transaction.atomic():
+            Users.objects.select_for_update().get(pk=self.cuti_klaim.pegawai_id)
+            sumber = RiwayatCuti.objects.select_for_update().get(
+                pk=form.cleaned_data['sumber_tunda'].pk
+            )
+            total_terklaim = sumber.klaim_keluar.aggregate(
+                total=Sum('jumlah_hari_diklaim')
+            )['total'] or 0
+            sisa_aktual = max(0, (sumber.lama_cuti or 0) - total_terklaim)
+            if form.cleaned_data['jumlah_hari_diklaim'] > sisa_aktual:
+                form.add_error(
+                    'jumlah_hari_diklaim',
+                    f'Saldo cuti tunda berubah. Sisa saat ini {sisa_aktual} hari.',
+                )
+                return self.form_invalid(form)
+
             klaim = form.save(commit=False)
+            klaim.sumber_tunda = sumber
             klaim.is_admin_override = True
             klaim.admin_override_by = self.request.user
             klaim.admin_override_at = timezone.now()
             klaim.catatan_admin = form.cleaned_data.get("catatan_admin", "")
+            klaim.full_clean()
             klaim.save()
-
-            riwayat = klaim.cuti_klaim
-            riwayat.lama_cuti = int(riwayat.lama_cuti or 0) + int(klaim.jumlah_hari_diklaim or 0)
-            riwayat.save(update_fields=["lama_cuti"])
             
         if catatan:
             messages.info(self.request, f"Catatan admin: {catatan}")
@@ -897,10 +1029,11 @@ class PelimpahanTugasCreateView(LoginRequiredMixin, CreateView):
 
     def dispatch(self, request, *args, **kwargs):
         self.riwayat_cuti = get_object_or_404(RiwayatCuti, pk=kwargs['riwayat_pk'])
+        self.pelimpahan_existing = getattr(self.riwayat_cuti, 'pelimpahan_tugas', None)
 
         # opsional: pastikan hanya pemilik cuti yang boleh buat pelimpahan
-        if request.user.is_cuti_admin and hasattr(self.riwayat_cuti, 'pelimpahan_tugas'):
-            return redirect('layanan_urls:pelimpahan_detail', pk=self.riwayat_cuti.pelimpahan_tugas.pk)
+        if request.user.is_cuti_admin and self.pelimpahan_existing:
+            return redirect('layanan_urls:pelimpahan_detail', pk=self.pelimpahan_existing.pk)
         if request.user.is_cuti_admin:
             messages.info(request, 'Pemohon belum membuat pelimpahan tugas.')
             return redirect('layanan_urls:layanan_cuti_listview')
@@ -910,14 +1043,18 @@ class PelimpahanTugasCreateView(LoginRequiredMixin, CreateView):
             return redirect('layanan_urls:layanan_cuti_listview')
 
         # jika sudah ada pelimpahan, redirect ke halaman detail
-        if hasattr(self.riwayat_cuti, 'pelimpahan_tugas'):
-            return redirect('layanan_urls:pelimpahan_detail', pk=self.riwayat_cuti.pelimpahan_tugas.pk)
+        if self.pelimpahan_existing and self.pelimpahan_existing.status not in (
+            'ditolak_penerima', 'ditolak_atasan'
+        ):
+            return redirect('layanan_urls:pelimpahan_detail', pk=self.pelimpahan_existing.pk)
         return super().dispatch(request, *args, **kwargs)
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         kwargs['request'] = self.request
         kwargs['riwayat_cuti'] = self.riwayat_cuti
+        if self.pelimpahan_existing:
+            kwargs['instance'] = self.pelimpahan_existing
         return kwargs
 
     def form_valid(self, form):
@@ -927,14 +1064,21 @@ class PelimpahanTugasCreateView(LoginRequiredMixin, CreateView):
         # Default status ketika selesai isi form: menunggu persetujuan penerima
         obj.status = 'menunggu_penerima'
         obj.persetujuan_penerima = "belum"
+        obj.catatan_penerima = ""
         obj.persetujuan_atasan = "belum"
+        obj.catatan_atasan = ""
         
         # aturan: jika pemberi level4 => set atasan (level3) sebagai penyetuju
         # jika pemberi level3+ => persetujuan atasan tidak diperlukan => auto "disetujui"
         if obj.requires_atasan_approval():
+            obj.butuh_persetujuan_atasan = True
             obj.atasan_penyetuju = resolve_atasan_level3_for_level4(obj.pemberi_tugas)
+            if obj.atasan_penyetuju is None:
+                form.add_error(None, "Atasan penyetuju belum tersedia pada struktur organisasi.")
+                return self.form_invalid(form)
             obj.persetujuan_atasan = "belum"
         else:
+            obj.butuh_persetujuan_atasan = False
             obj.atasan_penyetuju = None
             obj.persetujuan_atasan = "disetujui"
             
@@ -980,7 +1124,7 @@ class PelimpahanTugasPenerimaListView(LoginRequiredMixin, ListView):
     def get_queryset(self):
         return PelimpahanTugas.objects.filter(
             penerima_tugas=self.request.user,
-            status__in=['menunggu_penerima', 'menunggu_kepala', 'disetujui']
+            status__in=['menunggu_penerima', 'menunggu_atasan', 'disetujui']
         ).select_related('riwayat_cuti', 'pemberi_tugas')
         
     def get_context_data(self, **kwargs):
@@ -1007,8 +1151,9 @@ class PelimpahanTugasPenerimaUpdateView(LoginRequiredMixin, UpdateView):
             status='menunggu_penerima'
         )
     
+    @transaction.atomic
     def form_valid(self, form):
-        obj = form.instance  # atau: obj = self.object
+        obj = PelimpahanTugas.objects.select_for_update().get(pk=form.instance.pk)
 
         aksi = form.cleaned_data["aksi"]
         obj.catatan_penerima = form.cleaned_data.get("catatan_penerima", "")
@@ -1017,7 +1162,14 @@ class PelimpahanTugasPenerimaUpdateView(LoginRequiredMixin, UpdateView):
             obj.persetujuan_penerima = "ditolak"
             obj.status = "ditolak_penerima"
             obj.save(update_fields=["catatan_penerima", "persetujuan_penerima", "status"])
-            messages.info(self.request, "Pelimpahan tugas ditolak.")
+            perubahan_ditolak = reject_pending_schedule_change(obj.pk)
+            if perubahan_ditolak:
+                messages.info(
+                    self.request,
+                    "Pelimpahan jadwal baru ditolak. Jadwal dan pelimpahan lama tetap berlaku.",
+                )
+            else:
+                messages.info(self.request, "Pelimpahan tugas ditolak.")
             return redirect("layanan_urls:pelimpahan_detail", pk=obj.pk)
 
         # aksi setuju
@@ -1029,6 +1181,9 @@ class PelimpahanTugasPenerimaUpdateView(LoginRequiredMixin, UpdateView):
             obj.persetujuan_atasan = "disetujui"
             obj.status = "disetujui"
             obj.save(update_fields=["catatan_penerima", "persetujuan_penerima", "persetujuan_atasan", "status"])
+            perubahan_diterapkan = finalize_pending_schedule_change(obj.pk)
+            if perubahan_diterapkan:
+                messages.success(self.request, "Jadwal cuti baru resmi diterapkan.")
 
         messages.success(self.request, "Persetujuan penerima tersimpan.")
         return redirect("layanan_urls:pelimpahan_detail", pk=obj.pk)
@@ -1063,12 +1218,11 @@ class PelimpahanKepalaListView(LoginRequiredMixin, ListView):
             ).order_by('-created_at')
         )
 
-        # Filter: kepala yang berhak = atasan langsung dari pemohon level4 (SubBidang.nama_pimpinan)
-        # Kita gunakan riwayat penempatan aktif pemohon -> penempatan_level4 -> nama_pimpinan
+        # Gunakan snapshot atasan saat pelimpahan diajukan. Mutasi pejabat tidak
+        # boleh memindahkan pengajuan lama ke pejabat baru secara diam-diam.
         qs = qs.filter(
-            riwayat_cuti__pegawai__riwayat_penempatan__status=True,
-            riwayat_cuti__pegawai__riwayat_penempatan__penempatan_level4__isnull=False,
-            riwayat_cuti__pegawai__riwayat_penempatan__penempatan_level4__nama_pimpinan=user,
+            status='menunggu_atasan',
+            atasan_penyetuju=user,
         ).distinct()
 
         return qs
@@ -1098,7 +1252,9 @@ class PelimpahanTugasAtasanUpdateView(LoginRequiredMixin, UpdateView):
     def form_valid(self, form):
         aksi = form.cleaned_data["aksi"]
 
-        self.object = form.save(commit=False)  # <-- penting: jangan langsung form.save()
+        locked_object = PelimpahanTugas.objects.select_for_update().get(pk=form.instance.pk)
+        form.instance = locked_object
+        self.object = form.save(commit=False)
 
         self.object.catatan_atasan = form.cleaned_data.get("catatan_atasan", "")
 
@@ -1112,6 +1268,17 @@ class PelimpahanTugasAtasanUpdateView(LoginRequiredMixin, UpdateView):
             messages.error(self.request, "Pelimpahan ditolak Kepala Instalasi/Unit.")
 
         self.object.save()
+        if aksi == "setuju":
+            perubahan_diterapkan = finalize_pending_schedule_change(self.object.pk)
+            if perubahan_diterapkan:
+                messages.success(self.request, "Jadwal cuti baru resmi diterapkan.")
+        else:
+            perubahan_ditolak = reject_pending_schedule_change(self.object.pk)
+            if perubahan_ditolak:
+                messages.info(
+                    self.request,
+                    "Pelimpahan jadwal baru ditolak. Jadwal dan pelimpahan lama tetap berlaku.",
+                )
         return super().form_valid(form)  # aman karena instance sudah berisi nilai terbaru
 
     def get_success_url(self):
@@ -1126,7 +1293,6 @@ class LayananCutiDetailView(LoginRequiredMixin, DetailView):
     """
     model = LayananCuti
     template_name = "6_layanan_cuti/layanan_cuti_detail.html"
-    context_object_name = "layanan"
     login_url = "/accounts/login/"
 
     def get_queryset(self):
@@ -1157,11 +1323,10 @@ class LayananCutiDetailView(LoginRequiredMixin, DetailView):
 
         total_hari = details.aggregate(total=Sum("lama_cuti")).get("total") or 0
 
-        # status ringkas untuk penilaian (gabungan)
+        # Dua status dengan tanggung jawab yang berbeda.
         status_ringkas = {
-            "layanan_status": layanan.status,  # draft/pengajuan/tindaklanjut/selesai
-            "persetujuan": getattr(main, "status_persetujuan", None),  # belum/disetujui/ditolak
-            "status_cuti": getattr(main, "status_cuti", None),  # Proses/Selesai/Tunda
+            "status_pengajuan": layanan.status,
+            "status_pelaksanaan": getattr(main, "status_pelaksanaan_aktual", None),
         }
 
         # izin akses sederhana:
@@ -1169,18 +1334,53 @@ class LayananCutiDetailView(LoginRequiredMixin, DetailView):
         # - superuser boleh lihat semua
         # - admin boleh (opsional) tambahkan rules profil_admin sesuai kebutuhan
         user = self.request.user
-        can_view = user.is_staff or (layanan.pegawai_id == user.id)
+        can_view = can_view_leave(user, layanan)
         # jika Anda punya aturan admin, bisa diperluas di sini
         if not can_view:
             # biar aman, Anda bisa raise PermissionDenied
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied("Anda tidak berhak melihat detail pengajuan cuti ini.")
 
+        perubahan_aktif = None
+        riwayat_perubahan = PerubahanJadwalCuti.objects.none()
+        can_verify_change = False
+        if main:
+            riwayat_perubahan = main.perubahan_jadwal.select_related('diajukan_oleh').all()
+            perubahan_aktif = riwayat_perubahan.filter(
+                status__in=('menunggu_verifikasi', 'menunggu_pelimpahan')
+            ).first()
+            if perubahan_aktif:
+                can_verify_change = user.pk in {
+                    perubahan_aktif.verifikator1_id,
+                    perubahan_aktif.verifikator2_id,
+                    perubahan_aktif.verifikator3_id,
+                }
+
         context.update({
             "details": details,
             "main": main,
             "total_hari": total_hari,
             "status_ringkas": status_ringkas,
+            "is_owner": layanan.pegawai_id == user.id,
+            "can_upload_surat_cuti": bool(
+                (user.is_superuser or user.is_cuti_admin)
+                and main
+                and layanan.status in ('disetujui', 'selesai')
+            ),
+            "perubahan_aktif": perubahan_aktif,
+            "riwayat_perubahan": riwayat_perubahan,
+            "can_verify_change": can_verify_change,
+            "can_request_change": bool(
+                main
+                and layanan.pegawai_id == user.id
+                and layanan.status != 'ditolak'
+                and main.status_cuti not in ('Tunda', 'Batal')
+                and main.tgl_mulai_cuti
+                and main.tgl_akhir_cuti
+                and (main.lama_cuti or 0) > 0
+                and main.tgl_akhir_cuti >= date.today()
+                and perubahan_aktif is None
+            ),
 
             # tampilan
             "title_page": "Detail Pengajuan Cuti",
@@ -1192,532 +1392,101 @@ class LayananCutiDetailView(LoginRequiredMixin, DetailView):
         return context
 
 
-#refactoring layanan cuti -- masih memikirkan logika cuti tahun sebelumnya jika tidak diajukan cuti tunda
-class LayanananCutiInlineCreateView(LoginRequiredMixin, CheckCuti, CreateView):
-    model = LayananCuti
-    template_name = '6_layanan_cuti/layanan_cuti_inline_create.html'
-    form_class = LayananCutiForm
-    redirect_display = 'layanan_urls:layanan_cuti_view'
+class UploadFileCutiView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    UpdateView,
+):
+    """Unggah surat cuti final dan selesaikan proses pengajuannya."""
 
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        layanan = JenisLayanan.objects.filter(url='yancuti')
-        initial = {'layanan':layanan.first(), 'status':'pengajuan'}
-        if self.request.user.is_authenticated and not self.request.user.is_cuti_admin:
-            initial['pegawai'] = self.request.user
-        initial['pegawai'] = self.request.user
-        kwargs['request'] = self.request
-        kwargs['initial'] = initial
-        return kwargs
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        dokumen = DokumenSDM.objects.filter(url='cuti')
-        initial = {'dokumen':dokumen.first()}
-        if self.request.POST:
-            context['formset'] = pengajuan_cuti_formset(data=self.request.POST, form_kwargs={'request': self.request})
-        else:
-            context['formset'] = pengajuan_cuti_formset(form_kwargs={'request': self.request}, initial=[initial])
-        context['cek_sisa_cuti'] = self.cek_sisa_cuti(self.request.user)
-        context['cek_sisa_tunda_cuti'] = self.cek_sisa_tunda_cuti(self.request.user)
-        context['card_title'] = 'Pengajuan Cuti'
-        return context
-    
-    def form_valid(self, form):
-        context = self.get_context_data()
-        formset = context['formset']
-        aksi = self.request.POST.get("aksi")
-
-        with transaction.atomic():
-            # validasi cuti
-            if form.is_valid() and formset.is_valid():
-                for f in formset:
-                    if f.instance.pk and f.has_changed():
-                        f.add_error(None, "Data pengajuan cuti sebelumnya tidak boleh diubah.")
-                        return self.form_invalid(form)
-
-                tgl_mulai = next((f.cleaned_data.get('tgl_mulai_cuti') for f in formset if f.cleaned_data), None)
-                lama_cuti = next((f.cleaned_data.get('lama_cuti') for f in formset if f.cleaned_data), None)
-
-                if tgl_mulai and self.cek_waktu_pengajuan_cuti(tgl_mulai):
-                    messages.error(self.request, 'Maaf, pengajuan cuti paling lambat 7 hari sebelumnya.')
-                    return self.form_invalid(form)
-
-                if lama_cuti and (self.cek_sisa_cuti(self.request.user) <= 0 or
-                                  self.cek_sisa_cuti(self.request.user) < lama_cuti):
-                    messages.warning(self.request, 'Maaf, sisa cuti tidak mencukupi.')
-                    return self.form_invalid(form)
-
-                data = form.save(commit=False)
-                data.status = 'pengajuan' if aksi == 'ajukan' else 'draft'
-                data.save()
-
-                layanan_cuti = formset.save(commit=False)
-                for item in layanan_cuti:
-                    item.cuti = data
-                    item.pegawai = form.cleaned_data.get('pegawai')
-                    item.save()
-
-                messages.success(self.request, 'Pengajuan cuti berhasil dikirim.')
-
-        return super().form_valid(form)
-    
-
-class LayananCutiInlineFormView(LoginRequiredMixin, CheckCuti, View):
+    model = RiwayatCuti
+    form_class = UploadFileCutiForm
+    template_name = '6_layanan_cuti/upload_file_cuti.html'
+    context_object_name = 'riwayat_cuti'
     login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
-    redirect_display = 'layanan_urls:layanan_cuti_view'
+    raise_exception = True
 
-    def get_user(self, nip):
-        try: 
-            data = Users.objects.get(profil_user__nip=nip)
-            return data
-        except Exception:
-            return None
-        
-    def get(self, request, *args, **kwargs):
-        status_pengajuan_cuti = kwargs.get('status')
-        user = request.user
-        self.set_allow_cuti_tunda()
-        """
-        proses allow cuti tinggal atasannya melakukan updating terhadap eksisting
-        cuti merubah cuti tunda menjadi cuti proses atau cuti selesai
-        """
-        form_view = 'none'
-        data_view = 'block'
-        dokumen = DokumenSDM.objects.filter(url='cuti')
-        layanan = JenisLayanan.objects.filter(url='yancuti')
-        data = LayananCuti.objects.all().order_by('-updated_at')
-        initial_riwayat = {'dokumen':dokumen.first()}
-        initial = {'layanan':layanan.first(), 'status':'pengajuan'}
-        nip = None
-        card_title = 'Riwayat Pengajuan Cuti'
-        if not request.user.is_cuti_admin:
-            initial_riwayat = {'pegawai':user, 'dokumen':dokumen.first()}
-            initial = {'pegawai':user, 'layanan':layanan.first(), 'status':'pengajuan'}
-            nip = get_nip(user)
-            if nip:
-                data = LayananCuti.objects.filter(pegawai__profil_user__nip=nip).order_by('-updated_at')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'layanan', 'selected':'yancuti'}))
-        # allow_cuti_tunda = can_manage_cuti_tunda or cuti_tunda.exists()
-        layanan_form = LayananCutiForm(initial=initial, request=request, action='add')
-        form = pengajuan_cuti_formset(initial=[initial_riwayat], form_kwargs={'action':'add', 'status':status_pengajuan_cuti})
-        card_title = 'Input Pengajuan Cuti'
-        form_view = 'block'
-        data_view = 'none'
-        context={
-            'nip':nip,
-            'data':data,
-            # 'cuti_tunda':cuti_tunda,
-            # 'allow_cuti_tunda': allow_cuti_tunda,
-            # 'can_manage_cuti_tunda': can_manage_cuti_tunda,
-            'layanan_form':layanan_form,
-            'status':status_pengajuan_cuti,
-            'form':form,
-            'cek_sisa_cuti':self.cek_sisa_cuti(user),
-            'card_title':card_title,
-            'form_view':form_view,
-            'data_view':data_view,
-            'cuti':'active',
-            'layanan':'active',
-            'title_page':'Layanan Cuti',
-            'selected':'yancuti'
-        }
-        return render(request, '6_layanan_cuti/layanan_cuti_master.html', context)
-    
-    def post(self, request, *args, **kwargs):
-        status_pengajuan_cuti = kwargs.get('status')
-        self.set_allow_cuti_tunda()
-        can_manage_cuti_tunda = self.can_manage_cuti_tunda(request.user)
-        if status_pengajuan_cuti == 'baru' or status_pengajuan_cuti == 'tunda':
-            if status_pengajuan_cuti == 'tunda' and not can_manage_cuti_tunda:
-                messages.info(request, 'Penundaan cuti hanya dapat diatur oleh atasan langsung (kasi/kasubbag).')
-                return redirect(reverse(self.redirect_display, kwargs={'status': 'baru'}))
-            riwayat_form = LayananCutiForm(data=request.POST, files=request.FILES, request=request, action='add')
-            form = pengajuan_cuti_formset(data=request.POST, files=request.FILES, form_kwargs={'action':'add'})
-
-            if riwayat_form.is_valid() and form.is_valid():
-                with transaction.atomic():
-                    data_riwayat = riwayat_form.save(commit=False)
-                    # print('form: ', form.cleaned_data[0].get('tgl_mulai_cuti'))
-                    data_riwayat.tahun_cuti = form.cleaned_data[0].get('tahun') if form.cleaned_data[0].get('tahun') else date.today().year
-                    data_riwayat.save()
-                    data_form = form.save(commit=False)
-                    # print('data_form: ', data_form[0])
-                    target_pegawai = data_form[0].pegawai if hasattr(data_form[0], 'pegawai') and data_form[0].pegawai else request.user
-                    sisa_cuti = self.cek_sisa_cuti(target_pegawai)
-                    data_form[0].jenis_cuti = form.cleaned_data[0].get('jenis_cuti')
-                    data_form[0].tgl_mulai_cuti = form.cleaned_data[0].get('tgl_mulai_cuti')
-                    data_form[0].lama_cuti = form.cleaned_data[0].get('lama_cuti')
-                    
-                    if data_form[0].jenis_cuti == 'Cuti Tahunan' and self.cek_waktu_pengajuan_cuti(data_form[0].tgl_mulai_cuti):
-                        if sisa_cuti > 0 and sisa_cuti >= data_form[0].lama_cuti:
-                            for item_riwayat in data_form:
-                                item_riwayat.usulan = data_riwayat
-                                item_riwayat.save()
-                            messages.success(request, 'Pengajuan cuti anda sukses, dan segera akan ditindaklanjuti oleh bagian SDM')
-                            return redirect(reverse(self.redirect_display, kwargs={'status':'riwayat'}))
-                        messages.error(request, 'Maaf anda belum isi lama cuti atau jatah cuti tahunan anda kurang atau habis!')
-                        return redirect(reverse(self.redirect_display, kwargs={'status':status_pengajuan_cuti}))
-                    elif data_form[0].jenis_cuti == 'Cuti Alasan Penting' or data_form[0].jenis_cuti == 'Cuti melahirkan' or data_form[0].jenis_cuti == 'Cuti Sakit':
-                        for item_riwayat in data_form:
-                            item_riwayat.usulan = data_riwayat
-                            item_riwayat.save()
-                        messages.success(request, 'Pengajuan cuti anda sukses, dan segera akan ditindaklanjuti oleh bagian SDM')
-                        return redirect(reverse(self.redirect_display, kwargs={'status':'riwayat'}))
-                    messages.error(request, 'Mohon maaf waktu pengajuan cuti anda terlalu mepet atau tidak sesuai!!')
-                    return redirect(reverse(self.redirect_display, kwargs={'status':status_pengajuan_cuti}))
-            messages.error(request, 'Maaf form tidak valid')
-            return redirect(reverse(self.redirect_display, kwargs={'status':status_pengajuan_cuti}))
-        return redirect(reverse(self.redirect_display, kwargs={'status':'riwayat'}))
-
-
-class LayananCutiTundaView(LoginRequiredMixin, CheckCuti, ListView):
-    model = LayananCuti
-    template_name = '6_layanan_cuti/layanan_cuti_tunda.html'
+    def test_func(self):
+        user = self.request.user
+        return user.is_superuser or user.is_cuti_admin
 
     def get_queryset(self):
-        tanggal = date.today()
-        tahun_ini = tanggal.year
-        two_year_before = tanggal.year - 2
-        queryset = LayananCuti.objects.filter(pegawai=self.request.user, cuti_tunda=True, cuti__tahun_cuti__lte=tahun_ini, cuti__tahun_cuti__gt=two_year_before )
-        if self.request.user.is_cuti_admin:
-            queryset = LayananCuti.objects.filter(cuti__status_cuti='Tunda', cuti__tahun_cuti__lte=tahun_ini, cuti__tahun_cuti__gt=two_year_before)
-        return queryset
-    
+        return (
+            super()
+            .get_queryset()
+            .select_related('usulan', 'pegawai')
+            .filter(
+                usulan__isnull=False,
+                usulan__status__in=('disetujui', 'selesai'),
+            )
+        )
+
+    @transaction.atomic
+    def form_valid(self, form):
+        old_file_name = self.object.file.name if self.object.file else ''
+        storage = self.object.file.storage
+        new_file_name = ''
+
+        try:
+            self.object = form.save()
+            new_file_name = self.object.file.name
+
+            layanan = LayananCuti.objects.select_for_update().get(
+                pk=self.object.usulan_id,
+            )
+            layanan.status = 'selesai'
+            layanan.save(update_fields=('status', 'updated_at'))
+        except Exception:
+            if new_file_name and new_file_name != old_file_name:
+                storage.delete(new_file_name)
+            raise
+
+        if old_file_name and old_file_name != new_file_name:
+            transaction.on_commit(lambda: storage.delete(old_file_name))
+
+        messages.success(
+            self.request,
+            'Surat cuti berhasil diunggah dan status pengajuan menjadi selesai.',
+        )
+        return redirect(
+            'layanan_urls:layanan_cuti_detail',
+            pk=self.object.usulan_id,
+        )
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context.update({
-            'status':'ambil-tunda',
-            'cek_sisa_cuti':self.cek_sisa_cuti(self.request.user),
-            'cek_sisa_tunda_cuti':self.cek_sisa_tunda_cuti(self.request.user),
-            'card_title':'Daftar Cuti Tunda'
+            'title_page': 'Upload Surat Cuti Final',
+            'cuti': 'active',
+            'layanan': 'active',
+            'selected': 'yancuti',
         })
         return context
-    
 
-class LayananCreateCutiFromCutiTunda(LoginRequiredMixin, CheckCuti, CreateView):
-    model = RiwayatCuti
-    template_name = '6_layanan_cuti/layanan_cuti_tunda_ambil.html'
-    form_class = RiwayatCutiTundaForm
-    
-    def get_success_url(self):
-        return reverse('layanan_urls:layanan_cuti_view', kwargs={'status':'riwayat'})
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        if self.request.POST:
-            context['layanan_form'] = pengajuan_cuti_formset(data=self.request.POST)
-        else:
-            layanan_data = self.get_object()
-            layanan_cuti = LayananCuti.objects.filter(cuti=layanan_data).last()
-            initial=[{'pegawai':layanan_cuti.pegawai, 'layanan':layanan_cuti.layanan, 'jenis_jabatan':layanan_cuti.jenis_jabatan, 'cuti_tunda':1, 'status':'pengajuan'}] 
-            context['layanan_form'] = pengajuan_cuti_formset(initial=initial)
-        context['status'] = 'ambil-tunda'
-        context['cek_sisa_cuti'] = self.cek_sisa_cuti(self.request.user)
-        context['cek_sisa_tunda_cuti'] = self.cek_sisa_tunda_cuti(self.request.user)
-        context['card_title'] = 'Ambil Cuti Tunda'
-        return context 
-    
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        data = self.get_object()
-        kwargs['request'] = self.request
-        if data is not None:
-            kwargs['initial'] = {
-                'pegawai': data.pegawai, 'jenis_cuti': data.jenis_cuti, 'lama_cuti': data.lama_cuti, 'tahun_cuti': data.tahun_cuti,
-                'tgl_mulai_cuti': data.tgl_mulai_cuti, 'tgl_akhir_cuti': data.tgl_akhir_cuti, 'status_cuti': 'Proses',
-                'dokumen': data.dokumen, 'alasan_cuti': data.alasan_cuti
-            }
-        return kwargs
-    
-    def update_lama_cuti(self, lama_cuti, data):
-        if data.lama_cuti >= lama_cuti:
-            data.lama_cuti = data.lama_cuti-lama_cuti
-            data.save()#save riwayat cuti setelah lama cuti diupdate
-            return data
-        else:
-            return None
-    
-    def form_valid(self, form):
-        context = self.get_context_data()
-        layanan_form = context['layanan_form']
-        if form.is_valid() and layanan_form.is_valid() and not self.cek_waktu_pengajuan_cuti(form.cleaned_data.get('tgl_mulai_cuti')):
-            messages.error(self.request, 'Maaf waktu pengajuan paling lambat 7 hari sebelum cuti!')
-            return super().form_invalid(form)
-        elif form.is_valid() and layanan_form.is_valid():
-            #cek apakah lama cuti yang akan diambil lebih kecil atau sama dengan lama cuti tunda yang ada
-            data = self.update_lama_cuti(form.cleaned_data.get('lama_cuti'), self.get_object())
-            #jika lebih kecil maka lama sisa cuti tunda akan diupdate dan cuti baru yang akan diambil dibuatkan baru
-            if data is not None and data.lama_cuti > 0:
-                self.object = form.save(commit=False)
-                self.object.status_cuti = 'Proses'
-                self.object.save()
-                for layanan in layanan_form:
-                    item_layanan = layanan.save(commit=False)
-                    item_layanan.cuti = self.object
-                    item_layanan.cuti_tunda=0
-                    item_layanan.status='pengajuan'
-                    item_layanan.save()
-                return super().form_valid(form)
-            #jika sama maka data cuti tunda diupdate tanpa membuat cuti baru
-            elif data is not None and data.lama_cuti == 0:
-                data.lama_cuti = form.cleaned_data.get('lama_cuti')
-                data.status_cuti = 'Proses'
-                data.save()
-                data_layanan = LayananCuti.objects.filter(cuti=self.get_object()).last()
-                data_layanan.cuti_tunda = 0
-                data_layanan.status='pengajuan'
-                data_layanan.save()
-            return redirect(reverse('layanan_urls:layanan_cuti_view', kwargs={'status':'riwayat'}))
-        messages.error(self.request, 'Maaf terdapat kesalahan dalam pengisian form')
-        return self.form_invalid(form)
-    
 
-class UploadFileCutiView(LoginRequiredMixin, View, CheckCuti):
-    def get_object(self, id):
-        try:
-            data = RiwayatCuti.objects.get(id=id)
-            return data
-        except RiwayatCuti.DoesNotExist:
-            return None
-        
-    def post(self, request, *args, **kwargs):
-        id = kwargs.get('id')
-        data_object = self.get_object(id)
-        file = data_object.file if data_object else None
-        form = RiwayatCutiTundaForm(data=request.POST, files=request.FILES, instance=self.get_object(id))
-        if form.is_valid():
-            form.cleaned_data.get('file')
-            data = form.save(commit=False)
-            data.status_cuti = 'Selesai'
-            delete_existing_object(data, data_object, file)
-            data.save()
-            messages.success(request, 'Perubahan data cuti tunda berhasil disimpan.')
-            return redirect(reverse('layanan_urls:layanan_cuti_tunda_view'))
-        messages.error(request, 'Maaf terdapat kesalahan dalam pengisian form.')
-        return redirect(reverse('layanan_urls:layanan_cuti_tunda_update', kwargs={'id':id}))
-    
-    
-class LayananUpdateCUtiTundaView(LoginRequiredMixin, CheckCuti, UpdateView):    
-    model = RiwayatCuti
-    template_name = '6_layanan_cuti/layanan_cuti_tunda_ambil.html'
-    form_class = RiwayatCutiTundaForm
-    success_url = reverse_lazy('layanan_urls:layanan_cuti_tunda_view')
-        
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        riwayat_instance = self.get_object()
-        context['layanan_form'] = update_pengajuan_cuti_fullform_formset(self.request.POST or None, instance=riwayat_instance)           
-        context['status'] = 'ambil-tunda'
-        context['cek_sisa_cuti'] = self.cek_sisa_cuti(self.request.user)
-        context['cek_sisa_tunda_cuti'] = self.cek_sisa_tunda_cuti(self.request.user)
-        context['card_title'] = 'Ambil Cuti Tunda'
-        return context
+#refactoring layanan cuti -- masih memikirkan logika cuti tahun sebelumnya jika tidak diajukan cuti tunda
+class LayananCutiUpdateView(LoginRequiredMixin, View):
+    """Adapter URL lama menuju alur detail/verifikasi cuti yang aktif."""
 
-    def form_valid(self, form):
-        context = self.get_context_data()
-        layanan_form = context['layanan_form']
-        if form.is_valid() and layanan_form.is_valid():
-            self.object = form.save()
-            for layanan in layanan_form:
-                item_layanan = layanan.save(commit=False)
-                item_layanan.cuti = self.object
-                item_layanan.save()
-            return super().form_valid(form)
-        print('Form is invalid: ', form.errors)
-        print('Layanan Form is invalid: ', layanan_form.errors)
-        return self.render_to_response(self.get_context_data(form=form))
-        
-        
-class LayananCutiUpdateView(LoginRequiredMixin, CheckCuti, View):
-    login_url = reverse_lazy('myaccount_urls:login_view')
-    redirect_field_name = 'next'
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return super().dispatch(request, *args, **kwargs)
 
-    def get_object(self, id):
-        try:
-            data = LayananCuti.objects.get(id=id)
-            return data
-        except LayananCuti.DoesNotExist:
-            return None
-        
-    def get_verification_object(self, id):
-        try:
-            layanan_cuti = LayananCuti.objects.get(id=id)
-            data, _ = VerifikasiCuti.objects.get_or_create(layanan_cuti=layanan_cuti)
-            return data
-        except LayananCuti.DoesNotExist:
-            return None
+        layanan = get_object_or_404(LayananCuti, pk=kwargs.get('id'))
+        if not can_view_leave(request.user, layanan):
+            raise PermissionDenied("Anda tidak berhak mengakses pengajuan cuti ini.")
+        if request.method != 'GET':
+            raise PermissionDenied("Alur cuti lama sudah dinonaktifkan.")
 
-    def get_riwayat_object(self, id):
-        try:
-            layanan_cuti = LayananCuti.objects.get(id=id)
-            data = RiwayatCuti.objects.get(usulan__id=layanan_cuti.pk)
-            return data
-        except RiwayatCuti.DoesNotExist:
-            return None
-        
-    def get(self, request, *args, **kwargs):
-        get_case = request.GET.get('case')
-        get_level = request.GET.get('level')
-        selected_nip = kwargs.get('nip')
-        status_pengajuan_cuti = kwargs.get('status')
-        id = kwargs.get('id')
-        nip = None
-        card_title = 'Edit Pengajuan Cuti'
-        form_view = 'block'
-        data_view = 'none'
-        user = request.user
-        layanan_instance = self.get_object(id)
-        verifikasi_cuti = self.get_verification_object(id)
-        instalasi = None
-        nama_verifikator=None
-        penempatan = None
-        if request.user.is_staff:
-            nip = selected_nip
-            user = layanan_instance.pegawai if layanan_instance is not None else None
-            instalasi = layanan_instance.pegawai.riwayat_penempatan.filter(status=True).last()
-            if instalasi is not None:
-                penempatan = instalasi.penempatan
-        else:
-            nip = get_nip(request.user)  
-        riwayat_instance = self.get_riwayat_object(id)
-        form = update_pengajuan_cuti_formset(instance=layanan_instance, form_kwargs={'action':'edit'})
-        layanan_form = LayananCutiForm(instance=layanan_instance, request=request, action='edit')
-        verifikator_form = VerifikatorCutiForm(instance=verifikasi_cuti) 
-        if get_case == 'tindaklanjut':
-            form = update_pengajuan_cuti_formset(instance=layanan_instance, form_kwargs={'case': 'tindaklanjut'})
-            layanan_form = LayananCutiForm(instance=layanan_instance, request=request, case='tindaklanjut')
-            if get_level == '1':
-                verifikator_form = Verifikator1CutiForm(instance=verifikasi_cuti)
-            elif get_level == '2':
-                verifikator_form = Verifikator2CutiForm(instance=verifikasi_cuti)
-            elif get_level == '3':
-                verifikator_form = Verifikator3CutiForm(instance=verifikasi_cuti)
-            if instalasi is not None and instalasi.nama_atasan['nip_atasan1'] != "N/A":
-                nama_verifikator = instalasi.nama_atasan
-                nama_verifikator.update({
-                    'direktur':instalasi.penempatan_level1.nama_pimpinan.full_name_2,
-                    'nip_direktur':instalasi.penempatan_level1.nama_pimpinan.profil_user.nip if instalasi.penempatan_level1.nama_pimpinan and hasattr(instalasi.penempatan_level1.nama_pimpinan, 'profil_user') else None
-                })
-            else:
-                nama_verifikator = ""
-            card_title = 'Proses Pengajuan Cuti'
-            data_view = 'block'
-            form_view = 'none'
-        elif get_case == 'final':
-            form = update_pengajuan_cuti_formset(instance=layanan_instance)
-            layanan_form = RiwayatCutiUploadSuratForm(instance=layanan_instance)
-            card_title = 'Upload Surat Cuti'
-            data_view = 'block'
-            form_view = 'none'
-        elif get_case == 'detail':
-            card_title = 'Detail Pengajuan Cuti'
-            data_view = 'block'
-            form_view = 'none'
-        context={
-            'update_form':True,
-            'nip':nip,
-            'riwayat_form': layanan_form,
-            'form':form,
-            'verifikator_form':verifikator_form,
-            'cek_sisa_cuti':self.cek_sisa_cuti(request.user),
-            'cek_sisa_tunda_cuti':self.cek_sisa_tunda_cuti(request.user),
-            'cek_sisa_cuti_pegawai':self.cek_sisa_cuti(user),
-            'cek_sisa_tunda_cuti_pegawai':self.cek_sisa_tunda_cuti(user),
-            # 'cek_total_cuti_tahunan': self.cek_total_cuti_termasuk_sedang_proses(user),
-            'cek_total_pegawai_cuti': self.cek_pegawai_cuti_perinstalasi(penempatan),
-            'status':status_pengajuan_cuti,
-            'data_detail':layanan_instance,
-            'nama_verifikator':nama_verifikator,
-            'card_title':card_title,
-            'form_view':form_view,
-            'data_view':data_view,
-            'case':get_case,
-            'cuti':'active',
-            'layanan':'active',
-            'title_page':'Layanan Cuti',
-            'selected':'yancuti'
-        }
-        return render(request, '6_layanan_cuti/layanan_cuti_master.html', context)
-    
-    def post(self, request, *args, **kwargs):
-        status_pengajuan_cuti = kwargs.get('status')
-        get_case = request.GET.get('case')
-        get_level = request.GET.get('level')
-        id = kwargs.get('id')
-        layanan_instance = self.get_object(id)
-        verifikasi_cuti = self.get_verification_object(id)
-        aksi = request.POST.get("aksi", "verifikasi")
-        riwayat_instance = self.get_riwayat_object(id)
-        riwayat_form = LayananCutiForm(data=request.POST, files=request.FILES, instance=layanan_instance, request=request, action='edit')
-        form = update_pengajuan_cuti_formset(data=request.POST, files=request.FILES, instance=layanan_instance)
-        verifikator_form = VerifikatorCutiForm(data=request.POST, files=request.FILES, instance=verifikasi_cuti)
-        if get_case == 'tindaklanjut':
-            if aksi == 'aksi':
-                riwayat_instance.status_cuti='Tunda'
-                riwayat_instance.save()
-            else:
-                form = update_pengajuan_cuti_formset(data=request.POST, files=request.FILES, instance=layanan_instance, form_kwargs={'case': 'tindaklanjut'})
-                riwayat_form = LayananCutiForm(data=request.POST, files=request.FILES, instance=layanan_instance, request=request, case='tindaklanjut')
-                if get_level == '1':
-                    verifikator_form = Verifikator1CutiForm(data=request.POST, files=request.FILES, instance=verifikasi_cuti)
-                elif get_level == '2':
-                    verifikator_form = Verifikator2CutiForm(data=request.POST, files=request.FILES, instance=verifikasi_cuti)
-                elif get_level == '3':
-                    verifikator_form = Verifikator3CutiForm(data=request.POST, files=request.FILES, instance=verifikasi_cuti)
-        elif get_case == 'final':
-            form = update_pengajuan_cuti_formset(data=request.POST, files=request.FILES, instance=layanan_instance)
-            riwayat_form = RiwayatCutiUploadSuratForm(data=request.POST, files=request.FILES, instance=layanan_instance)
-        url_redirect = reverse('layanan_urls:layanan_cuti_update_view', kwargs={'status':status_pengajuan_cuti, 'id':id})
-        if verifikator_form.is_valid():
-            verifikator = verifikator_form.save(commit=False)
-            if get_level == '1':
-                verifikator.verifikator1 = request.user
-                layanan_instance.status = 'pengajuan'
-                layanan_instance.save()
-            elif get_level == '2':
-                verifikator.verifikator2 = request.user
-            elif get_level == '3':
-                verifikator.verifikator3 = request.user
-                verifikator.tanggal = date.today()
-            verifikator.save()
-            return redirect(f'{url_redirect}?case=tindaklanjut#close')
-        if riwayat_form.is_valid() and form.is_valid():
-            data_submitted = riwayat_form.save(commit=False)
-            file1 = riwayat_instance.file_pengajuan if riwayat_instance is not None and hasattr(riwayat_instance, 'file_pengajuan') else None
-            delete_existing_object(data_submitted, riwayat_instance, file1)
-            file2 = riwayat_instance.file_pendukung if riwayat_instance is not None and hasattr(riwayat_instance, 'file_pendukung') else None
-            delete_existing_object(data_submitted, riwayat_instance, file2)
-            
-            data_submitted.save()
-            for item in form:
-                if item.is_valid():
-                    data_usulan = item.save(commit=False)
-                    data_status = ['tindaklanjut', 'selesai']
-                    if get_case == 'tindaklanjut' and not any(data == layanan_instance.status for data in data_status):
-                        data_usulan.status = form.cleaned_data[0].get('status')
-                        if data_usulan.status == 'tidak ditindaklanjut':
-                            data_usulan.lama_cuti = 0
-                            data_usulan.save()
-                    elif get_case == 'final':
-                        data_usulan.status = 'selesai'
-                    data_usulan.save()
-            messages.success(request, 'Data berhasil disimpan!') 
-            return redirect(reverse('layanan_urls:layanan_cuti_view', kwargs={'status':'riwayat'}))
-        for formitem in form:
-            for field, errors in formitem.errors.items():
-                    for error in errors:
-                        messages.error(request, error)
-        for field, errors in riwayat_form.errors.items():
-                for error in errors:
-                    if error:
-                        messages.error(request, error)
-                    else:
-                        messages.error(request, 'Maaf data gagal disimpan!')
-        return redirect(reverse('layanan_urls:layanan_cuti_view', kwargs={'status':'riwayat'}))
-
+        if request.GET.get('case') == 'tindaklanjut' and (
+            request.user.is_cuti_admin
+            or any(
+                item['user'] and item['user'].pk == request.user.pk
+                for item in build_approval_chain(layanan.pegawai)
+            )
+        ):
+            return redirect('layanan_urls:layanan_cuti_verifikasi', id=layanan.pk)
+        return redirect('layanan_urls:layanan_cuti_detail', pk=layanan.pk)
 
 class VerifikasiCutiAccessMixin(LoginRequiredMixin):
     """
@@ -1742,9 +1511,23 @@ class VerifikasiCutiAccessMixin(LoginRequiredMixin):
 
     def get_verifikasi_obj(self) -> VerifikasiCuti:
         if not hasattr(self, "_verifikasi_obj"):
+            chain = build_approval_chain(self.get_layanan_cuti().pegawai)
+            defaults = {
+                f"verifikator{item['level']}": item['user']
+                for item in chain
+                if item['user'] is not None
+            }
             self._verifikasi_obj, _ = VerifikasiCuti.objects.get_or_create(
-                layanan_cuti=self.get_layanan_cuti()
+                layanan_cuti=self.get_layanan_cuti(),
+                defaults=defaults,
             )
+            changed_fields = []
+            for field_name, user in defaults.items():
+                if getattr(self._verifikasi_obj, field_name) is None:
+                    setattr(self._verifikasi_obj, field_name, user)
+                    changed_fields.append(field_name)
+            if changed_fields:
+                self._verifikasi_obj.save(update_fields=changed_fields + ['updated_at'])
         return self._verifikasi_obj
 
     def get_riwayat_penempatan_aktif(self) -> Optional[RiwayatPenempatan]:
@@ -1777,125 +1560,108 @@ class VerifikasiCutiAccessMixin(LoginRequiredMixin):
           {"level": 3, "user": <User atau None>, "label": "Direktur ..."},
         ]
         """
-        rp = self.get_riwayat_penempatan_aktif()
-        chain = []
-
-        if not rp:
-            return chain
-
-        # Pegawai level 4 (Instalasi) → diverifikasi: Kasi/SubBidang, Kabid, Unor
-        if rp.penempatan_level4:
-            inst = rp.penempatan_level4
-            sb = inst.sub_bidang
-            b = sb.bidang
-            u = b.unor
-
-            chain.append({
-                "level": 1,
-                "user": sb.nama_pimpinan,
-                "label": f"{sb.pimpinan} {sb.sub_bidang}",
-            })
-            chain.append({
-                "level": 2,
-                "user": b.nama_pimpinan,
-                "label": f"{b.pimpinan} {b.bidang}",
-            })
-            chain.append({
-                "level": 3,
-                "user": u.nama_pimpinan,
-                "label": f"{u.pimpinan} {u.unor}",
-            })
-
-        # Pegawai level 3 (SubBidang) → diverifikasi: Kabid, Unor
-        elif rp.penempatan_level3:
-            sb = rp.penempatan_level3
-            b = sb.bidang
-            u = b.unor
-
-            chain.append({
-                "level": 1,
-                "user": b.nama_pimpinan,
-                "label": f"{b.pimpinan} {b.bidang}",
-            })
-            chain.append({
-                "level": 2,
-                "user": u.nama_pimpinan,
-                "label": f"{u.pimpinan} {u.unor}",
-            })
-
-        # Pegawai level 2 (Bidang) → diverifikasi: Unor, SatkerInduk
-        elif rp.penempatan_level2:
-            b = rp.penempatan_level2
-            u = b.unor
-            sk = u.satker_induk
-
-            chain.append({
-                "level": 1,
-                "user": u.nama_pimpinan,
-                "label": f"{u.pimpinan} {u.unor}",
-            })
-            chain.append({
-                "level": 2,
-                "user": sk.nama_pimpinan,
-                "label": f"{sk.pimpinan} {sk.satuan_kerja}",
-            })
-
-        # Pegawai level 1 (Unor) → diverifikasi: SatkerInduk, (opsional) InstansiDaerah
-        elif rp.penempatan_level1:
-            u = rp.penempatan_level1
-            sk = u.satker_induk
-            inst = sk.instansi_daerah
-
-            chain.append({
-                "level": 1,
-                "user": sk.nama_pimpinan,
-                "label": f"{sk.pimpinan} {sk.satuan_kerja}",
-            })
-            chain.append({
-                "level": 2,
-                "user": inst.nama_pimpinan,
-                "label": f"{inst.pimpinan} {inst.instansi}",
-            })
-
-        # kalau mau handle langsung pegawai di SatkerInduk: bisa ditambah branch lain
-
-        return chain
+        return build_approval_chain(self.get_layanan_cuti().pegawai)
 
     @property
     def verifikator_chain(self):
         if not hasattr(self, "_verifikator_chain"):
-            self._verifikator_chain = self.build_verifikator_chain()
+            chain_aktif = {
+                item['level']: item
+                for item in self.build_verifikator_chain()
+            }
+            snapshot = self.get_verifikasi_obj()
+            gabungan = []
+            for level in (1, 2, 3):
+                item = chain_aktif.get(level)
+                saved_user = getattr(snapshot, f"verifikator{level}", None)
+                if item is None and saved_user is None:
+                    continue
+                gabungan.append({
+                    'level': level,
+                    'user': saved_user or item['user'],
+                    'label': (
+                        item['label']
+                        if item is not None
+                        else f'Verifikator Level {level}'
+                    ),
+                })
+            self._verifikator_chain = gabungan
         return self._verifikator_chain
 
     @property
+    def user_level(self):
+        """Level user dalam snapshot/rantai verifikator, termasuk riwayat lama."""
+        if hasattr(self, '_user_level'):
+            return self._user_level
+        user = self.request.user
+        self._user_level = None
+        for item in self.verifikator_chain:
+            atasan = item["user"]
+            if atasan and atasan.pk == user.pk:
+                self._user_level = item['level']
+                break
+        return self._user_level
+
+    @property
     def current_level(self):
+        """Level yang dapat diedit; None berarti halaman hasil/read-only."""
+        if hasattr(self, '_current_level'):
+            return self._current_level
+
         user = self.request.user
         if not user.is_authenticated:
             raise PermissionDenied
 
-        # ✅ SUPERADMIN = MONITOR (TIDAK VERIFIKASI)
         if self.is_monitor_user():
-            return None  # <- PENTING
+            self._current_level = None
+            return None
 
-        for item in self.verifikator_chain:
-            atasan = item["user"]
-            if atasan and atasan.pk == user.pk:
-                return item["level"]
+        level = self.user_level
+        if level is None:
+            if self.can_monitor_as_supervisor():
+                self._current_level = None
+                return None
+            raise PermissionDenied(
+                "Anda tidak tercatat sebagai verifikator pengajuan cuti ini."
+            )
 
-        raise PermissionDenied(
-            "Anda tidak memiliki kewenangan untuk memverifikasi cuti ini."
+        verifikasi = self.get_verifikasi_obj()
+        keputusan = getattr(verifikasi, f"keputusan{level}", 'belum')
+        status_final = self.get_layanan_cuti().status in (
+            'disetujui',
+            'selesai',
+            'ditolak',
         )
-    
+        self._current_level = (
+            level
+            if keputusan == 'belum' and not status_final
+            else None
+        )
+        return self._current_level
+
     def is_monitor_user(self) -> bool:
         u = self.request.user
         return u.is_authenticated and u.is_cuti_admin
 
+    def can_monitor_as_supervisor(self) -> bool:
+        if not hasattr(self, '_can_monitor_as_supervisor'):
+            self._can_monitor_as_supervisor = can_supervise_employee(
+                self.request.user,
+                self.get_layanan_cuti().pegawai,
+            )
+        return self._can_monitor_as_supervisor
+
+    def is_read_only_mode(self) -> bool:
+        return self.is_monitor_user() or self.current_level is None
+
     def dispatch(self, request, *args, **kwargs):
-        # Panggil current_level utk validasi akses di awal
         if self.is_monitor_user():
             return super().dispatch(request, *args, **kwargs)
-        
-        _ = self.current_level
+
+        if self.user_level is None and not self.can_monitor_as_supervisor():
+            raise PermissionDenied(
+                "Anda tidak tercatat sebagai verifikator pengajuan cuti ini."
+            )
         return super().dispatch(request, *args, **kwargs)
 
 
@@ -1914,10 +1680,7 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
         return self.get_verifikasi_obj()
 
     def get_form_class(self):
-        if self.is_monitor_user():
-            return Verifikator3CutiForm  # read-only
-
-        level = self.current_level
+        level = self.current_level or self.user_level or 3
         if level == 1:
             return Verifikator1CutiForm
         elif level == 2:
@@ -1927,7 +1690,7 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
     
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
-        if self.is_monitor_user():
+        if self.is_read_only_mode():
             for f in form.fields.values():
                 f.disabled = True
         return form
@@ -1937,10 +1700,44 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
     #     kwargs.setdefault("request", self.request)
     #     return kwargs
     
+    @transaction.atomic
     def post(self, request, *args, **kwargs):
-        if self.is_monitor_user():
-            messages.info(request, "Mode monitoring: Anda tidak dapat mengubah verifikasi.")
+        if self.is_read_only_mode():
+            messages.info(
+                request,
+                "Hasil verifikasi hanya dapat dilihat dan tidak dapat diubah kembali.",
+            )
             return redirect(request.path)  # stay di halaman yang sama
+
+        layanan = self.get_layanan_cuti()
+        Users.objects.select_for_update().get(pk=layanan.pegawai_id)
+        riwayat = RiwayatCuti.objects.select_for_update().filter(usulan=layanan).first()
+        if not riwayat:
+            messages.error(request, "Detail pengajuan cuti tidak ditemukan.")
+            return redirect("layanan_urls:layanan_cuti_bawahan_listview")
+        if layanan.status in (
+            'disetujui', 'selesai', 'ditolak', 'dibatalkan',
+        ):
+            messages.error(request, "Pengajuan ini sudah memiliki keputusan final dan tidak dapat diubah.")
+            return redirect(request.path)
+        if any(item['user'] is None for item in self.verifikator_chain):
+            messages.error(request, "Rantai verifikator belum lengkap. Hubungi admin struktur organisasi.")
+            return redirect(request.path)
+
+        level = self.current_level
+        verifikasi = self.get_verifikasi_obj()
+        level_sebelumnya = [
+            item['level'] for item in self.verifikator_chain if item['level'] < level
+        ]
+        if any(getattr(verifikasi, f'keputusan{lvl}') != 'setuju' for lvl in level_sebelumnya):
+            messages.error(request, "Verifikasi pada level sebelumnya belum disetujui.")
+            return redirect(request.path)
+
+        if riwayat.jenis_cuti == self.CUTI_TAHUNAN:
+            pelimpahan = getattr(riwayat, 'pelimpahan_tugas', None)
+            if pelimpahan is None or not pelimpahan.is_final_approved():
+                messages.error(request, "Pelimpahan tugas harus disetujui sebelum cuti diverifikasi.")
+                return redirect(request.path)
         return super().post(request, *args, **kwargs)
 
     def _update_verifikator_user(self, verifikasi: VerifikasiCuti):
@@ -1948,11 +1745,11 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
         user = self.request.user
         level = self.current_level
 
-        if level == 1 and hasattr(verifikasi, "verifikator1") and not verifikasi.verifikator1:
+        if level == 1 and hasattr(verifikasi, "verifikator1"):
             verifikasi.verifikator1 = user
-        elif level == 2 and hasattr(verifikasi, "verifikator2") and not verifikasi.verifikator2:
+        elif level == 2 and hasattr(verifikasi, "verifikator2"):
             verifikasi.verifikator2 = user
-        elif level == 3 and hasattr(verifikasi, "verifikator3") and not verifikasi.verifikator3:
+        elif level == 3 and hasattr(verifikasi, "verifikator3"):
             verifikasi.verifikator3 = user
 
     def _update_status_after_verifikasi(self, verifikasi: VerifikasiCuti):
@@ -1974,21 +1771,14 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
         ada_keputusan = any(k != "belum" for k in keputusan_values)
 
         # minimal tindaklanjut kalau sudah ada keputusan
-        if ada_keputusan and layanan.status in ("draft", "pengajuan"):
+        if ada_keputusan and layanan.status == "pengajuan":
             layanan.status = "tindaklanjut"
-
-        if riwayat and riwayat.status_persetujuan not in ("disetujui", "ditolak"):
-            riwayat.status_persetujuan = "belum"
 
         # 1) Jika ADA TOLAK -> final ditolak
         if any(k == "tolak" for k in keputusan_values):
-            layanan.status = "tidak ditindaklanjut"
+            layanan.status = "ditolak"
             if riwayat:
-                riwayat.status_persetujuan = "ditolak"
-                # agar tidak ikut hitung pemakaian, paling aman:
-                # biarkan status_cuti tetap 'Proses'? (jangan)
-                # kalau Anda belum punya status khusus "Ditolak", set saja:
-                riwayat.status_cuti = "Selesai"
+                riwayat.status_cuti = "Batal"
             layanan.save()
             if riwayat:
                 riwayat.save()
@@ -1996,9 +1786,8 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
 
         # 2) Jika ADA TUNDA -> final jadi saldo tunda
         if any(k == "tunda" for k in keputusan_values):
-            layanan.status = "selesai"
+            layanan.status = "disetujui"
             if riwayat:
-                riwayat.status_persetujuan = "disetujui"
                 riwayat.status_cuti = "Tunda"
                 # pastikan tahun_cuti terisi untuk tracking saldo
                 if not riwayat.tahun_cuti:
@@ -2010,13 +1799,10 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
 
         # 3) Jika semua setuju -> final disetujui
         if keputusan_values and all(k == "setuju" for k in keputusan_values):
-            layanan.status = "selesai"
-            if riwayat:
-                riwayat.status_persetujuan = "disetujui"
-                # status_cuti: boleh tetap Proses sampai surat keluar, atau Selesai
-                riwayat.status_cuti = "Proses"
+            layanan.status = "disetujui"
             layanan.save()
             if riwayat:
+                riwayat.status_cuti = riwayat.tentukan_status_pelaksanaan()
                 riwayat.save()
             return
 
@@ -2026,6 +1812,7 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
         if riwayat:
             riwayat.save()
 
+    @transaction.atomic
     def form_valid(self, form):
         if self.is_monitor_user():
             messages.info(self.request, "Mode monitoring: tidak ada perubahan yang disimpan.")
@@ -2033,8 +1820,24 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
         
         verifikasi: VerifikasiCuti = form.save(commit=False)
 
+        level = self.current_level
+        keputusan = form.cleaned_data.get(f'keputusan{level}')
+        level_terakhir = max(item['level'] for item in self.verifikator_chain)
+        if keputusan == 'tunda' and level != level_terakhir:
+            form.add_error(None, "Keputusan menunda hanya dapat diberikan oleh verifikator terakhir.")
+            return self.form_invalid(form)
+
         # set verifikatorX = user login
         self._update_verifikator_user(verifikasi)
+
+        setattr(verifikasi, f'diputuskan_pada{level}', timezone.now())
+        if level == level_terakhir:
+            sekarang = timezone.now()
+            verifikasi.tanggal = (
+                timezone.localtime(sekarang).date()
+                if timezone.is_aware(sekarang)
+                else sekarang.date()
+            )
 
         verifikasi.save()
 
@@ -2054,7 +1857,8 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
         layanan = self.get_layanan_cuti()
         verifikasi = self.get_verifikasi_obj()
         
-        current_level = None if self.is_monitor_user() else self.current_level
+        current_level = self.current_level
+        user_level = self.user_level
 
         # riwayat cuti terkait (untuk ringkasan)
         riwayat = (
@@ -2066,7 +1870,7 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
         pengangkatan = RiwayatPengangkatan.objects.filter(pegawai=layanan.pegawai).order_by('-id').first()
         status_pegawai = pengangkatan.desk_status_pegawai if pengangkatan else None
         ctx["status_pegawai"] = status_pegawai
-        ctx["layanan_disetujui"] = (layanan.status == "selesai")
+        ctx["layanan_disetujui"] = layanan.status in ("disetujui", "selesai")
 
         # Siapkan chain untuk ditampilkan di UI
         chain_display = []
@@ -2096,7 +1900,7 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
                 "user": user,
                 "status": status,
                 "catatan": catatan_val,
-                "is_current": (current_level == lvl),
+                "is_current": (user_level == lvl),
             })
 
         ctx.update({
@@ -2104,12 +1908,197 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
             "layanan": layanan,
             "riwayat": riwayat,
             "chain_display": chain_display,
-            "current_level": self.current_level,
+            "current_level": current_level,
+            "user_level": user_level,
+            "view_only": self.is_read_only_mode(),
+            "can_submit_verification": not self.is_read_only_mode(),
             "active_tab": "bawahan",
             "cek_sisa_cuti_pegawai": self.cek_sisa_cuti(layanan.pegawai),
             "cek_sisa_tunda_cuti_pegawai": self.cek_sisa_tunda_cuti(layanan.pegawai),
         })
         return ctx
+
+
+class LayananCutiDeleteView(SuccessMessageMixin, DeleteView):
+    model = RiwayatCuti
+    template_name = 'delete.html'
+    success_url = reverse_lazy('layanan_urls:layanan_cuti_listview')
+    success_message = "Data berhasil dihapus!"
+
+
+class CutiPemutihanAdminView(LoginRequiredMixin, UserPassesTestMixin, View):
+    """Koreksi massal status pengajuan cuti dengan jejak audit."""
+
+    template_name = '6_layanan_cuti/cuti_pemutihan_admin.html'
+    allowed_actions = {'disetujui', 'selesai', 'ditolak', 'dibatalkan'}
+
+    def test_func(self):
+        return self.request.user.is_cuti_admin
+
+    def _parse_date(self, value, default):
+        try:
+            return date.fromisoformat(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _filters(self):
+        today = date.today()
+        return {
+            'tanggal_mulai': self._parse_date(
+                self.request.GET.get('tanggal_mulai')
+                or self.request.POST.get('tanggal_mulai'),
+                date(today.year, 1, 1),
+            ),
+            'tanggal_akhir': self._parse_date(
+                self.request.GET.get('tanggal_akhir')
+                or self.request.POST.get('tanggal_akhir'),
+                today,
+            ),
+            'status': (
+                self.request.GET.get('status')
+                or self.request.POST.get('status')
+                or 'proses'
+            ),
+            'q': (
+                self.request.GET.get('q')
+                or self.request.POST.get('q')
+                or ''
+            ).strip(),
+        }
+
+    def _queryset(self, filters):
+        queryset = (
+            LayananCuti.objects
+            .select_related('pegawai__profil_user', 'cuti_usulan')
+            .filter(
+                created_at__date__gte=filters['tanggal_mulai'],
+                created_at__date__lte=filters['tanggal_akhir'],
+            )
+            .order_by('created_at', 'id')
+        )
+        status = filters['status']
+        if status == 'proses':
+            queryset = queryset.filter(status__in=('pengajuan', 'tindaklanjut'))
+        elif status in dict(STATUS_PENGAJUAN_CUTI):
+            queryset = queryset.filter(status=status)
+        if filters['q']:
+            queryset = queryset.filter(
+                Q(pegawai__first_name__icontains=filters['q'])
+                | Q(pegawai__last_name__icontains=filters['q'])
+                | Q(pegawai__email__icontains=filters['q'])
+                | Q(pegawai__profil_user__nip__icontains=filters['q'])
+            )
+        return queryset
+
+    def get(self, request, *args, **kwargs):
+        filters = self._filters()
+        queryset = self._queryset(filters)
+        context = {
+            'data': queryset[:500],
+            'total_data': queryset.count(),
+            'filters': filters,
+            'status_choices': STATUS_PENGAJUAN_CUTI,
+            'action_choices': (
+                ('disetujui', 'Disetujui'),
+                ('selesai', 'Selesai'),
+                ('ditolak', 'Ditolak'),
+                ('dibatalkan', 'Dibatalkan'),
+            ),
+            'recent_logs': (
+                PemutihanCutiLog.objects
+                .select_related('layanan_cuti__pegawai', 'admin')
+                .all()[:50]
+            ),
+            'title_page': 'Pemutihan Pengajuan Cuti',
+            'cuti': 'active',
+            'layanan': 'active',
+        }
+        return render(request, self.template_name, context)
+
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        filters = self._filters()
+        action = request.POST.get('aksi')
+        catatan = (request.POST.get('catatan') or '').strip()
+        selected_ids = request.POST.getlist('pengajuan_ids')
+
+        if action not in self.allowed_actions:
+            messages.error(request, 'Pilih keputusan pemutihan yang valid.')
+            return self.get(request, *args, **kwargs)
+        if not catatan:
+            messages.error(request, 'Catatan/alasan pemutihan wajib diisi.')
+            return self.get(request, *args, **kwargs)
+        if not selected_ids:
+            messages.error(request, 'Pilih minimal satu pengajuan cuti.')
+            return self.get(request, *args, **kwargs)
+
+        visible_ids = self._queryset(filters).filter(
+            pk__in=selected_ids,
+        ).values_list('pk', flat=True)
+        layanan_list = list(
+            LayananCuti.objects
+            .select_for_update()
+            .select_related('cuti_usulan')
+            .filter(pk__in=visible_ids)
+            .order_by('id')
+        )
+        if not layanan_list:
+            messages.error(
+                request,
+                'Pengajuan terpilih tidak ditemukan pada hasil filter.',
+            )
+            return self.get(request, *args, **kwargs)
+
+        logs = []
+        for layanan in layanan_list:
+            riwayat = getattr(layanan, 'cuti_usulan', None)
+            status_pengajuan_lama = layanan.status
+            status_pelaksanaan_lama = (
+                riwayat.status_cuti if riwayat else ''
+            )
+
+            layanan.status = action
+            layanan.is_read = True
+            layanan.save(update_fields=('status', 'is_read', 'updated_at'))
+
+            if riwayat:
+                if action in ('ditolak', 'dibatalkan'):
+                    riwayat.status_cuti = 'Batal'
+                elif riwayat.status_cuti != 'Tunda':
+                    riwayat.status_cuti = 'Belum'
+                    riwayat.status_cuti = (
+                        riwayat.tentukan_status_pelaksanaan(pada=date.today())
+                    )
+                riwayat.save(update_fields=('status_cuti', 'updated_at'))
+
+            logs.append(PemutihanCutiLog(
+                layanan_cuti=layanan,
+                riwayat_cuti=riwayat,
+                admin=request.user,
+                aksi=action,
+                status_pengajuan_sebelum=status_pengajuan_lama,
+                status_pengajuan_sesudah=layanan.status,
+                status_pelaksanaan_sebelum=status_pelaksanaan_lama,
+                status_pelaksanaan_sesudah=(
+                    riwayat.status_cuti if riwayat else ''
+                ),
+                catatan=catatan,
+            ))
+
+        PemutihanCutiLog.objects.bulk_create(logs)
+        messages.success(
+            request,
+            f'{len(logs)} pengajuan cuti berhasil diubah menjadi '
+            f'{dict(STATUS_PENGAJUAN_CUTI)[action]}.',
+        )
+        query = (
+            f'?tanggal_mulai={filters["tanggal_mulai"].isoformat()}'
+            f'&tanggal_akhir={filters["tanggal_akhir"].isoformat()}'
+            f'&status={filters["status"]}'
+        )
+        return redirect(
+            reverse('layanan_urls:cuti_pemutihan_admin') + query
+        )
 
 
 class GajiBerkalaCheck:
@@ -2742,7 +2731,11 @@ class LayananUsulanDiklatCreateView(LoginRequiredMixin, CreateView):
                 data_riwayat.usulan = self.object
                 data_riwayat.is_usulan = True
                 data_riwayat.save()
-                data_riwayat.pegawai.set(riwayat_form.cleaned_data[0].get('pegawai'))
+                pegawai_diklat = riwayat_form.cleaned_data[0].get('pegawai')
+                data_riwayat.pegawai.set(pegawai_diklat)
+                pegawai_snapshot = pegawai_diklat.first()
+                if pegawai_snapshot:
+                    ensure_diklat_verifier_snapshot(self.object, pegawai_snapshot)
             messages.success(self.request, 'Data berhasil disimpan!')
             return super().form_valid(form)
         print('form: ', form.errors)
@@ -2905,9 +2898,10 @@ class LayananUsulanDiklatUpdateView(LoginRequiredMixin, UpdateView):
                 context['card_title'] = 'Error penempatan'
                 return context
             nama_verifikator = instalasi.nama_atasan if instalasi else {}
+            direktur = get_active_leader(instalasi.penempatan_level1)
             nama_verifikator.update({
-                'direktur':instalasi.penempatan_level1.nama_pimpinan.full_name_2,
-                'nip_direktur':instalasi.penempatan_level1.nama_pimpinan.profil_user.nip if instalasi.penempatan_level1.nama_pimpinan and hasattr(instalasi.penempatan_level1.nama_pimpinan, 'profil_user') else None
+                'direktur': getattr(direktur, 'full_name_2', None),
+                'nip_direktur': getattr(getattr(direktur, 'profil_user', None), 'nip', None),
             })
             verifikator_object = self.get_verification_object(instance)
             context['nama_verifikator'] = nama_verifikator
@@ -3431,6 +3425,255 @@ class LayananSIPUploadRekomendasiView(
         return context
 
 
+class PerubahanJadwalCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
+    model = PerubahanJadwalCuti
+    form_class = PerubahanJadwalCutiForm
+    template_name = '6_layanan_cuti/perubahan_jadwal_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return super().dispatch(request, *args, **kwargs)
+        self.riwayat = get_object_or_404(
+            RiwayatCuti.objects.select_related('pegawai', 'usulan'),
+            pk=kwargs['riwayat_pk'],
+        )
+        if self.riwayat.pegawai_id != request.user.pk:
+            raise PermissionDenied('Hanya pemohon yang dapat mengajukan perubahan jadwal.')
+        if self.riwayat.usulan.status == 'ditolak':
+            messages.error(request, 'Pengajuan yang ditolak harus dibuat sebagai pengajuan baru.')
+            return redirect('layanan_urls:layanan_cuti_detail', pk=self.riwayat.usulan_id)
+        if self.riwayat.status_cuti in ('Tunda', 'Batal'):
+            messages.error(request, 'Jadwal cuti tunda atau cuti yang ditolak tidak dapat diubah.')
+            return redirect('layanan_urls:layanan_cuti_detail', pk=self.riwayat.usulan_id)
+        if not self.riwayat.tgl_mulai_cuti or not self.riwayat.tgl_akhir_cuti or not self.riwayat.lama_cuti:
+            messages.error(request, 'Tanggal atau durasi cuti lama belum lengkap.')
+            return redirect('layanan_urls:layanan_cuti_detail', pk=self.riwayat.usulan_id)
+        if self.riwayat.perubahan_jadwal.filter(
+            status__in=('menunggu_verifikasi', 'menunggu_pelimpahan')
+        ).exists():
+            messages.error(request, 'Masih ada perubahan jadwal yang sedang diproses.')
+            return redirect('layanan_urls:layanan_cuti_detail', pk=self.riwayat.usulan_id)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['riwayat_cuti'] = self.riwayat
+        kwargs['check_cuti'] = self
+        return kwargs
+
+    def get_initial(self):
+        return {
+            'tanggal_mulai_baru': self.riwayat.tgl_mulai_cuti,
+            'tanggal_akhir_baru': self.riwayat.tgl_akhir_cuti,
+        }
+
+    @transaction.atomic
+    def form_valid(self, form):
+        Users.objects.select_for_update().get(pk=self.riwayat.pegawai_id)
+        self.riwayat = RiwayatCuti.objects.select_for_update().select_related(
+            'pegawai', 'usulan'
+        ).get(pk=self.riwayat.pk)
+        if self.riwayat.perubahan_jadwal.filter(
+            status__in=('menunggu_verifikasi', 'menunggu_pelimpahan')
+        ).exists():
+            form.add_error(None, 'Perubahan jadwal lain sedang diproses.')
+            return self.form_invalid(form)
+
+        perubahan = form.save(commit=False)
+        perubahan.riwayat_cuti = self.riwayat
+        perubahan.diajukan_oleh = self.request.user
+        perubahan.jenis_perubahan = determine_change_type(self.riwayat)
+        perubahan.tanggal_mulai_lama = self.riwayat.tgl_mulai_cuti
+        perubahan.tanggal_akhir_lama = self.riwayat.tgl_akhir_cuti
+        perubahan.lama_cuti_lama = self.riwayat.lama_cuti
+        perubahan.lama_cuti_baru = (
+            perubahan.tanggal_akhir_baru - perubahan.tanggal_mulai_baru
+        ).days + 1
+
+        verifikasi = VerifikasiCuti.objects.filter(layanan_cuti=self.riwayat.usulan).first()
+        perubahan.snapshot_verifikasi = snapshot_verification(verifikasi)
+
+        if perubahan.jenis_perubahan == 'perubahan_final':
+            chain = build_approval_chain(self.riwayat.pegawai)
+            if not chain or any(item['user'] is None for item in chain):
+                form.add_error(None, 'Rantai verifikator belum lengkap. Hubungi admin struktur organisasi.')
+                return self.form_invalid(form)
+            for item in chain:
+                setattr(perubahan, f"verifikator{item['level']}", item['user'])
+            perubahan.status = 'menunggu_verifikasi'
+            perubahan.full_clean()
+            perubahan.save()
+            messages.success(
+                self.request,
+                'Permohonan perubahan jadwal dikirim. Jadwal lama tetap berlaku sampai perubahan disetujui.',
+            )
+        else:
+            perubahan.status = 'diterapkan'
+            perubahan.full_clean()
+            perubahan.save()
+            try:
+                apply_nonfinal_change(perubahan.pk)
+            except ValidationError as exc:
+                perubahan.delete()
+                form.add_error(None, exc)
+                return self.form_invalid(form)
+            if perubahan.jenis_perubahan == 'revisi_proses':
+                message = 'Jadwal diperbarui dan verifikasi dimulai kembali dari level pertama.'
+            else:
+                message = 'Jadwal cuti berhasil diperbarui sebelum verifikasi.'
+            messages.success(self.request, message)
+
+        self.object = perubahan
+        return redirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse('layanan_urls:layanan_cuti_detail', kwargs={'pk': self.riwayat.usulan_id})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'riwayat': self.riwayat,
+            'jenis_perubahan': determine_change_type(self.riwayat),
+            'title_page': 'Perubahan Jadwal Cuti',
+            'cuti': 'active',
+            'layanan': 'active',
+        })
+        return context
+
+
+class PerubahanJadwalCutiCancelView(LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        perubahan = get_object_or_404(
+            PerubahanJadwalCuti.objects.select_related('riwayat_cuti__usulan'),
+            pk=kwargs['pk'],
+        )
+        if perubahan.diajukan_oleh_id != request.user.pk:
+            raise PermissionDenied('Hanya pemohon yang dapat membatalkan perubahan jadwal.')
+        try:
+            cancel_schedule_change(perubahan.pk)
+        except ValidationError as exc:
+            messages.error(request, '; '.join(exc.messages))
+        else:
+            messages.success(request, 'Permohonan perubahan jadwal dibatalkan.')
+        return redirect(
+            'layanan_urls:layanan_cuti_detail',
+            pk=perubahan.riwayat_cuti.usulan_id,
+        )
+
+
+class PerubahanJadwalCutiVerifikasiView(LoginRequiredMixin, FormView):
+    form_class = PerubahanJadwalDecisionForm
+    template_name = '6_layanan_cuti/perubahan_jadwal_verifikasi.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return super().dispatch(request, *args, **kwargs)
+        self.perubahan = get_object_or_404(
+            PerubahanJadwalCuti.objects.select_related(
+                'riwayat_cuti__pegawai', 'riwayat_cuti__usulan',
+                'verifikator1', 'verifikator2', 'verifikator3',
+            ),
+            pk=kwargs['pk'],
+        )
+        if self.perubahan.status != 'menunggu_verifikasi':
+            messages.info(request, 'Permohonan perubahan jadwal ini sudah tidak menunggu verifikasi.')
+            return redirect('layanan_urls:layanan_cuti_detail', pk=self.perubahan.riwayat_cuti.usulan_id)
+        self.current_level = self._get_current_level(request.user)
+        if request.user.is_cuti_admin:
+            self.current_level = None
+        elif self.current_level is None:
+            raise PermissionDenied('Anda bukan verifikator perubahan jadwal ini.')
+        return super().dispatch(request, *args, **kwargs)
+
+    def _get_current_level(self, user):
+        for level in (1, 2, 3):
+            if (
+                getattr(self.perubahan, f'verifikator{level}_id') == user.pk
+                and getattr(self.perubahan, f'keputusan{level}') == 'belum'
+            ):
+                return level
+        return None
+
+    def post(self, request, *args, **kwargs):
+        if request.user.is_cuti_admin:
+            messages.info(request, 'Admin cuti berada dalam mode monitoring.')
+            return redirect(request.path)
+        previous = [
+            level for level in (1, 2, 3)
+            if getattr(self.perubahan, f'verifikator{level}_id') and level < self.current_level
+        ]
+        if any(getattr(self.perubahan, f'keputusan{level}') != 'setuju' for level in previous):
+            messages.error(request, 'Verifikator sebelumnya belum menyetujui perubahan jadwal.')
+            return redirect(request.path)
+        return super().post(request, *args, **kwargs)
+
+    @transaction.atomic
+    def form_valid(self, form):
+        perubahan = PerubahanJadwalCuti.objects.select_for_update().get(pk=self.perubahan.pk)
+        if perubahan.status != 'menunggu_verifikasi':
+            messages.error(self.request, 'Status perubahan sudah berubah.')
+            return redirect(self.request.path)
+
+        level = self.current_level
+        keputusan = form.cleaned_data['keputusan']
+        setattr(perubahan, f'keputusan{level}', keputusan)
+        setattr(perubahan, f'catatan{level}', form.cleaned_data.get('catatan', ''))
+        setattr(perubahan, f'diputuskan_pada{level}', timezone.now())
+        perubahan.save()
+
+        if keputusan == 'tolak':
+            perubahan.status = 'ditolak'
+            perubahan.save(update_fields=('status', 'updated_at'))
+            messages.error(self.request, 'Permohonan perubahan jadwal ditolak.')
+        else:
+            active_levels = [
+                level for level in (1, 2, 3)
+                if getattr(perubahan, f'verifikator{level}_id')
+            ]
+            if all(getattr(perubahan, f'keputusan{item}') == 'setuju' for item in active_levels):
+                try:
+                    approve_final_change(perubahan.pk)
+                except ValidationError as exc:
+                    form.add_error(None, exc)
+                    transaction.set_rollback(True)
+                    return self.form_invalid(form)
+                messages.success(
+                    self.request,
+                    'Perubahan jadwal disetujui. Menunggu persetujuan ulang pelimpahan jika diperlukan.',
+                )
+            else:
+                messages.success(self.request, 'Keputusan perubahan jadwal berhasil disimpan.')
+        return redirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse('layanan_urls:layanan_cuti_detail', kwargs={
+            'pk': self.perubahan.riwayat_cuti.usulan_id,
+        })
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        chain = []
+        for level in (1, 2, 3):
+            user = getattr(self.perubahan, f'verifikator{level}')
+            if user:
+                chain.append({
+                    'level': level,
+                    'user': user,
+                    'keputusan': getattr(self.perubahan, f'keputusan{level}'),
+                    'catatan': getattr(self.perubahan, f'catatan{level}'),
+                })
+        context.update({
+            'perubahan': self.perubahan,
+            'chain': chain,
+            'current_level': self.current_level,
+            'is_monitor': self.request.user.is_cuti_admin,
+            'title_page': 'Verifikasi Perubahan Jadwal Cuti',
+            'cuti': 'active',
+            'layanan': 'active',
+        })
+        return context
+
+
 class LayananSIPUploadPersyaratanView(LoginRequiredMixin, FormView):
     form_class = UploadPersyaratanSIPForm
     template_name = "layanan_sip/upload_persyaratan.html"
@@ -3554,7 +3797,7 @@ class LayananNaikPangkatUpdateView(LoginRequiredMixin, UpdateView):
         form.instance.pegawai = self.request.user
         form.instance.is_read = False
         messages.success(self.request, 'Usulan kenaikan pangkat berhasil diperbarui.')
-        return super().form_valid(form)
+        return redirect(self.get_success_url())
 
     def get_success_url(self):
         return reverse('layanan_urls:layanan_pangkat_detail', kwargs={'pk': self.object.pk})

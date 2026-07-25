@@ -316,7 +316,7 @@
                                         <td>
                                             {% if request.user.is_superuser or item.layanan__url == 'yanberkala' and request.user.is_berkala_admin or item.layanan__url == 'yancuti' and request.user.is_cuti_admin or item.layanan__url == 'yandiklat' and request.user.is_diklat_admin or item.layanan__url == 'yaninovasi' and request.user.is_inovasi_admin or item.layanan__url == 'yanpangkat' and request.user.is_pangkat_admin or item.layanan__url == 'yanjabatan' and request.user.is_jabatan_admin %}
                                                 {% if item.layanan__url == 'yancuti' %}
-                                                    <a href="{% url 'layanan_urls:layanan_cuti_update_view' status='riwayat' id=item.id %}?case=tindaklanjut" class="btn btn-info">Proses</a>
+                                                    <a href="{% url 'layanan_urls:layanan_cuti_verifikasi' id=item.id %}" class="btn btn-info">Proses</a>
                                                 {% elif item.layanan__url == 'yanberkala' %}
                                                     {% if item.pegawai__profil_user__nip %}
                                                         <a href="{% url 'layanan_urls:layanan_berkala_admin_view' layanan_id=item.id nip=item.pegawai__profil_user__nip %}" class="btn btn-info">Proses</a>

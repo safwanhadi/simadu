@@ -7,6 +7,8 @@ from dateutil.relativedelta import relativedelta
 
 from myaccount.models import ProfilSDM, Users
 from myaccount.roles import ADMIN_DOKUMEN
+from layanan.models import JenisLayanan, LayananCuti
+from layanan.services import CheckCuti
 from jenissdm.models import JenisSDM
 from strukturorg.models import InstansiDaerah, SatuanKerjaInduk, UnitOrganisasi
 
@@ -22,7 +24,95 @@ from .models import (
     RiwayatPendidikan,
     RiwayatPengangkatan,
     RiwayatPenempatan,
+    RiwayatCuti,
 )
+
+
+class RiwayatCutiBalanceTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.pegawai = Users.objects.create_user(
+            email='saldo-riwayat-cuti@example.com',
+            first_name='Pegawai',
+            last_name='Saldo Cuti',
+            password='Password-123!',
+        )
+        ProfilSDM.objects.create(
+            user=cls.pegawai,
+            nip='19990001',
+            no_hp='081200009901',
+            email_pribadi=cls.pegawai.email,
+        )
+        cls.admin = Users.objects.create_user(
+            email='admin-saldo-riwayat-cuti@example.com',
+            first_name='Admin',
+            last_name='Saldo Cuti',
+            password='Password-123!',
+        )
+        ProfilSDM.objects.create(
+            user=cls.admin,
+            nip='19990002',
+            no_hp='081200009902',
+            email_pribadi=cls.admin.email,
+        )
+        group, _ = Group.objects.get_or_create(name=ADMIN_DOKUMEN)
+        cls.admin.groups.add(group)
+        cls.dokumen = DokumenSDM.objects.create(nama='Cuti', url='cuti')
+        cls.jenis_layanan = JenisLayanan.objects.create(
+            nama='Layanan Cuti Tes Saldo',
+            url='cuti-saldo-test',
+            status=True,
+        )
+        cls.layanan = LayananCuti.objects.create(
+            pegawai=cls.pegawai,
+            layanan=cls.jenis_layanan,
+            status='disetujui',
+            tahun=date.today().year,
+        )
+        RiwayatCuti.objects.create(
+            pegawai=cls.pegawai,
+            dokumen=cls.dokumen,
+            usulan=cls.layanan,
+            jenis_cuti='Cuti Tahunan',
+            lama_cuti=4,
+            tahun_cuti=date.today().year,
+            status_cuti='Selesai',
+            tgl_mulai_cuti=date.today(),
+            tgl_akhir_cuti=date.today(),
+        )
+
+    def test_admin_melihat_saldo_pegawai_yang_dipilih(self):
+        self.client.force_login(self.admin)
+        response = self.client.get(
+            reverse('riwayat_urls:riwayat_cuti'),
+            {'nip': self.pegawai.profil_user.nip},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        snapshot = response.context['snapshot_saldo_cuti']
+        baris_n = next(row for row in snapshot['rows'] if row['label'] == 'N')
+        self.assertEqual(baris_n['terpakai'], 4)
+        self.assertEqual(baris_n['dapat_digunakan'], 8)
+
+    def test_penggunaan_cuti_memakai_perhitungan_pusat(self):
+        self.client.force_login(self.admin)
+        response = self.client.get(
+            reverse('riwayat_urls:riwayat_penggunaan_cuti'),
+            {'nip': self.pegawai.profil_user.nip},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        expected = CheckCuti().buat_snapshot_saldo_cuti(self.pegawai)
+        self.assertEqual(
+            response.context['total_hak_tersedia'],
+            expected['total_tersedia'],
+        )
+        baris_n = next(
+            row for row in response.context['ringkasan_cuti']
+            if row['keterangan'] == 'Tahun Berjalan'
+        )
+        self.assertEqual(baris_n['terpakai'], 4)
+        self.assertEqual(baris_n['sisa_dapat_diambil'], 8)
 
 
 class DocumentAccessSecurityTests(TestCase):

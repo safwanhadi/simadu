@@ -1,7 +1,7 @@
 import requests
 import logging
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.conf import settings
 from .models import JenisSDMPerinstalasi, MappingMesinAbsensi, LogKehadiran
 from oauth2_provider.models import get_application_model
@@ -10,6 +10,7 @@ from django.utils.timezone import make_aware, get_current_timezone
 from django.utils import timezone
 
 from datetime import datetime, timedelta, time, date
+from .attendance_rules import HOLIDAY, MISSING_SCHEDULE, WORK, classify_daily_obligation
 
 from .models import (
     JadwalDinasSDM, ApprovedJadwalDinasSDM, LogKehadiran, KehadiranKegiatan, 
@@ -1012,9 +1013,6 @@ class NewAttendanceMappingService:
             mapping__pegawai_id__in=user_ids
         ).select_related('mapping__pegawai').order_by('datetime')
 
-        if not raw_logs.exists():
-            return True, "Tidak ada log mentah baru yang ditemukan pada rentang evaluasi ini."
-
         # 2. AMANKAN DATA METADATA STRUKTUR SDM
         bulan_target = target_date.month
         tahun_target = target_date.year
@@ -1069,6 +1067,12 @@ class NewAttendanceMappingService:
             refreshed_parents = AbsensiHarian.objects.filter(pegawai_id__in=user_ids, tanggal__in=[target_date, esok_hari])
             for rp in refreshed_parents:
                 parent_cache[f"{rp.pegawai_id}-{rp.tanggal}"] = rp
+
+        # Parent harus tetap terbentuk walaupun tidak ada seorang pun yang
+        # melakukan tapping. Parent inilah yang nantinya dinilai ALPA/LIBUR
+        # oleh orchestrator berdasarkan kalender dan jadwal.
+        if not raw_logs.exists():
+            return True, "Tidak ada log mentah baru; parent harian tetap berhasil disiapkan."
 
         # -------------------------------------------------------------------------
         # 3. PREPARASI DATA DETAIL CHILD (ANTI-DOUBLE TAP LINTAS HARI)
@@ -1167,25 +1171,34 @@ class NewAttendanceReconciliationService:
         # Load kamus jadwal dinas tepercaya
         approved_schedules = {
             sch.pegawai_id: sch.kategori_jadwal 
-            for sch in JadwalDinasSDM.objects.filter(pegawai_id__in=sdm_ids, tanggal=target_date).select_related('kategori_jadwal__kategori_dinas')
+            for sch in ApprovedJadwalDinasSDM.objects.filter(
+                pegawai_id__in=sdm_ids,
+                tanggal=target_date,
+                is_approved=True,
+            ).select_related('kategori_jadwal__kategori_dinas')
         }
         draft_schedules = {
             sch.pegawai_id: sch.kategori_jadwal 
-            for sch in JadwalDinasSDM.objects.filter(pegawai_id__in=sdm_ids, tanggal=target_date).select_related('kategori_jadwal__kategori_dinas')
+            for sch in JadwalDinasSDM.objects.filter(
+                pegawai_id__in=sdm_ids,
+                pegawai__status='disetujui',
+                tanggal=target_date,
+            ).select_related('kategori_jadwal__kategori_dinas')
         }
         
         user_to_sdm_map = {sdm.pegawai_id: sdm.id for sdm in sdm_perinstalasi_queryset}
         esok_hari = target_date + timedelta(days=1)
         
-        # Query Log Cerdas
+        # Selalu tarik ulang log yang relevan. Penilaian ulang harus dapat
+        # mengikuti perubahan jadwal maupun aturan toleransi, bukan hanya
+        # memproses log yang status_ketepatan-nya masih NULL.
         child_logs_queryset = LogAktivitasAbsen.objects.filter(
             absensi_harian__pegawai_id__in=pegawai_user_ids,
-            status_ketepatan__isnull=True
         ).filter(
             Q(absensi_harian__tanggal=target_date, tipe='DATANG') |
             Q(absensi_harian__tanggal=target_date, devicename__iexact='apel') |
             Q(absensi_harian__tanggal__in=[target_date, esok_hari], tipe='PULANG')
-        ).select_related('absensi_harian')
+        ).select_related('absensi_harian').order_by('waktu', 'pk')
 
         grouped_by_pegawai = defaultdict(list)
         for log in child_logs_queryset:
@@ -1220,13 +1233,21 @@ class NewAttendanceReconciliationService:
                 if log.absensi_harian.tanggal == target_date:
                     parent_hari_ini_id = log.absensi_harian_id
                     if log.tipe == 'DATANG':
-                        datang_log = log
-                
+                        if datang_log is None or log.waktu < datang_log.waktu:
+                            datang_log = log
+
                 if log.tipe == 'PULANG':
-                    if is_shift_malam and log.absensi_harian.tanggal == esok_hari and log.waktu.time() <= time(13, 0):
-                        pulang_log = log
+                    is_pulang_shift_malam = (
+                        is_shift_malam
+                        and log.waktu.date() == esok_hari
+                        and log.waktu.time() <= time(13, 0)
+                    )
+                    if is_pulang_shift_malam:
+                        if pulang_log is None or log.waktu > pulang_log.waktu:
+                            pulang_log = log
                     elif not is_shift_malam and log.absensi_harian.tanggal == target_date:
-                        pulang_log = log
+                        if pulang_log is None or log.waktu > pulang_log.waktu:
+                            pulang_log = log
 
             # Antisipasi darurat: jika shift malam tidak ada log datang hari ini, parent_hari_ini_id bisa dicari dari log milik hari ini yang bertipe APEL jika ada
             if not parent_hari_ini_id:
@@ -1302,12 +1323,28 @@ class NewAttendanceReconciliationService:
         # -----------------------------------------------------------------
         if child_updates:
             LogAktivitasAbsen.objects.bulk_update(child_updates, fields=['status_ketepatan', 'absensi_harian_id', 'tipe'])
-            
+
         if parent_ids_to_present:
-            AbsensiHarian.objects.filter(id__in=parent_ids_to_present, status_final='').update(status_final='HADIR')
-            
+            # IZIN dan DINAS adalah keputusan administratif dan tidak boleh
+            # ditimpa. Status sistem ALPA/LIBUR boleh dikoreksi menjadi HADIR
+            # bila pada penilaian ulang ditemukan log yang sah.
+            AbsensiHarian.objects.filter(
+                id__in=parent_ids_to_present,
+            ).exclude(
+                status_final__in=['HADIR', 'IZIN', 'DINAS'],
+            ).update(
+                status_final='HADIR',
+                keterangan='Sistem: Hadir berdasarkan log presensi yang telah direkonsiliasi.',
+            )
+
         if parent_ids_to_revert:
-            AbsensiHarian.objects.filter(id__in=parent_ids_to_revert, logs__isnull=True).update(status_final='')
+            AbsensiHarian.objects.filter(
+                id__in=parent_ids_to_revert,
+                logs__isnull=True,
+                keterangan__startswith='Sistem:',
+            ).exclude(
+                status_final__in=['IZIN', 'DINAS'],
+            ).update(status_final='', keterangan='')
             
         return len(child_updates)
     
@@ -1370,100 +1407,165 @@ class NewAttendanceOrchestrator:
                 # =========================================================================
                 # LOGIKA 2: PROSES PENANDAAN PEGAWAI TIDAK APEL (Aman dari Pegawai Libur)
                 # =========================================================================
-                # Pegawai wajib apel adalah yang terjadwal Reguler atau Pagi, KECUALI hari tersebut Libur Kalender bagi pegawai Reguler
-                jadwal_wajib_apel = JadwalDinasSDM.objects.filter(
-                    tanggal=target_date,
-                    # is_approved=True,
-                    pegawai__pegawai_id__in=user_ids
-                ).filter(
-                    Q(kategori_jadwal__kategori_dinas__kategori_dinas__icontains='Reguler') |
-                    Q(kategori_jadwal__kategori_jadwal__icontains='Pagi')
-                ).exclude(
-                    kategori_jadwal__kategori_dinas__kategori_dinas__icontains='Libur'
-                ).select_related('pegawai')
-
-                # Jika hari minggu atau libur nasional, pegawai dengan kategori_dinas 'Reguler' dibebaskan dari Apel
+                # Pegawai wajib apel diambil dari jadwal yang sudah disetujui.
+                # Data draft hanya menjadi fallback bila pengajuan induknya
+                # sudah berstatus disetujui (kompatibilitas data lama).
+                sdm_ids = [sdm.id for sdm in scope_pegawai_qs]
+                kondisi_wajib_apel = (
+                    Q(kategori_jadwal__kategori_dinas__kategori_dinas__iexact='Reguler')
+                    | Q(kategori_jadwal__kategori_jadwal__icontains='Pagi')
+                )
                 if is_hari_minggu or is_libur_nasional:
-                    jadwal_wajib_apel = jadwal_wajib_apel.exclude(
-                        kategori_jadwal__kategori_dinas__kategori_dinas='Reguler'
+                    kondisi_wajib_apel &= Q(
+                        kategori_jadwal__kategori_dinas__kategori_dinas__iexact='Piket'
                     )
 
-                pegawai_wajib_apel_ids = [j.pegawai.pegawai_id for j in jadwal_wajib_apel]
+                jadwal_disetujui_hari_ini = ApprovedJadwalDinasSDM.objects.filter(
+                    tanggal=target_date,
+                    pegawai_id__in=sdm_ids,
+                    is_approved=True,
+                )
+                approved_day_sdm_ids = set(
+                    jadwal_disetujui_hari_ini.values_list('pegawai_id', flat=True)
+                )
+                jadwal_wajib_apel_disetujui = jadwal_disetujui_hari_ini.filter(
+                    kondisi_wajib_apel,
+                ).exclude(
+                    kategori_jadwal__kategori_dinas__kategori_dinas__icontains='Libur'
+                )
+                pegawai_wajib_apel_ids = set(
+                    jadwal_wajib_apel_disetujui.values_list(
+                        'pegawai__pegawai_id',
+                        flat=True,
+                    )
+                )
 
-                pegawai_sudah_tap_apel = LogAktivitasAbsen.objects.filter(
+                jadwal_wajib_apel_legacy = JadwalDinasSDM.objects.filter(
+                    tanggal=target_date,
+                    pegawai_id__in=set(sdm_ids) - approved_day_sdm_ids,
+                    pegawai__status='disetujui',
+                ).filter(
+                    kondisi_wajib_apel,
+                ).exclude(
+                    kategori_jadwal__kategori_dinas__kategori_dinas__icontains='Libur'
+                )
+                pegawai_wajib_apel_ids.update(
+                    jadwal_wajib_apel_legacy.values_list(
+                        'pegawai__pegawai_id',
+                        flat=True,
+                    )
+                )
+
+                pegawai_sudah_tap_apel = set(LogAktivitasAbsen.objects.filter(
                     absensi_harian__tanggal=target_date,
                     absensi_harian__pegawai_id__in=pegawai_wajib_apel_ids,
                     devicename__iexact='apel'
-                ).values_list('absensi_harian__pegawai_id', flat=True)
+                ).values_list('absensi_harian__pegawai_id', flat=True))
 
-                child_mangkir_apel_to_create = []
                 parent_absensi_map = {
                     absb.pegawai_id: absb.id 
-                    for absb in AbsensiHarian.objects.filter(tanggal=target_date, pegawai_id__in=pegawai_wajib_apel_ids)
+                    for absb in AbsensiHarian.objects.select_for_update().filter(
+                        tanggal=target_date,
+                        pegawai_id__in=pegawai_wajib_apel_ids,
+                    )
                 }
 
-                for p_id in pegawai_wajib_apel_ids:
-                    if p_id not in pegawai_sudah_tap_apel:
-                        parent_id = parent_absensi_map.get(p_id)
-                        if parent_id:
-                            child_mangkir_apel_to_create.append(
-                                LogAktivitasAbsen(
-                                    absensi_harian_id=parent_id,
-                                    tipe='APEL',
-                                    waktu=datetime.combine(target_date, time(7, 30)),
-                                    status_ketepatan='Mangkir Apel',
-                                    devicename='Sistem Otomatis'
-                                )
-                            )
+                # Hapus penanda otomatis milik pegawai yang setelah perubahan
+                # jadwal tidak lagi wajib apel.
+                LogAktivitasAbsen.objects.filter(
+                    absensi_harian__tanggal=target_date,
+                    tipe='APEL',
+                    devicename='Sistem Otomatis',
+                ).exclude(
+                    absensi_harian__pegawai_id__in=pegawai_wajib_apel_ids,
+                ).delete()
 
-                if child_mangkir_apel_to_create:
-                    LogAktivitasAbsen.objects.bulk_create(child_mangkir_apel_to_create)
+                for p_id in pegawai_wajib_apel_ids:
+                    parent_id = parent_absensi_map.get(p_id)
+                    if not parent_id:
+                        continue
+
+                    synthetic_logs = LogAktivitasAbsen.objects.filter(
+                        absensi_harian_id=parent_id,
+                        tipe='APEL',
+                        devicename='Sistem Otomatis',
+                    ).order_by('pk')
+
+                    if p_id in pegawai_sudah_tap_apel:
+                        # Tapping asli yang datang belakangan membatalkan
+                        # penanda mangkir hasil proses sebelumnya.
+                        synthetic_logs.delete()
+                        continue
+
+                    synthetic_log = synthetic_logs.first()
+                    if synthetic_log:
+                        synthetic_logs.exclude(pk=synthetic_log.pk).delete()
+                        synthetic_log.waktu = datetime.combine(target_date, time(7, 30))
+                        synthetic_log.status_ketepatan = 'Mangkir Apel'
+                        synthetic_log.save(update_fields=['waktu', 'status_ketepatan'])
+                    else:
+                        LogAktivitasAbsen.objects.create(
+                            absensi_harian_id=parent_id,
+                            tipe='APEL',
+                            waktu=datetime.combine(target_date, time(7, 30)),
+                            status_ketepatan='Mangkir Apel',
+                            devicename='Sistem Otomatis',
+                        )
                     
                 # =========================================================================
-                # LOGIKA 3: KATEGORISASI DAFTAR DINAS JADWAL & KALENDER
+                # LOGIKA 3: KALENDER GLOBAL, KEMUDIAN JADWAL HARIAN PEGAWAI
                 # =========================================================================
-                sdm_ids = [sdm.id for sdm in scope_pegawai_qs]
-                
-                # 1. Base query untuk semua master jadwal hari target yang disetujui
-                base_jadwal_qs = JadwalDinasSDM.objects.filter(
+                schedule_types_by_user = defaultdict(set)
+
+                approved_schedule_rows = ApprovedJadwalDinasSDM.objects.filter(
                     tanggal=target_date,
-                    # is_approved=True,
-                    pegawai_id__in=sdm_ids
+                    pegawai_id__in=sdm_ids,
+                    is_approved=True,
+                ).values_list(
+                    'pegawai_id',
+                    'pegawai__pegawai_id',
+                    'kategori_jadwal__kategori_dinas__kategori_dinas',
                 )
 
-                # 2. Ambil ID Pegawai yang secara sistem terplot jadwal 'Libur' (Cuti, Lepas Piket, Libur Extra)
-                jadwal_libur_ids = list(base_jadwal_qs.filter(
-                    kategori_jadwal__kategori_dinas__kategori_dinas__icontains='Libur'
-                ).values_list('pegawai__pegawai_id', flat=True))
+                approved_sdm_ids = set()
+                for sdm_id, user_id, schedule_type in approved_schedule_rows:
+                    approved_sdm_ids.add(sdm_id)
+                    schedule_types_by_user[user_id].add(schedule_type)
 
-                # 3. Ambil ID Pegawai yang hari itu terjadwal masuk 'Piket' (Wajib tapping walau tanggal merah/Ahad)
-                # AMAN: Ambil semua jadwal AKTIF (Piket/Shift/Dinas) dengan cara mengecualikan Libur & Reguler
-                # jadwal_piket_ids = list(base_jadwal_qs.exclude(
-                #     Q(kategori_jadwal__kategori_dinas__kategori_dinas__icontains='Libur') |
-                #     Q(kategori_jadwal__kategori_dinas__kategori_dinas__icontains='Reguler')
-                # ).values_list('pegawai__pegawai_id', flat=True))
-                jadwal_piket_ids = list(base_jadwal_qs.filter(
-                    kategori_jadwal__kategori_dinas__kategori_dinas='Piket'
-                ).values_list('pegawai__pegawai_id', flat=True))
+                # Fallback khusus data lama yang pengajuannya sudah disetujui tetapi
+                # salinan ApprovedJadwalDinasSDM belum terbentuk.
+                legacy_schedule_rows = JadwalDinasSDM.objects.filter(
+                    tanggal=target_date,
+                    pegawai_id__in=set(sdm_ids) - approved_sdm_ids,
+                    pegawai__status='disetujui',
+                ).values_list(
+                    'pegawai__pegawai_id',
+                    'kategori_jadwal__kategori_dinas__kategori_dinas',
+                )
+                for user_id, schedule_type in legacy_schedule_rows:
+                    schedule_types_by_user[user_id].add(schedule_type)
 
-                # 4. Ambil ID Pegawai yang memiliki jadwal 'Reguler' (Pekerja Kantor/Struktural)
-                jadwal_reguler_ids = list(base_jadwal_qs.filter(
-                    kategori_jadwal__kategori_dinas__kategori_dinas='Reguler'
-                ).values_list('pegawai__pegawai_id', flat=True))
+                is_tanggal_merah = is_hari_minggu or is_libur_nasional
+                jadwal_libur_ids = []
+                jadwal_dinas_ids = []
+                jadwal_belum_dibuat_ids = []
 
-                # Intervensi Aturan Kalender: Jika hari Minggu atau Libur Nasional, pegawai 'Reguler' dipindahkan ke rumpun LIBUR
-                keterangan_final_libur = "Sistem: Pegawai Libur sesuai dengan plotting jadwal dinas."
-                
-                if is_hari_minggu or is_libur_nasional:
-                    # Pindahkan seluruh user berjadwal reguler ke list libur
-                    jadwal_libur_ids.extend(jadwal_reguler_ids)
-                    keterangan_final_libur = f"Sistem: Libur Otomatis Otomatis ({keterangan_libur_kalender})."
-                    
-                    # Bersihkan reguler dari list hari kerja aktif agar tidak divonis ALPA
-                    jadwal_dinas_ids = [pid for pid in jadwal_piket_ids]
+                for sdm in scope_pegawai_qs:
+                    obligation = classify_daily_obligation(
+                        is_calendar_holiday=is_tanggal_merah,
+                        schedule_types=schedule_types_by_user.get(sdm.pegawai_id, set()),
+                    )
+                    if obligation == HOLIDAY:
+                        jadwal_libur_ids.append(sdm.pegawai_id)
+                    elif obligation == WORK:
+                        jadwal_dinas_ids.append(sdm.pegawai_id)
+                    elif obligation == MISSING_SCHEDULE:
+                        jadwal_belum_dibuat_ids.append(sdm.pegawai_id)
+
+                if is_tanggal_merah:
+                    keterangan_final_libur = f"Sistem: Libur kalender ({keterangan_libur_kalender}); tidak ada jadwal piket aktif."
                 else:
-                    # Hari kerja biasa: Yang wajib masuk adalah yang berjadwal Piket + Reguler
-                    jadwal_dinas_ids = list(set(jadwal_piket_ids + jadwal_reguler_ids))
+                    keterangan_final_libur = "Sistem: Libur sesuai jadwal dinas pegawai."
 
                 # =========================================================================
                 # LOGIKA 4: EKSEKUSI MUTASI DATA STATUS FINAL
@@ -1474,11 +1576,10 @@ class NewAttendanceOrchestrator:
                     pegawai_id__in=jadwal_libur_ids,
                     tanggal=target_date
                 ).exclude(
-                    status_final__in=['HADIR', 'IZIN', 'DINAS', 'ALPA']
+                    status_final__in=['HADIR', 'IZIN', 'DINAS']
                 )
 
                 total_libur_processed = libur_parents.count()
-                print('total Libur: ', total_libur_processed)
                 libur_parents.update(
                     status_final='LIBUR',
                     keterangan=keterangan_final_libur
@@ -1487,21 +1588,45 @@ class NewAttendanceOrchestrator:
 
                 # Eksekusi B: Vonis 'ALPA' bagi yang terjadwal aktif kerja (Hari Biasa atau Piket di hari libur) tapi bolos
                 # Gunakan Q filter untuk mengantisipasi status_final berupa string kosong ATAU NULL ATAU 'Belum Presensi'
+                real_log_exists = LogAktivitasAbsen.objects.filter(
+                    absensi_harian_id=OuterRef('pk'),
+                ).exclude(devicename='Sistem Otomatis')
+
                 mangkir_parents = AbsensiHarian.objects.filter(
                     pegawai_id__in=jadwal_dinas_ids,
-                    tanggal=target_date
+                    tanggal=target_date,
                 ).exclude(
                     # KUNCI: Kecualikan yang sudah jelas status sahnya. 
                     # Apapun sisa statusnya (kosong, 'Belum Presensi', salah ketik), sikat jadi ALPA.
-                    status_final__in=['HADIR', 'IZIN', 'DINAS', 'LIBUR', 'ALPA']
-                )
+                    status_final__in=['HADIR', 'IZIN', 'DINAS']
+                ).annotate(
+                    has_real_log=Exists(real_log_exists),
+                ).filter(has_real_log=False)
 
                 total_tk = mangkir_parents.count()
-                print('total TK: ', total_tk)
                 mangkir_parents.update(
                     status_final='ALPA',
                     keterangan="Sistem: Mangkir. Hari kerja aktif tetapi tidak ditemukan log tapping mesin hingga batas waktu evaluasi."
                 )
+
+                # Hari kerja biasa tanpa jadwal tetap dinilai ALPA, tetapi
+                # keterangannya dibedakan dari mangkir pada jadwal aktif.
+                jadwal_kosong_parents = AbsensiHarian.objects.filter(
+                    pegawai_id__in=jadwal_belum_dibuat_ids,
+                    tanggal=target_date,
+                ).exclude(
+                    status_final__in=['IZIN', 'DINAS'],
+                )
+
+                total_tk_jadwal_kosong = jadwal_kosong_parents.count()
+                jadwal_kosong_parents.update(
+                    status_final='ALPA',
+                    keterangan=(
+                        'Sistem: Alpa karena jadwal dinas pegawai belum '
+                        'dibuat atau belum disetujui untuk tanggal ini.'
+                    ),
+                )
+                total_tk += total_tk_jadwal_kosong
                 
             else:
                 total_tk = 0

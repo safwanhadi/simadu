@@ -1,5 +1,5 @@
 from django.db import models
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.dispatch import receiver
 from django.db.models.signals import post_save, pre_save
 from django.template.defaultfilters import slugify
@@ -7,6 +7,8 @@ from myaccount.models import Users, Gender
 from dateutil.relativedelta import relativedelta
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
+from django.utils import timezone
+from strukturorg.services import get_active_leader
 
 def validate_file_size(value):
     try:
@@ -364,7 +366,7 @@ class RiwayatPenempatan(models.Model):
         if not unor_obj:
             return result
 
-        user = getattr(unor_obj, "nama_pimpinan", None)
+        user = get_active_leader(unor_obj)
         if not user:
             return result
 
@@ -426,17 +428,17 @@ class RiwayatPenempatan(models.Model):
         try:
             atasan1, atasan2 = None, None
             if level == 'level4':
-                atasan1 = obj.sub_bidang.nama_pimpinan
-                atasan2 = obj.sub_bidang.bidang.nama_pimpinan
+                atasan1 = get_active_leader(obj.sub_bidang)
+                atasan2 = get_active_leader(obj.sub_bidang.bidang)
             elif level == 'level3':
-                atasan1 = obj.bidang.nama_pimpinan
-                atasan2 = obj.bidang.unor.nama_pimpinan
+                atasan1 = get_active_leader(obj.bidang)
+                atasan2 = get_active_leader(obj.bidang.unor)
             elif level == 'level2':
-                atasan1 = obj.unor.nama_pimpinan
-                atasan2 = obj.unor.satker_induk.nama_pimpinan
+                atasan1 = get_active_leader(obj.unor)
+                atasan2 = get_active_leader(obj.unor.satker_induk)
             elif level == 'level1':
-                atasan1 = obj.satker_induk.nama_pimpinan
-                atasan2 = obj.satker_induk.instansi_daerah.nama_pimpinan
+                atasan1 = get_active_leader(obj.satker_induk)
+                atasan2 = get_active_leader(obj.satker_induk.instansi_daerah)
 
             if atasan1:
                 data['nama_atasan1'] = getattr(atasan1, 'full_name_2', 'N/A')
@@ -670,19 +672,14 @@ JENISCUTI=(
     ('Cuti Sakit', 'Cuti Sakit'),
     ('Cuti Besar', 'Cuti Besar'),
     ('Cuti Diluar Tanggungan Negara', 'Cuti Diluar Tanggungan Negara'),
-    ('Cuti Tertunda', 'Cuti Tertunda')
 )
 
-STATUSCUTI = (
-    ('Tunda', 'Tunda'),
-    ('Proses', 'Proses'),
-    ('Selesai', 'Selesai')
-)
-
-STATUS_PERS_CUTI = (
-    ('belum', 'Belum diputuskan'),
-    ('disetujui', 'Disetujui'),
-    ('ditolak', 'Ditolak'),
+STATUS_PELAKSANAAN_CUTI = (
+    ('Belum', 'Belum dilaksanakan'),
+    ('Berlangsung', 'Sedang berlangsung'),
+    ('Selesai', 'Selesai'),
+    ('Tunda', 'Ditunda'),
+    ('Batal', 'Tidak dilaksanakan'),
 )
     
 class RiwayatCuti(models.Model):
@@ -702,16 +699,48 @@ class RiwayatCuti(models.Model):
     file_pengajuan = models.FileField(upload_to="cuti/pengajuan/", blank=True, validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
     file_pendukung = models.FileField(verbose_name="Dokumen Pendukung", upload_to="cuti/pendukung/", blank=True, help_text="Dapat berupa surat ket. penyerahan tugas", validators=[validate_file_size])
     file = models.FileField(verbose_name='Surat Cuti', upload_to="cuti/surat/", blank=True, validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
-    status_cuti = models.CharField(max_length=10, choices=STATUSCUTI, default='Proses')
-    status_persetujuan = models.CharField(
-        max_length=20,
-        choices=STATUS_PERS_CUTI,
-        default='belum',
-        help_text='Status hasil persetujuan atasan terhadap pengajuan cuti ini.'
+    status_cuti = models.CharField(
+        max_length=12,
+        choices=STATUS_PELAKSANAAN_CUTI,
+        default='Belum',
+        verbose_name='Status Pelaksanaan Cuti',
     )
     pakai_tunda_saja = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def tentukan_status_pelaksanaan(self, pada=None):
+        """Tentukan status pelaksanaan tanpa mencampurnya dengan proses pengajuan."""
+        if self.status_cuti in ('Tunda', 'Batal'):
+            return self.status_cuti
+        if self.usulan_id and self.usulan.status not in ('disetujui', 'selesai'):
+            return 'Belum'
+        if not self.tgl_mulai_cuti or not self.tgl_akhir_cuti:
+            return self.status_cuti
+
+        if pada is None:
+            sekarang = timezone.now()
+            pada = (
+                timezone.localtime(sekarang).date()
+                if timezone.is_aware(sekarang)
+                else sekarang.date()
+            )
+        if pada < self.tgl_mulai_cuti:
+            return 'Belum'
+        if pada <= self.tgl_akhir_cuti:
+            return 'Berlangsung'
+        return 'Selesai'
+
+    @property
+    def status_pelaksanaan_aktual(self):
+        return self.tentukan_status_pelaksanaan()
+
+    @property
+    def status_pelaksanaan_display(self):
+        return dict(STATUS_PELAKSANAAN_CUTI).get(
+            self.status_pelaksanaan_aktual,
+            self.status_pelaksanaan_aktual,
+        )
 
     # ==== Tambahan helper untuk cuti tunda ====
     @property
@@ -722,7 +751,14 @@ class RiwayatCuti(models.Model):
         """
         if self.status_cuti != 'Tunda':
             return 0
-        return self.klaim_keluar.aggregate(
+        return self.klaim_keluar.filter(
+            cuti_klaim__status_cuti__in=('Belum', 'Berlangsung', 'Selesai'),
+        ).filter(
+            Q(cuti_klaim__usulan__status__in=(
+                'pengajuan', 'tindaklanjut', 'disetujui', 'selesai',
+            ))
+            | Q(cuti_klaim__usulan__isnull=True)
+        ).aggregate(
             total=Sum('jumlah_hari_diklaim')
         ).get('total') or 0
 
@@ -784,6 +820,24 @@ class KlaimCutiTunda(models.Model):
     class Meta:
         verbose_name = 'Klaim Cuti Tunda'
         verbose_name_plural = 'Klaim Cuti Tunda'
+
+    def clean(self):
+        super().clean()
+        if self.jumlah_hari_diklaim is not None and self.jumlah_hari_diklaim <= 0:
+            raise ValidationError('Jumlah hari yang diklaim harus lebih dari 0.')
+        if self.sumber_tunda_id and self.cuti_klaim_id:
+            if self.sumber_tunda_id == self.cuti_klaim_id:
+                raise ValidationError('Sumber cuti tunda tidak boleh sama dengan cuti yang mengklaim.')
+            if self.sumber_tunda.pegawai_id != self.cuti_klaim.pegawai_id:
+                raise ValidationError('Sumber cuti tunda dan cuti klaim harus milik pegawai yang sama.')
+            if (
+                self.sumber_tunda.status_cuti != 'Tunda'
+                or (
+                    self.sumber_tunda.usulan_id
+                    and self.sumber_tunda.usulan.status not in ('disetujui', 'selesai')
+                )
+            ):
+                raise ValidationError('Sumber cuti tunda harus sudah disetujui.')
 
     def __str__(self):
         return f'Klaim {self.jumlah_hari_diklaim} hari dari {self.sumber_tunda_id} ke {self.cuti_klaim_id}'

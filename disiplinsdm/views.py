@@ -1,4 +1,5 @@
 from django.shortcuts import render, redirect, get_object_or_404
+from strukturorg.services import get_active_leader, get_active_leader_ids, is_active_leader
 from django.urls import reverse, reverse_lazy
 from django.db import transaction
 from django.views import View, generic
@@ -186,12 +187,11 @@ def get_evaluasi_tabel(inst_id, users, bulan=None, tahun=None):
 
 
 def get_pimpinan_id():
-    pimpinan_ids = Users.objects.filter(
-        Q(id__in=SatuanKerjaInduk.objects.values_list('nama_pimpinan_id', flat=True)) |
-        Q(id__in=UnitOrganisasi.objects.values_list('nama_pimpinan_id', flat=True)) |
-        Q(id__in=Bidang.objects.values_list('nama_pimpinan_id', flat=True)) |
-        Q(id__in=SubBidang.objects.values_list('nama_pimpinan_id', flat=True))
-    ).exclude(is_active=False).values_list('id', flat=True)
+    from strukturorg.models import PejabatStruktur
+    pimpinan_ids = PejabatStruktur.objects.filter(
+        is_active=True,
+        pejabat__is_active=True,
+    ).values_list('pejabat_id', flat=True).distinct()
     
     return pimpinan_ids
 
@@ -734,11 +734,11 @@ class JadwalBulananListView(LoginRequiredMixin, generic.ListView):
 
     @cached_property
     def pimpinan_instalasi(self):
-        return self.instalasi.nama_pimpinan if self.instalasi else '-'
+        return get_active_leader(self.instalasi) if self.instalasi else '-'
 
     @cached_property
     def pimpinan(self):
-        return self.instalasi.sub_bidang.nama_pimpinan if self.instalasi and self.instalasi.sub_bidang else '-'
+        return get_active_leader(self.instalasi.sub_bidang) if self.instalasi and self.instalasi.sub_bidang else '-'
 
 
 class ApprovedJadwalBulananListView(LoginRequiredMixin, generic.ListView):
@@ -924,19 +924,19 @@ class ApprovedJadwalBulananListView(LoginRequiredMixin, generic.ListView):
 
     @cached_property
     def pimpinan_instalasi(self):
-        return self.instalasi.nama_pimpinan if self.instalasi else '-'
+        return get_active_leader(self.instalasi) if self.instalasi else '-'
 
     @cached_property
     def pimpinan(self):
-        return self.instalasi.sub_bidang.nama_pimpinan if self.instalasi and self.instalasi.sub_bidang else '-'
+        return get_active_leader(self.instalasi.sub_bidang) if self.instalasi and self.instalasi.sub_bidang else '-'
 
 
 class PengajuanJadwalInstalasi(LoginRequiredMixin, UserPassesTestMixin, generic.View):
     def test_func(self):
         instalasi_id = self.kwargs['inst']
         user = self.request.user
-        instalasi_pimpinan_list = UnitInstalasi.objects.filter(nama_pimpinan=user)
-        if (user.is_staff or user.is_disiplin_admin) and instalasi_pimpinan_list.filter(pk=instalasi_id).exists():
+        instalasi = UnitInstalasi.objects.filter(pk=instalasi_id).first()
+        if (user.is_staff or user.is_disiplin_admin) and is_active_leader(user, instalasi):
             return True
         return False
 
@@ -1270,7 +1270,7 @@ def export_jadwal_excel(request, inst, bulan, tahun):
     pimpinan = None
     try:
         unit = UnitInstalasi.objects.get(pk=inst)
-        pimpinan = unit.sub_bidang.nama_pimpinan
+        pimpinan = get_active_leader(unit.sub_bidang)
     except UnitInstalasi.DoesNotExist:
         unit = None
     # Lokasi pengesahan (custom jika perlu)
@@ -1430,7 +1430,7 @@ class SetujuiJadwalView(LoginRequiredMixin, UserPassesTestMixin, generic.UpdateV
         return reverse('disiplinsdm_urls:jadwal_auto_create', kwargs={'pk':pk})
 
     def test_func(self):
-        sub_bidang = SubBidang.objects.filter(nama_pimpinan=self.request.user).exists()
+        sub_bidang = self.request.user.pk in set(get_active_leader_ids(SubBidang))
         if self.request.user.is_disiplin_admin:
             return True
         elif sub_bidang and (self.request.user.is_staff or self.request.user.is_disiplin_admin):
@@ -3922,6 +3922,7 @@ class SyncAnalisisPresensiPerInstalasi(View):
     
 ########################################### VIEW BARU UNTUK MODEL BARU ##############################
 from .models import AbsensiHarian, LogAktivitasAbsen
+from .attendance_rules import is_successful_apel
 
 class RekapPresensiBulananView(LoginRequiredMixin, generic.ListView):
     login_url = reverse_lazy('myaccount_urls:login_view')
@@ -3960,19 +3961,11 @@ class RekapPresensiBulananView(LoginRequiredMixin, generic.ListView):
             if date(tahun, bulan, 1) > hari_ini:
                 batas_hari_penilaian = 0
 
-        # =========================================================================
-        # OPTIMASI TAMBAHAN: AMBIL HARI LIBUR NASIONAL BULAN TERPILIH
-        # =========================================================================
-        libur_nasional_set = set(
-            HariLibur.objects.filter(
-                tanggal__range=(awal_bulan, akhir_bulan)
-            ).values_list('tanggal', flat=True)
-        )
-                
-        # Subquery untuk memeriksa keberadaan plotting jadwal kerja pegawai
-        jadwal_exists_subquery = JadwalDinasSDM.objects.filter(
+        # Subquery untuk memeriksa keberadaan jadwal kerja yang sudah disetujui.
+        jadwal_exists_subquery = ApprovedJadwalDinasSDM.objects.filter(
             pegawai__pegawai_id=OuterRef('pk'),
             tanggal__range=(awal_bulan, akhir_bulan),
+            is_approved=True,
         )
 
         # Prefetch data transaksional bulanan
@@ -4009,15 +4002,12 @@ class RekapPresensiBulananView(LoginRequiredMixin, generic.ListView):
             total_terlambat = 0
             total_pulang_cepat = 0
             total_libur = 0
+            total_belum_dinilai = 0
 
-            # Evaluasi kehadiran mundur dari hari penilaian sampai tanggal 1
+            # Rekap hanya membaca keputusan yang sudah disimpan oleh orchestrator.
+            # View tidak boleh menciptakan vonis ALPA/LIBUR sendiri.
             for day in range(batas_hari_penilaian, 0, -1):
                 loop_date = date(tahun, bulan, day)
-                
-                # Deteksi aturan kalender global secara realtime
-                is_minggu = loop_date.weekday() == 6
-                is_libur_nasional = loop_date in libur_nasional_set
-                is_tanggal_merah = is_minggu or is_libur_nasional
 
                 if loop_date in absen_db_dict:
                     absen_hari_ini = absen_db_dict[loop_date]
@@ -4030,7 +4020,11 @@ class RekapPresensiBulananView(LoginRequiredMixin, generic.ListView):
                             tipe_log = log.tipe
                             status_ketepatan = str(log.status_ketepatan).strip().upper() if log.status_ketepatan else ""
 
-                            if tipe_log == 'APEL':
+                            if is_successful_apel(
+                                tipe_log,
+                                log.status_ketepatan,
+                                log.devicename,
+                            ):
                                 total_apel += 1
 
                             if tipe_log in ['DATANG', 'APEL'] and 'TERLAMBAT' in status_ketepatan:
@@ -4045,19 +4039,10 @@ class RekapPresensiBulananView(LoginRequiredMixin, generic.ListView):
                         total_libur += 1 
                     elif status == 'ALPA':
                         total_alpa += 1
-                else:
-                    # =========================================================================
-                    # SOLUSI INTI: EVALUASI KONDISI RECORD ABSENSI KOSONG (TANPA TRANSAKSI)
-                    # =========================================================================
-                    # Jika hari tersebut adalah tanggal merah (Minggu/Nasional) dan pegawai tidak punya jadwal 
-                    # ATAU memiliki jadwal selain bertipe 'Piket', maka dianggap sebagai HARI LIBUR
-                    if is_tanggal_merah:
-                        # Perlindungan: Staf piket yang harusnya masuk tapi tidak dibuatkan record oleh unit tetap Alpa.
-                        # Di sini kita asumsikan jika tidak ada record transaksi, default-nya diarahkan sebagai Libur Kalender.
-                        total_libur += 1
                     else:
-                        # Jika hari kerja efektif biasa tapi datanya bolong, mutlak divonis Mangkir (Alpa)
-                        total_alpa += 1
+                        total_belum_dinilai += 1
+                else:
+                    total_belum_dinilai += 1
 
             # Tempelkan atribut summary ke objek pegawai agar bisa langsung dirender oleh template
             pegawai.summary_hadir = total_hadir
@@ -4067,6 +4052,7 @@ class RekapPresensiBulananView(LoginRequiredMixin, generic.ListView):
             pegawai.summary_terlambat = total_terlambat
             pegawai.summary_pulang_cepat = total_pulang_cepat
             pegawai.summary_libur = total_libur
+            pegawai.summary_belum_dinilai = total_belum_dinilai
 
         # =========================================================================
         # 5. LOGIKA SORTING
@@ -4188,18 +4174,6 @@ class DetailPresensiPegawaiView(LoginRequiredMixin, generic.DetailView):
         
         hari_ini = date.today()
         
-        # Tentukan Batas Awal dan Akhir Bulan untuk Filter Kalender Libur Nasional
-        awal_bulan = date(tahun, bulan, 1)
-        akhir_bulan = (awal_bulan + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-
-        # =========================================================================
-        # OPTIMASI DAFTAR TANGGAL MERAH NASIONAL (BULAN TERPILIH)
-        # =========================================================================
-        libur_nasional_dict = {
-            hl.tanggal: hl.keterangan 
-            for hl in HariLibur.objects.filter(tanggal__range=(awal_bulan, akhir_bulan))
-        }
-
         # 2. Tarik rekap absensi harian beserta seluruh log aktivitasnya (Prefetched)
         absensi_bulan_ini = AbsensiHarian.objects.filter(
             pegawai=pegawai,
@@ -4223,10 +4197,6 @@ class DetailPresensiPegawaiView(LoginRequiredMixin, generic.DetailView):
         # 4. Konstruksi baris tanggal per hari
         for day in range(total_hari, 0, -1):
             loop_date = date(tahun, bulan, day)
-            
-            # Deteksi status kalender harian di level Python
-            is_minggu = loop_date.weekday() == 6
-            is_libur_nasional = loop_date in libur_nasional_dict
             
             # Kerangka default untuk mengantisipasi pegawai yang tidak punya data/jadwal
             data_hari = {
@@ -4262,23 +4232,12 @@ class DetailPresensiPegawaiView(LoginRequiredMixin, generic.DetailView):
                     data_hari['status_css'] = 'dark' 
                     data_hari['keterangan_tambahan'] = absen_hari_ini.keterangan or 'Libur sesuai dengan jadwal dinas terdaftar'
                 else:
-                    # =========================================================================
-                    # INTERVENSI VIEW: JIKA STATUS KOSONG DI DATABASE TAPI KALENDER ADALAH LIBUR
-                    # =========================================================================
-                    if is_libur_nasional:
-                        nama_libur = libur_nasional_dict.get(loop_date)
-                        data_hari['status_final'] = 'HARI LIBUR'
-                        data_hari['status_css'] = 'dark'
-                        data_hari['keterangan_tambahan'] = f'Libur Otomatis: {nama_libur} (Terdapat log presensi)'
-                    elif is_minggu:
-                        data_hari['status_final'] = 'HARI LIBUR'
-                        data_hari['status_css'] = 'dark'
-                        data_hari['keterangan_tambahan'] = 'Libur Otomatis: Hari Ahad / Minggu (Terdapat log presensi)'
-                    else:
-                        # Benar-benar hari kerja aktif yang belum diputuskan
-                        data_hari['status_final'] = absen_hari_ini.status_final or 'Belum Presensi'
-                        data_hari['status_css'] = 'secondary'
-                        data_hari['keterangan_tambahan'] = 'Sudah terevaluasi dan belum diputuskan status kehadirannya'
+                    data_hari['status_final'] = 'BELUM DINILAI'
+                    data_hari['status_css'] = 'secondary'
+                    data_hari['keterangan_tambahan'] = (
+                        absen_hari_ini.keterangan
+                        or 'Status belum diputuskan oleh proses penilaian harian.'
+                    )
 
                 # Ambil detak transaksi log (Child)
                 logs_child = absen_hari_ini.logs.all()
@@ -4303,22 +4262,12 @@ class DetailPresensiPegawaiView(LoginRequiredMixin, generic.DetailView):
                             'bg_box': bg_box,
                         })
             else:
-                # =========================================================================
-                # PENYELAMATAN DATA KOSONG TANPA RECORD ABSENSI SAMA SEKALI
-                # =========================================================================
-                if is_libur_nasional:
-                    nama_libur = libur_nasional_dict.get(loop_date)
-                    data_hari['status_final'] = 'HARI LIBUR'
-                    data_hari['status_css'] = 'dark'
-                    data_hari['keterangan_tambahan'] = f'Libur Otomatis: {nama_libur}'
-                elif is_minggu:
-                    data_hari['status_final'] = 'HARI LIBUR'
-                    data_hari['status_css'] = 'dark'
-                    data_hari['keterangan_tambahan'] = 'Libur Otomatis: Hari Ahad / Minggu'
-                else:
-                    data_hari['status_final'] = 'MANGKIR'
-                    data_hari['status_css'] = 'danger'
-                    data_hari['keterangan_tambahan'] = 'Teridentifikasi TK karena tidak ada data jadwal atau data log absensi bolong di hari kerja'
+                data_hari['status_final'] = 'BELUM DINILAI'
+                data_hari['status_css'] = 'secondary'
+                data_hari['keterangan_tambahan'] = (
+                    'Belum ada hasil penilaian harian. Jalankan proses penilaian '
+                    'setelah memastikan jadwal pegawai sudah disetujui.'
+                )
 
             riwayat_harian.append(data_hari)
 

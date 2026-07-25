@@ -1,10 +1,16 @@
 from django.shortcuts import render, redirect
 from django.views import View
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.exceptions import PermissionDenied
 from django.urls import reverse
-from django.http import HttpResponse
+from django.http import FileResponse, Http404, HttpResponse
 from django.contrib import messages
 from django.utils import timezone
+from django.utils.text import slugify
+from strukturorg.services import get_active_leader
 from datetime import datetime, date, timedelta
+from dateutil.relativedelta import relativedelta
 from django.shortcuts import get_object_or_404
 import qrcode
 from io import BytesIO
@@ -41,13 +47,48 @@ from dokumen.utils.jabatan import get_jabatan_unit
 from layanan.models import (
     LayananGajiBerkala, LayananCuti, LayananUsulanInovasi, VerifikasiCuti, PelimpahanTugas
 )
-from dokumen.models import RiwayatDiklat, RiwayatPenempatan, RiwayatCuti, RiwayatPengangkatan
+from dokumen.models import (
+    RiwayatCuti,
+    RiwayatDiklat,
+    RiwayatJabatan,
+    RiwayatPenempatan,
+    RiwayatPengangkatan,
+)
 from .models import TextSPTDiklat
 from .forms import TextSPTDiklatForm
 from layanan.services import CheckCuti
 from layanan.utils import get_nip
+from layanan.cuti_access import (
+    build_approval_chain,
+    can_view_delegation,
+    can_view_leave,
+)
 
 locale.setlocale(locale.LC_ALL, 'id_ID.utf-8')
+
+
+class CutiFileDownloadView(LoginRequiredMixin, View):
+    """Mengirim berkas cuti setelah pemeriksaan hak akses."""
+
+    allowed_fields = {'file_pengajuan', 'file_pendukung', 'file'}
+
+    def get(self, request, pk, field_name):
+        if field_name not in self.allowed_fields:
+            raise Http404
+        riwayat = get_object_or_404(
+            RiwayatCuti.objects.select_related('usulan', 'pegawai'),
+            pk=pk,
+        )
+        if riwayat.usulan is None or not can_view_leave(request.user, riwayat.usulan):
+            raise PermissionDenied("Anda tidak berhak mengunduh berkas cuti ini.")
+        field_file = getattr(riwayat, field_name)
+        if not field_file:
+            raise Http404
+        return FileResponse(
+            field_file.open('rb'),
+            as_attachment=True,
+            filename=field_file.name.rsplit('/', 1)[-1],
+        )
 
 def clear_document(doc):
     for element in doc.element.body:
@@ -191,11 +232,31 @@ class LayananGajiBerkalaDocxView(View):
         except Exception:
             return None
         
-    def get_unor_pimpinan(self, pegawai):
+    def get_unor_pimpinan(self, pegawai, layanan_cuti=None):
         try:
             penempatan = RiwayatPenempatan.objects.filter(pegawai=pegawai, status=True).order_by('-id').first()
             if penempatan:
-                return penempatan.unor_pimpinan
+                data = penempatan.unor_pimpinan
+                snapshot = getattr(layanan_cuti, 'verifikasicuti', None)
+                if snapshot:
+                    signer = next((user for user in (
+                        snapshot.verifikator3,
+                        snapshot.verifikator2,
+                        snapshot.verifikator1,
+                    ) if user is not None), None)
+                    if signer:
+                        data['nama_pimpinan'] = getattr(signer, 'full_name_2', 'N/A')
+                        profil = getattr(signer, 'profil_user', None)
+                        data['nip'] = getattr(profil, 'nip', 'N/A') or 'N/A'
+                        panggol = signer.riwayatpanggol_set.order_by('-id').first()
+                        data['panggol'] = getattr(panggol, 'panggol', 'N/A') or 'N/A'
+                        struktur = penempatan.unor
+                        masa_jabatan = struktur.riwayat_pejabat.filter(
+                            pejabat=signer,
+                        ).order_by('-tanggal_mulai', '-id').first() if struktur else None
+                        if masa_jabatan and masa_jabatan.nama_jabatan:
+                            data['pimpinan'] = masa_jabatan.nama_jabatan
+                return data
             return ""
         except Exception:
             return ""
@@ -290,7 +351,7 @@ class LayananGajiBerkalaDocxView(View):
         return response
 
 
-class LayananUsulanCutiDocxView(View):
+class LayananUsulanCutiDocxView(LoginRequiredMixin, View):
     def set_col_widths(self, table):
         widths = (Inches(3.5), Inches(4.5))
         for row in table.rows:
@@ -305,7 +366,7 @@ class LayananUsulanCutiDocxView(View):
             return None
     
     def get_data_cuti(self, data_input=None, data_output=None, attr=""):
-        if data_input is not None and hasattr(data_input.cuti, attr):
+        if data_input is not None and hasattr(data_input.cuti_usulan, attr):
             return data_output
         return ""
 
@@ -323,6 +384,8 @@ class LayananUsulanCutiDocxView(View):
         doc:Document=CreateDocument()
         verifikasi_cuti = self.get_verification_object(id)
         layanan_cuti = self.get_object(id=id)
+        if layanan_cuti is None or not can_view_leave(request.user, layanan_cuti):
+            raise PermissionDenied("Anda tidak berhak mengunduh dokumen cuti ini.")
         verifikator1 = None
         verifikator2 = None
         verifikator3 = None
@@ -353,7 +416,7 @@ class LayananUsulanCutiDocxView(View):
             """
         jabatan = layanan_cuti.pegawai.riwayatjabatan_set.last()
         data_instansi = layanan_cuti.pegawai.riwayat_penempatan.last()
-        lama_cuti = layanan_cuti.cuti.lama_cuti if layanan_cuti is not None and hasattr(layanan_cuti.cuti, "lama_cuti") else 0
+        lama_cuti = layanan_cuti.cuti_usulan.lama_cuti if layanan_cuti is not None and hasattr(layanan_cuti, "cuti_usulan") else 0
         page_size = doc.sections[0]
         page_size.page_width = Mm(215.9)
         page_size.page_height = Mm(330.0)
@@ -374,7 +437,7 @@ class LayananUsulanCutiDocxView(View):
         table1 = doc.add_table(rows=1, cols=2)
         table1.autofit = False
         self.set_col_widths(table1)
-        add_table_content2(table=table1, row_index=0, col_index=0, content=f'PERMINTAAN {(self.get_data_cuti(layanan_cuti, layanan_cuti.cuti.jenis_cuti, "jenis_cuti")).upper()}', font_size=13, set_bold=True)
+        add_table_content2(table=table1, row_index=0, col_index=0, content=f'PERMINTAAN {(self.get_data_cuti(layanan_cuti, layanan_cuti.cuti_usulan.jenis_cuti, "jenis_cuti")).upper()}', font_size=13, set_bold=True)
         add_table_content2(table=table1, row_index=0, col_index=1, style=None, content='\tK e p a d a \nYth.\tDirektur RS Mandalika  \n\tProvinsi Nusa Tenggara Barat \n\tdi Lombok Tengah')
         # generate qrcode
         pegawai_qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=7, border=4,)
@@ -415,7 +478,7 @@ class LayananUsulanCutiDocxView(View):
         add_content(doc=doc, content=f'\tNIP/NRK \t\t: {layanan_cuti.pegawai.profil_user.nip if layanan_cuti is not None and hasattr(layanan_cuti.pegawai, "profil_user") and hasattr(layanan_cuti.pegawai.profil_user, "nip") else ""}')
         add_content(doc=doc, content=f'\tJabatan \t\t: {jabatan.nama_jabatan if jabatan is not None and hasattr(jabatan, "nama_jabatan") else ""}')
         add_content(doc=doc, content=f'\tSatuan Organisasi \t: {data_instansi.unor if data_instansi is not None else "" }')
-        add_content(doc=doc, content=f'Dengan ini mengajukan permintaan {self.get_data_cuti(layanan_cuti, layanan_cuti.cuti.jenis_cuti, "jenis_cuti")} karena {self.get_data_cuti(layanan_cuti, layanan_cuti.cuti.alasan_cuti, "alasan_cuti")} selama {convert_num_2_word(lama_cuti)} ({lama_cuti}) hari, terhitung mulai tanggal {self.get_data_cuti(layanan_cuti, layanan_cuti.cuti.tgl_mulai_cuti.strftime("%d %B"), "tgl_mulai_cuti")} s.d {self.get_data_cuti(layanan_cuti, layanan_cuti.cuti.tgl_akhir_cuti.strftime("%d %B %Y"), "tgl_akhir_cuti")} dan selama menjalankan cuti alamat saya adalah {self.get_data_cuti(layanan_cuti, layanan_cuti.cuti.domisili_saat_cuti, "domisili_saat_cuti")}', space_after=6, space_before=6)
+        add_content(doc=doc, content=f'Dengan ini mengajukan permintaan {self.get_data_cuti(layanan_cuti, layanan_cuti.cuti_usulan.jenis_cuti, "jenis_cuti")} karena {self.get_data_cuti(layanan_cuti, layanan_cuti.cuti_usulan.alasan_cuti, "alasan_cuti")} selama {convert_num_2_word(lama_cuti)} ({lama_cuti}) hari, terhitung mulai tanggal {self.get_data_cuti(layanan_cuti, layanan_cuti.cuti_usulan.tgl_mulai_cuti.strftime("%d %B"), "tgl_mulai_cuti")} s.d {self.get_data_cuti(layanan_cuti, layanan_cuti.cuti_usulan.tgl_akhir_cuti.strftime("%d %B %Y"), "tgl_akhir_cuti")} dan selama menjalankan cuti alamat saya adalah {self.get_data_cuti(layanan_cuti, layanan_cuti.cuti_usulan.domisili_saat_cuti, "domisili_saat_cuti")}', space_after=6, space_before=6)
         add_content(doc=doc, content='Demikian permintaan ini saya buat untuk dapat dipertimbangkan sebagaimana mestinya.', space_after=16)
         add_content(doc=doc, content=f'Hormat Saya', left_indent=80, align='center')
         paragraf = doc.add_paragraph()
@@ -464,23 +527,24 @@ def _safe_get(obj, attr, default="-"):
         return default
 
 
-def _status_checkbox_line(persetujuan: bool | None) -> str:
+def _status_checkbox_line(keputusan) -> str:
     """
     Untuk bagian VIII:
     [ ] DISETUJUI [ ] PERUBAHAN [ ] DITANGGUHKAN [ ] TIDAK DISETUJUI
 
-    - persetujuan = True  -> centang DISETUJUI
-    - persetujuan = False -> centang TIDAK DISETUJUI
-    - persetujuan = None  -> semua kotak kosong, tapi tetap ditampilkan
+    Mendukung nilai workflow baru: belum, setuju, tunda, dan tolak.
+    Boolean lama tetap dikenali untuk kompatibilitas data terdahulu.
     """
     labels = ["DISETUJUI", "PERUBAHAN", "DITANGGUHKAN", "TIDAK DISETUJUI"]
 
-    active_index = None
-    if persetujuan is True:
-        active_index = 0      # DISETUJUI
-    elif persetujuan is False:
-        active_index = 3      # TIDAK DISETUJUI
-    # kalau None -> active_index tetap None (semua kosong)
+    active_index = {
+        'setuju': 0,
+        'perubahan': 1,
+        'tunda': 2,
+        'tolak': 3,
+        True: 0,
+        False: 3,
+    }.get(keputusan)
 
     parts = []
     for i, label in enumerate(labels):
@@ -489,40 +553,72 @@ def _status_checkbox_line(persetujuan: bool | None) -> str:
     return " ".join(parts)
 
 
-def _build_catatan_cuti_tahunan(pegawai, tahun_ref: int):
-    """
-    Bangun data tabel catatan cuti menggunakan CheckCuti.
-    """
-    c = CheckCuti()
-
-    penggunaan = c._sum_cuti_per_tahun(pegawai)      # {tahun: total_pakai}
-    tahun_tunda = c._tahun_dengan_penundaan(pegawai) # {tahun: sisa_tunda}
-
+def _build_catatan_cuti_tahunan(
+    pegawai,
+    tahun_ref: int,
+    snapshot=None,
+    pada=None,
+):
+    """Gunakan snapshot saat pengajuan; hitung dinamis hanya untuk data lama."""
+    snapshot = snapshot or CheckCuti().buat_snapshot_saldo_cuti(
+        pegawai,
+        tahun_ref,
+        pada=pada,
+    )
     rows = []
-
-    for label, tahun in [("N-2", tahun_ref - 2),
-                         ("N-1", tahun_ref - 1),
-                         ("N", tahun_ref)]:
-        total_pakai = penggunaan.get(tahun, 0)
-        sisa_hak = c._sisa_cuti_per_tahun(total_pakai)
-
-        # Tahun berjalan: kompensasi = sisa tahun ini (untuk dipakai langsung)
-        if tahun == tahun_ref:
-            komp = sisa_hak
-        else:
-            komp = c._kompensasi_tahun_sebelumnya(
-                penggunaan, tahun, tahun_tunda
+    for row in snapshot.get('rows', []):
+        label = row.get('label', '-')
+        tahun = row.get('tahun', '-')
+        terpakai = int(row.get('terpakai', 0) or 0)
+        sisa_hak = int(row.get('sisa_hak', 0) or 0)
+        dapat_digunakan = int(row.get('dapat_digunakan', 0) or 0)
+        dicadangkan_default = (
+            max(0, sisa_hak - dapat_digunakan)
+            if label == 'N'
+            else 0
+        )
+        dicadangkan = int(
+            row.get('dicadangkan', dicadangkan_default) or 0
+        )
+        # Snapshot versi 2 menyimpan cadangan terpisah. Pada formulir, sesuai
+        # format ringkas yang diminta, cadangan digabung ke kolom Terpakai.
+        if dicadangkan and int(snapshot.get('versi', 1) or 1) <= 2:
+            terpakai += dicadangkan
+            sisa_hak = max(0, sisa_hak - dicadangkan)
+        sisa_tunda = int(row.get('sisa_tunda', 0) or 0)
+        # Snapshot versi awal belum menyimpan hak_tunda/terpakai_tunda.
+        hak_tunda = int(row.get('hak_tunda', sisa_tunda) or 0)
+        terpakai_tunda = int(row.get('terpakai_tunda', 0) or 0)
+        if hak_tunda or terpakai_tunda:
+            keterangan = (
+                f"Hak tunda {hak_tunda} hari; dipakai "
+                f"{terpakai_tunda} hari; sisa {sisa_tunda} hari"
             )
-
+        elif label in ('N-1', 'N-2') and dapat_digunakan:
+            keterangan = (
+                f"Kompensasi hak tahun {tahun}: "
+                f"dapat digunakan {dapat_digunakan} hari"
+            )
+        elif label == 'N':
+            keterangan = (
+                f"Hak tahun berjalan; terpakai {terpakai} hari; "
+                f"sisa {dapat_digunakan} hari"
+            )
+        else:
+            keterangan = "Tidak ada saldo yang dapat digunakan"
         rows.append([
             f"Cuti Tahunan ({label})",
             str(tahun),
-            str(total_pakai),
+            str(terpakai),
             str(sisa_hak),
-            str(komp),
+            str(dapat_digunakan),
+            keterangan,
         ])
-
-    return rows
+    return {
+        'rows': rows,
+        'total_tersedia': int(snapshot.get('total_tersedia', 0) or 0),
+        'dibuat_pada': snapshot.get('dibuat_pada', '-'),
+    }
 
 
 def make_qr_drawing(data_str: str, size_mm: float = 25 * mm) -> Drawing:
@@ -629,23 +725,28 @@ def build_section_I(nama, nip, jabatan, masa_kerja, unit_kerja, styles):
 
 
 def build_section_II(jenis_aktif, styles):
+    jenis_normal = {
+        'Cuti Alasan Penting': 'Cuti Karena Alasan Penting',
+        'Cuti Diluar Tanggungan Negara': 'Cuti di Luar Tanggungan Negara',
+        'Cuti melahirkan': 'Cuti Melahirkan',
+    }.get(jenis_aktif, jenis_aktif)
     data = [
         [Paragraph("II. JENIS CUTI YANG DIAMBIL**", styles["BodySmall"]), "",],
         [
-            Paragraph(checkbox_text("Cuti Tahunan", jenis_aktif), styles["BodySmall"]),
-            Paragraph(checkbox_text("Cuti Besar", jenis_aktif), styles["BodySmall"]),
+            Paragraph(checkbox_text("Cuti Tahunan", jenis_normal), styles["BodySmall"]),
+            Paragraph(checkbox_text("Cuti Besar", jenis_normal), styles["BodySmall"]),
         ],
         [
-            Paragraph(checkbox_text("Cuti Sakit", jenis_aktif), styles["BodySmall"]),
-            Paragraph(checkbox_text("Cuti Melahirkan", jenis_aktif), styles["BodySmall"]),
+            Paragraph(checkbox_text("Cuti Sakit", jenis_normal), styles["BodySmall"]),
+            Paragraph(checkbox_text("Cuti Melahirkan", jenis_normal), styles["BodySmall"]),
         ],
         [
             Paragraph(
-                checkbox_text("Cuti Karena Alasan Penting", jenis_aktif),
+                checkbox_text("Cuti Karena Alasan Penting", jenis_normal),
                 styles["BodySmall"],
             ),
             Paragraph(
-                checkbox_text("Cuti di Luar Tanggungan Negara", jenis_aktif),
+                checkbox_text("Cuti di Luar Tanggungan Negara", jenis_normal),
                 styles["BodySmall"],
             ),
         ],
@@ -730,7 +831,8 @@ def build_section_IV(lama_hari, tgl_mulai, tgl_akhir, styles):
     return t
 
 
-def build_section_V(catatan_rows, styles):
+def build_section_V(catatan_snapshot, styles):
+    catatan_rows = catatan_snapshot['rows']
     # catatan_rows sudah berisi 3 baris: N-2, N-1, N
     header1 = [
         Paragraph("V. CATATAN CUTI***", styles["BodySmall"]),
@@ -741,11 +843,11 @@ def build_section_V(catatan_rows, styles):
         Paragraph("Tahun", styles["BodySmall"]),
         Paragraph("Terpakai", styles["BodySmall"]),
         Paragraph("Sisa Hak", styles["BodySmall"]),
-        Paragraph("Boleh Dikomp.", styles["BodySmall"]),
+        Paragraph("Dapat Digunakan", styles["BodySmall"]),
         Paragraph("Keterangan", styles["BodySmall"]),
     ]
     body = []
-    for label, tahun, terpakai, sisa, komp in catatan_rows:
+    for label, tahun, terpakai, sisa, komp, keterangan in catatan_rows:
         body.append(
             [
                 Paragraph(label, styles["BodySmall"]),
@@ -753,15 +855,31 @@ def build_section_V(catatan_rows, styles):
                 Paragraph(terpakai, styles["BodySmall"]),
                 Paragraph(sisa, styles["BodySmall"]),
                 Paragraph(komp, styles["BodySmall"]),
-                Paragraph("", styles["BodySmall"]),
+                Paragraph(keterangan, styles["BodySmall"]),
             ]
         )
 
-    data = [header1, header2] + body
+    summary = [
+        Paragraph(
+            "Total saldo tersedia setelah pengajuan ",
+            # f"(snapshot {catatan_snapshot['dibuat_pada']})",
+            styles["BodySmall"],
+        ),
+        "",
+        "",
+        "",
+        Paragraph(
+            f"{catatan_snapshot['total_tersedia']} hari",
+            styles["BodySmall"],
+        ),
+        "",
+    ]
+    data = [header1, header2] + body + [summary]
+    summary_row = len(data) - 1
 
     t = Table(
         data,
-        colWidths=[55 * mm, 20 * mm, 25 * mm, 25 * mm, 30 * mm, 25 * mm],
+        colWidths=[45 * mm, 17 * mm, 20 * mm, 20 * mm, 28 * mm, 50 * mm],
         hAlign="LEFT",
     )
     t.setStyle(
@@ -771,6 +889,9 @@ def build_section_V(catatan_rows, styles):
                 ("BOX", (0, 0), (-1, -1), 1, colors.black),
                 ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.black),
                 ("BACKGROUND", (0, 1), (-1, 1), colors.lightgrey),
+                ("SPAN", (0, summary_row), (3, summary_row)),
+                ("SPAN", (4, summary_row), (5, summary_row)),
+                ("BACKGROUND", (0, summary_row), (-1, summary_row), colors.whitesmoke),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
                 ("FONTSIZE", (0, 0), (-1, -1), 8),
@@ -780,101 +901,7 @@ def build_section_V(catatan_rows, styles):
     return t
 
 
-def build_verifikator_chain_from_penempatan(rp):
-    """
-    Versi fungsi dari build_verifikator_chain() di VerifikasiCutiAccessMixin,
-    tapi menerima 1 objek RiwayatPenempatan aktif (rp).
-    Kembalikan list of dict:
-    [
-      {"level": 1, "user": <User atau None>, "label": "Kasi/Subbag ..."},
-      {"level": 2, "user": <User atau None>, "label": "Kabid ..."},
-      {"level": 3, "user": <User atau None>, "label": "Direktur ..."},
-    ]
-    """
-    chain = []
-
-    if not rp:
-        return chain
-
-    # Pegawai level 4 (Instalasi) → diverifikasi: Kasi/SubBidang, Kabid, Unor
-    if rp.penempatan_level4:
-        inst = rp.penempatan_level4
-        sb = inst.sub_bidang
-        b = sb.bidang
-        u = b.unor
-
-        chain.append({
-            "level": 1,
-            "user": sb.nama_pimpinan,
-            "label": f"{sb.pimpinan} {sb.sub_bidang}",
-        })
-        chain.append({
-            "level": 2,
-            "user": b.nama_pimpinan,
-            "label": f"{b.pimpinan} {b.bidang}",
-        })
-        chain.append({
-            "level": 3,
-            "user": u.nama_pimpinan,
-            "label": f"{u.pimpinan} {u.unor}",
-        })
-
-    # Pegawai level 3 (SubBidang) → diverifikasi: Kabid, Unor
-    elif rp.penempatan_level3:
-        sb = rp.penempatan_level3
-        b = sb.bidang
-        u = b.unor
-
-        chain.append({
-            "level": 2,
-            "user": b.nama_pimpinan,
-            "label": f"{b.pimpinan} {b.bidang}",
-        })
-        chain.append({
-            "level": 3,
-            "user": u.nama_pimpinan,
-            "label": f"{u.pimpinan} {u.unor}",
-        })
-
-    # Pegawai level 2 (Bidang) → diverifikasi: Unor, SatkerInduk
-    elif rp.penempatan_level2:
-        b = rp.penempatan_level2
-        u = b.unor
-        sk = u.satker_induk
-
-        chain.append({
-            "level": 2,
-            "user": u.nama_pimpinan,
-            "label": f"{u.pimpinan} {u.unor}",
-        })
-        chain.append({
-            "level": 3,
-            "user": sk.nama_pimpinan,
-            "label": f"{sk.pimpinan} {sk.satuan_kerja}",
-        })
-
-    # Pegawai level 1 (Unor) → diverifikasi: SatkerInduk, InstansiDaerah
-    elif rp.penempatan_level1:
-        u = rp.penempatan_level1
-        sk = u.satker_induk
-        inst = sk.instansi_daerah
-
-        chain.append({
-            "level": 2,
-            "user": sk.nama_pimpinan,
-            "label": f"{sk.pimpinan} {sk.satuan_kerja}",
-        })
-        chain.append({
-            "level": 3,
-            "user": inst.nama_pimpinan,
-            "label": f"{inst.pimpinan} {inst.instansi}",
-        })
-
-    return chain
-
-def atasan_penandatangan(penempatan):
-    _, level = penempatan._penempatan_aktif
-    
+@login_required
 def formulir_cuti_pdf(request, pk):
     """
     Generate PDF 'Formulir Permintaan dan Pemberian Cuti' (Lampiran 1.b)
@@ -886,6 +913,8 @@ def formulir_cuti_pdf(request, pk):
     )
     pegawai = riwayat.pegawai
     layanan = riwayat.usulan
+    if layanan is None or not can_view_leave(request.user, layanan):
+        raise PermissionDenied("Anda tidak berhak mengunduh dokumen cuti ini.")
 
     # URL dokumen (link ke formulir ini sendiri atau ke halaman detail yang Anda mau)
     doc_url = request.build_absolute_uri(request.path)
@@ -898,8 +927,38 @@ def formulir_cuti_pdf(request, pk):
     profil = getattr(pegawai, "profil_user", None)
     nama = _safe_get(pegawai, "full_name", _safe_get(pegawai, "first_name", "-"))
     nip = _safe_get(profil, "nip", "-")          # NIP/NRK
-    jabatan = _safe_get(pegawai, "jabatan", "-") # ganti bila field beda
-    masa_kerja = _safe_get(profil, "masa_kerja_display", "-")  # placeholder
+    riwayat_jabatan = (
+        RiwayatJabatan.objects
+        .filter(pegawai=pegawai)
+        .select_related('nama_jabatan', 'jenjang_jabatan')
+        .order_by('-tmt_jabatan', '-updated_at', '-id')
+        .first()
+    )
+    bagian_jabatan = []
+    if riwayat_jabatan:
+        if riwayat_jabatan.nama_jabatan:
+            bagian_jabatan.append(str(riwayat_jabatan.nama_jabatan))
+        if riwayat_jabatan.jenjang_jabatan:
+            bagian_jabatan.append(str(riwayat_jabatan.jenjang_jabatan))
+        if riwayat_jabatan.detail_nama_jabatan:
+            bagian_jabatan.append(riwayat_jabatan.detail_nama_jabatan)
+    jabatan = ' - '.join(bagian_jabatan) or '-'
+
+    tanggal_dokumen = (
+        layanan.created_at.date()
+        if layanan and layanan.created_at
+        else date.today()
+    )
+    pengangkatan = (
+        RiwayatPengangkatan.objects
+        .filter(pegawai=pegawai, tmt_pegawai__isnull=False)
+        .order_by('-tmt_pegawai', '-id')
+        .first()
+    )
+    masa_kerja = '-'
+    if pengangkatan and pengangkatan.tmt_pegawai:
+        masa = relativedelta(tanggal_dokumen, pengangkatan.tmt_pegawai)
+        masa_kerja = f'{max(0, masa.years)} tahun {max(0, masa.months)} bulan'
 
     # Riwayat penempatan aktif
     penempatan = (
@@ -916,9 +975,6 @@ def formulir_cuti_pdf(request, pk):
     unit_kerja = penempatan.penempatan if penempatan else "-"
     # _, level = penempatan._penempatan_aktif
     
-    # === chain verifikator berdasar penempatan ===
-    chain = build_verifikator_chain_from_penempatan(penempatan)
-
     # Alamat & telp saat cuti
     alamat_cuti = riwayat.domisili_saat_cuti or "-"
     telp = _safe_get(profil, "no_hp", "-")  # sesuaikan field no HP/telepon
@@ -934,16 +990,47 @@ def formulir_cuti_pdf(request, pk):
         except VerifikasiCuti.DoesNotExist:
             verifikasi = None
 
-    # ====== Atasan Langsung (LEVEL 2) ======
-    level2_entry = next((c for c in chain if c["level"] == 2), None)
-    level3_entry = next((c for c in chain if c["level"] == 3), None)
+    # Gabungkan label struktur aktif dengan identitas verifikator yang dibekukan.
+    chain_aktif = {
+        item['level']: item
+        for item in build_approval_chain(pegawai)
+    }
+    chain = []
+    for level in (1, 2, 3):
+        item = chain_aktif.get(level)
+        saved_user = (
+            getattr(verifikasi, f'verifikator{level}', None)
+            if verifikasi else None
+        )
+        if item is None and saved_user is None:
+            continue
+        active_user = item['user'] if item else None
+        label = (
+            item['label']
+            if item and (
+                saved_user is None
+                or active_user is None
+                or active_user.pk == saved_user.pk
+            )
+            else f'Verifikator Level {level}'
+        )
+        chain.append({
+            'level': level,
+            'user': saved_user or active_user,
+            'label': label,
+            'keputusan': (
+                getattr(verifikasi, f'keputusan{level}', 'belum')
+                if verifikasi else 'belum'
+            ),
+        })
 
-    # user yang tercatat sebagai verifikator2 (kalau ada), kalau belum isi pakai chain
-    user_atasan = getattr(verifikasi, "verifikator2", None) if verifikasi else None
-    jabatan_atasan = "Atasan Langsung"
-    if user_atasan is None and level2_entry:
-        user_atasan = level2_entry["user"]
-        jabatan_atasan = level2_entry["label"] if level2_entry else "Atasan Langsung"
+    direct_entry = chain[0] if chain else None
+    final_entry = chain[-1] if chain else None
+    user_atasan = direct_entry['user'] if direct_entry else None
+    jabatan_atasan = (
+        direct_entry['label']
+        if direct_entry else 'Atasan Langsung'
+    )
 
     # Nama & NIP atasan diambil langsung dari user_atasan (sesuai TTE)
     nama_atasan2 = "-"
@@ -955,18 +1042,15 @@ def formulir_cuti_pdf(request, pk):
         nip_atasan2 = _safe_get(profil_atasan, "nip", "-")
 
     status_line_lvl1 = _status_checkbox_line(
-        verifikasi.persetujuan1 if verifikasi else None
+        direct_entry['keputusan'] if direct_entry else 'belum'
     )
     
     # ====== Pejabat Penandatangan TERTINGGI (final signer) ======
-    # Urutan: kalau ada verifikator3 → pakai dia; kalau tidak, cek verifikator2, lalu verifikator1
-    final_user = "-"
-    final_label = "Pejabat Berwenang"
-    
-    user_atasan3 = getattr(verifikasi, "verifikator3", None) if verifikasi else None
-    if user_atasan3 is None and level3_entry:
-        user_atasan3 = level3_entry["user"]
-        final_label = level3_entry["label"] if level3_entry else "Pejabat Berwenang"
+    user_atasan3 = final_entry['user'] if final_entry else None
+    final_label = (
+        final_entry['label']
+        if final_entry else 'Pejabat Berwenang'
+    )
 
 
     nama_pejabat = "-"
@@ -979,14 +1063,8 @@ def formulir_cuti_pdf(request, pk):
 
     jabatan_pejabat = final_label
 
-    # status_line_lvl3 = _status_checkbox_line(persetujuan=None)
-    # if level == 'level4':
-    #     status_line_lvl3 = _status_checkbox_line(
-    #         verifikasi.persetujuan3 if verifikasi else None
-    #     )
-    # else:
     status_line_lvl3 = _status_checkbox_line(
-        verifikasi.persetujuan2 if verifikasi else None
+        final_entry['keputusan'] if final_entry else 'belum'
     )
 
     # ---------------- QR DATA (TTD ELEKTRONIK) ----------------
@@ -1017,20 +1095,17 @@ def formulir_cuti_pdf(request, pk):
     qr_atasan_drawing = None
     qr_pejabat_drawing = None
     
-    if verifikasi is not None and verifikasi.keputusan2 == 'setuju':
+    if direct_entry and direct_entry['keputusan'] == 'setuju' and user_atasan:
         qr_atasan_drawing = make_qr_drawing(qr_str_atasan, size_mm=25 * mm)
-    # if level == 'level4':
-    if verifikasi is not None and verifikasi.keputusan3 == 'setuju':
+    if final_entry and final_entry['keputusan'] == 'setuju' and user_atasan3:
         qr_pejabat_drawing = make_qr_drawing(qr_str_pejabat, size_mm=25 * mm)
-    # else:
-    #     if verifikasi is not None and verifikasi.keputusan2 == 'setuju':
-    #         qr_pejabat_drawing = make_qr_drawing(qr_str_pejabat, size_mm=25 * mm)
 
     # ==========================================================
     #               SETUP REPORTLAB PDF
     # ==========================================================
     response = HttpResponse(content_type="application/pdf")
-    filename = f"Formulir_Cuti_{nama}_{tahun_ref}.pdf"
+    nama_file = slugify(nama) or f'pegawai-{pegawai.pk}'
+    filename = f"Formulir_Cuti_{nama_file}_{tahun_ref}.pdf"
     response["Content-Disposition"] = f'inline; filename="{filename}"'
 
     buffer = BytesIO()
@@ -1039,8 +1114,8 @@ def formulir_cuti_pdf(request, pk):
     doc = SimpleDocTemplate(
         buffer,
         pagesize=FOLIO,
-        leftMargin=20 * mm,
-        rightMargin=20 * mm,
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
         topMargin=15 * mm,
         bottomMargin=15 * mm,
     )
@@ -1108,12 +1183,9 @@ def formulir_cuti_pdf(request, pk):
     elements = []
 
     # Header surat: lokasi, tanggal, kepada Yth.
-    today = date.today()
     lokasi_surat = "Lombok Tengah"  # bisa Bapak ganti dari settings / InstansiDaerah
 
-    today = date.today()
-    lokasi_surat = "Lombok Tengah"  # silakan sesuaikan
-    tanggal_str = today.strftime("%d-%m-%Y")
+    tanggal_str = tanggal_dokumen.strftime("%d-%m-%Y")
 
     header_rows = [
         ["", Paragraph(f"{lokasi_surat}, {tanggal_str}", styles["BodySmall"])],
@@ -1177,8 +1249,13 @@ def formulir_cuti_pdf(request, pk):
     elements.append(Spacer(1, 4))
 
     # V. CATATAN CUTI – pakai CheckCuti
-    catatan_rows = _build_catatan_cuti_tahunan(pegawai, tahun_ref)
-    elements.append(build_section_V(catatan_rows, styles))
+    catatan_snapshot = _build_catatan_cuti_tahunan(
+        pegawai,
+        tahun_ref,
+        snapshot=layanan.snapshot_saldo_cuti,
+        pada=tanggal_dokumen,
+    )
+    elements.append(build_section_V(catatan_snapshot, styles))
     elements.append(Spacer(1, 8))
 
     # VI. ALAMAT SELAMA MENJALANKAN CUTI
@@ -1202,13 +1279,12 @@ def formulir_cuti_pdf(request, pk):
     elements.append(Spacer(1, 12))
 
     # Tanda tangan pemohon
-    today = date.today()
     tte_pemohon = [
         # baris 1: tanggal + "Hormat saya," dalam 1 paragraf, 2 line
         [
             "",
             Paragraph(
-                f"Lombok Tengah, {today.strftime('%d-%m-%Y')}<br/>Hormat saya,",
+                f"Lombok Tengah, {tanggal_dokumen.strftime('%d-%m-%Y')}<br/>Hormat saya,",
                 styles["BodySmall"],
             ),
         ],
@@ -1264,7 +1340,7 @@ def formulir_cuti_pdf(request, pk):
         [
             "",
             Paragraph(
-                f"{nama_atasan2}<br/>NIP. {nip_atasan2}",
+                f"{jabatan_atasan}<br/>{nama_atasan2}<br/>NIP. {nip_atasan2}",
                 styles["BodySmall"],
             ),
         ],
@@ -1310,7 +1386,7 @@ def formulir_cuti_pdf(request, pk):
         [
             "",
             Paragraph(
-                f"{nama_pejabat}<br/>NIP. {nip_pejabat}",
+                f"{jabatan_pejabat}<br/>{nama_pejabat}<br/>NIP. {nip_pejabat}",
                 styles["BodySmall"],
             ),
         ],
@@ -1345,7 +1421,7 @@ def formulir_cuti_pdf(request, pk):
     return response
 
 
-class LayananCutiDocxView(View):
+class LayananCutiDocxView(LoginRequiredMixin, View):
     def set_col_widths(self, table):
         widths = (Inches(0.3), Inches(7.7))
         # height = (Inches(0.2), Inches(0.2), Inches(0.2), Inches(0.2), Inches(0.2))
@@ -1369,15 +1445,35 @@ class LayananCutiDocxView(View):
             return None
         
     def get_data_cuti(self, data_input=None, data_output=None, attr=""):
-        if data_input is not None and hasattr(data_input.cuti, attr):
+        if data_input is not None and hasattr(data_input.cuti_usulan, attr):
             return data_output
         return ""
     
-    def get_unor_pimpinan(self, pegawai):
+    def get_unor_pimpinan(self, pegawai, layanan_cuti=None):
         try:
             penempatan = RiwayatPenempatan.objects.filter(pegawai=pegawai, status=True).order_by('-id').first()
             if penempatan:
-                return penempatan.unor_pimpinan
+                data = penempatan.unor_pimpinan
+                snapshot = getattr(layanan_cuti, 'verifikasicuti', None)
+                if snapshot:
+                    signer = next((user for user in (
+                        snapshot.verifikator3,
+                        snapshot.verifikator2,
+                        snapshot.verifikator1,
+                    ) if user is not None), None)
+                    if signer:
+                        data['nama_pimpinan'] = getattr(signer, 'full_name_2', 'N/A')
+                        profil = getattr(signer, 'profil_user', None)
+                        data['nip'] = getattr(profil, 'nip', 'N/A') or 'N/A'
+                        panggol = signer.riwayatpanggol_set.order_by('-id').first()
+                        data['panggol'] = getattr(panggol, 'panggol', 'N/A') or 'N/A'
+                        struktur = penempatan.unor
+                        masa_jabatan = struktur.riwayat_pejabat.filter(
+                            pejabat=signer,
+                        ).order_by('-tanggal_mulai', '-id').first() if struktur else None
+                        if masa_jabatan and masa_jabatan.nama_jabatan:
+                            data['pimpinan'] = masa_jabatan.nama_jabatan
+                return data
             return ""
         except Exception:
             return ""
@@ -1396,6 +1492,8 @@ class LayananCutiDocxView(View):
         doc:Document=CreateDocument()
         id = kwargs.get('layanan_id')
         layanan_cuti = self.get_object(id=id)
+        if layanan_cuti is None or not can_view_leave(request.user, layanan_cuti):
+            raise PermissionDenied("Anda tidak berhak mengunduh dokumen cuti ini.")
         riwayat_cuti = self.get_riwayat_cuti(id=id)
         jabatan = riwayat_cuti.pegawai.riwayatjabatan_set.last()
         data_instansi = riwayat_cuti.pegawai.riwayat_penempatan.last()
@@ -1434,11 +1532,11 @@ class LayananCutiDocxView(View):
         pimpinan = riwayatpenempatan.unor_pimpinan if riwayatpenempatan is not None else ""
         add_content(doc=doc, content='Demikian surat cuti ini dibuat untuk dapat dipergunakan sebagaimana mestinya.', space_before=10, space_after=16, style='List Number')
         add_content(doc=doc, content='Lombok Tengah, ${tanggal_naskah}', align='left', left_indent=80)
-        add_content(doc=doc, content=f'{self.get_unor_pimpinan(layanan_cuti.pegawai)["pimpinan"] if self.get_unor_pimpinan(layanan_cuti.pegawai) else ""}', left_indent=80, align='left', space_after=30)
+        add_content(doc=doc, content=f'{self.get_unor_pimpinan(layanan_cuti.pegawai, layanan_cuti)["pimpinan"] if self.get_unor_pimpinan(layanan_cuti.pegawai, layanan_cuti) else ""}', left_indent=80, align='left', space_after=30)
         add_content(doc=doc, content='${ttd_pengirim}', left_indent=80, align='left', space_after=30)
-        add_content(doc=doc, content=f'{self.get_unor_pimpinan(layanan_cuti.pegawai)["nama_pimpinan"] if self.get_unor_pimpinan(layanan_cuti.pegawai) else ""}', left_indent=80, align='left')
-        add_content(doc=doc, content=f'{self.get_unor_pimpinan(layanan_cuti.pegawai)["panggol"] if self.get_unor_pimpinan(layanan_cuti.pegawai) else ""}', left_indent=80, align='left')
-        add_content(doc=doc, content=f'{self.get_unor_pimpinan(layanan_cuti.pegawai)["nip"] if self.get_unor_pimpinan(layanan_cuti.pegawai) else ""}', left_indent=80, align='left')
+        add_content(doc=doc, content=f'{self.get_unor_pimpinan(layanan_cuti.pegawai, layanan_cuti)["nama_pimpinan"] if self.get_unor_pimpinan(layanan_cuti.pegawai, layanan_cuti) else ""}', left_indent=80, align='left')
+        add_content(doc=doc, content=f'{self.get_unor_pimpinan(layanan_cuti.pegawai, layanan_cuti)["panggol"] if self.get_unor_pimpinan(layanan_cuti.pegawai, layanan_cuti) else ""}', left_indent=80, align='left')
+        add_content(doc=doc, content=f'{self.get_unor_pimpinan(layanan_cuti.pegawai, layanan_cuti)["nip"] if self.get_unor_pimpinan(layanan_cuti.pegawai, layanan_cuti) else ""}', left_indent=80, align='left')
 
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
         response['Content-Disposition'] = f'attachment; filename=cuti-{riwayat_cuti.pegawai.full_name}.docx'
@@ -1469,7 +1567,7 @@ def _resolve_kepala_instalasi(pelimpahan: PelimpahanTugas):
     Tentukan kepala instalasi untuk blok tanda tangan.
     Prioritas:
     1) pelimpahan.kepala_instalasi (kalau sudah diputuskan)
-    2) dari penempatan aktif pemberi tugas (level4 -> UnitInstalasi.nama_pimpinan)
+    2) dari riwayat pejabat aktif pada UnitInstalasi penempatan pemberi tugas
     """
     if pelimpahan.kepala_instalasi:
         return pelimpahan.kepala_instalasi
@@ -1480,7 +1578,7 @@ def _resolve_kepala_instalasi(pelimpahan: PelimpahanTugas):
 
     obj, level = rp._penempatan_aktif
     if level == "level4" and obj:
-        return getattr(obj, "nama_pimpinan", None)
+        return get_active_leader(obj)
 
     # jika bukan level4, tidak dipaksakan (Anda bisa sesuaikan bila ingin kepala unit lain)
     return None
@@ -1503,6 +1601,7 @@ def _qr_image(payload: str, size_cm: float = 2.5) -> Image:
     return Image(bio, width=size_cm * cm, height=size_cm * cm)
 
 
+@login_required
 def pelimpahan_tugas_pdf(request, pk: int):
     pelimpahan = get_object_or_404(
         PelimpahanTugas.objects.select_related(
@@ -1510,6 +1609,8 @@ def pelimpahan_tugas_pdf(request, pk: int):
         ),
         pk=pk
     )
+    if not can_view_delegation(request.user, pelimpahan):
+        raise PermissionDenied("Anda tidak berhak mengunduh dokumen pelimpahan ini.")
 
     pdf_url = request.build_absolute_uri(
         reverse("file_urls:pelimpahan_tugas_pdf", kwargs={"pk": pelimpahan.pk})
@@ -1818,7 +1919,7 @@ class LayananDiklatSPTDocxView(View):
             jabatan = pegawai.riwayatjabatan_set.last()
             penempatan = RiwayatPenempatan.objects.filter(pegawai=pegawai, status=True).last()
             panggol_sdm = pegawai.riwayatpanggol_set.last()
-            panggol = penempatan.penempatan_level1.nama_pimpinan.riwayatpanggol_set.last() if hasattr(penempatan, 'penempatan_level1') else None
+            panggol = get_active_leader(penempatan.penempatan_level1).riwayatpanggol_set.last() if hasattr(penempatan, 'penempatan_level1') and get_active_leader(penempatan.penempatan_level1) else None
         # Parse the HTML content (you can use BeautifulSoup or lxml)
         dasar_pelaksanaan = BeautifulSoup(spt_text.dasar_pelaksanaan, 'html.parser')
         items_dasar = [li.text for li in dasar_pelaksanaan.find_all('li')]
@@ -1868,9 +1969,9 @@ class LayananDiklatSPTDocxView(View):
         add_content(doc=doc, content='Lombok Tengah, ${tanggal_naskah}', space_before=30, left_indent=80)
         add_content(doc=doc, content='Direktur', left_indent=80, space_after=30)
         add_content(doc=doc, content='${ttd_pengirim}', left_indent=80, )
-        add_content(doc=doc, content=f'{penempatan.penempatan_level1.nama_pimpinan.full_name_2}', left_indent=80, space_before=30)
+        add_content(doc=doc, content=f'{get_active_leader(penempatan.penempatan_level1).full_name_2}', left_indent=80, space_before=30)
         add_content(doc=doc, content=f'{panggol.panggol if hasattr(panggol, "panggol") else None}', left_indent=80)
-        add_content(doc=doc, content=f'NIP. {penempatan.penempatan_level1.nama_pimpinan.profil_user.nip}', left_indent=80)
+        add_content(doc=doc, content=f'NIP. {get_active_leader(penempatan.penempatan_level1).profil_user.nip}', left_indent=80)
 
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
         response['Content-Disposition'] = f'attachment; filename=pelimpahan_tugas-{pegawai.full_name}.docx'
@@ -1917,7 +2018,7 @@ class LayananDiklatSPTDocxView2(View):
         detail_pegawai = riwayatdiklat.pegawai.first()
         if detail_pegawai:
             penempatan = RiwayatPenempatan.objects.filter(pegawai=detail_pegawai, status=True).last()
-            panggol = penempatan.penempatan_level1.nama_pimpinan.riwayatpanggol_set.last() if hasattr(penempatan, 'penempatan_level1') else None
+            panggol = get_active_leader(penempatan.penempatan_level1).riwayatpanggol_set.last() if hasattr(penempatan, 'penempatan_level1') and get_active_leader(penempatan.penempatan_level1) else None
         # Parse the HTML content (you can use BeautifulSoup or lxml)
         dasar_pelaksanaan = BeautifulSoup(spt_text.dasar_pelaksanaan, 'html.parser')
         items_dasar = [li.text for li in dasar_pelaksanaan.find_all('li')]
@@ -1959,9 +2060,9 @@ class LayananDiklatSPTDocxView2(View):
         add_content(doc=doc, content='Lombok Tengah, ${tanggal_naskah}', space_before=20, left_indent=80)
         add_content(doc=doc, content='Direktur', left_indent=80, space_after=30)
         add_content(doc=doc, content='${ttd_pengirim}', left_indent=80, )
-        add_content(doc=doc, content=f'{penempatan.penempatan_level1.nama_pimpinan.full_name_2}', left_indent=80, space_before=30)
+        add_content(doc=doc, content=f'{get_active_leader(penempatan.penempatan_level1).full_name_2}', left_indent=80, space_before=30)
         add_content(doc=doc, content=f'{panggol.panggol if hasattr(panggol, "panggol") else None}', left_indent=80)
-        add_content(doc=doc, content=f'NIP. {penempatan.penempatan_level1.nama_pimpinan.profil_user.nip}', left_indent=80)
+        add_content(doc=doc, content=f'NIP. {get_active_leader(penempatan.penempatan_level1).profil_user.nip}', left_indent=80)
 
         doc.add_page_break()
         add_content(doc=doc, content='Lampiran:')
@@ -1995,9 +2096,9 @@ class LayananDiklatSPTDocxView2(View):
         add_content(doc=doc, content='Lombok Tengah, ${tanggal_naskah}', space_before=20, left_indent=80)
         add_content(doc=doc, content='Direktur', left_indent=80, space_after=30)
         add_content(doc=doc, content='${ttd_pengirim}', left_indent=80, )
-        add_content(doc=doc, content=f'{penempatan.penempatan_level1.nama_pimpinan.full_name_2}', left_indent=80, space_before=30)
+        add_content(doc=doc, content=f'{get_active_leader(penempatan.penempatan_level1).full_name_2}', left_indent=80, space_before=30)
         add_content(doc=doc, content=f'{panggol.panggol if hasattr(panggol, "panggol") else None}', left_indent=80)
-        add_content(doc=doc, content=f'NIP. {penempatan.penempatan_level1.nama_pimpinan.profil_user.nip}', left_indent=80)
+        add_content(doc=doc, content=f'NIP. {get_active_leader(penempatan.penempatan_level1).profil_user.nip}', left_indent=80)
         
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
         response['Content-Disposition'] = f'attachment; filename=spt-pelatihan-{detail_pegawai.full_name}.docx'

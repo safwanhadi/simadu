@@ -5,6 +5,7 @@ from .views import (
     formulir_cuti_pdf,
     LayananUsulanCutiDocxView,
     LayananCutiDocxView,
+    CutiFileDownloadView,
     pelimpahan_tugas_pdf,
     FormatPenilaianInovasiView,
     LayananDiklatSPTDocxView,
@@ -17,6 +18,11 @@ from .views import (
 
 
 urlpatterns=[
+    path(
+        'cuti-file/<int:pk>/<str:field_name>/',
+        CutiFileDownloadView.as_view(),
+        name='cuti_file_download',
+    ),
     path('berkala/<int:layanan_id>/', LayananGajiBerkalaDocxView.as_view(), name='berkala_docx'),
     path("usulan-cuti/<int:pk>/formulir-pdf/", formulir_cuti_pdf, name="formulir_cuti_pdf"),
     path('usulan-cuti/<int:layanan_id>/', LayananUsulanCutiDocxView.as_view(), name='usulan_cuti_docx'),

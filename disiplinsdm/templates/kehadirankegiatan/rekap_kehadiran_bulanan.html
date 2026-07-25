@@ -17,6 +17,9 @@
         </div>
         
         <div>
+            <a href="{% url 'disiplinsdm_urls:download_presensi_pdf' %}?bulan={{ selected_bulan }}&tahun={{ selected_tahun }}" class="btn btn-outline-danger btn-sm rounded-pill px-3 mr-2">
+                <i class="fas fa-file-pdf"></i> PDF per Instalasi
+            </a>
             {% if request.user.is_disiplin_admin %}
             <a href="{% url 'disiplinsdm_urls:log-kehadiran' %}" class="btn btn-outline-success btn-sm rounded-pill px-3 mr-2">
                 <i class="fas fa-history mr-1"></i> Log Perangkat
@@ -106,6 +109,7 @@
                             <th class="text-center bg-danger text-white">Mangkir (ALPA)</th>
                             <th class="text-center bg-info text-white">Izin/Cuti</th>
                             <th class="text-center bg-info text-white">Libur</th>
+                            <th class="text-center bg-secondary text-white">Belum Dinilai</th>
                             <th class="text-center bg-warning text-dark">Terlambat</th>
                             <th class="text-center pe-3" style="width: 10%;">Aksi</th>
                         </tr>
@@ -151,6 +155,7 @@
                                 <td class="text-center text-danger fw-bold fs-6">{{ pegawai.summary_alpa }}</td>
                                 <td class="text-center text-info fw-bold fs-6">{{ pegawai.summary_izin }}</td>
                                 <td class="text-center text-info fw-bold fs-6">{{ pegawai.summary_libur }}</td>
+                                <td class="text-center text-secondary fw-bold fs-6">{{ pegawai.summary_belum_dinilai }}</td>
                                 <td class="text-center">
                                     <span class="badge {% if pegawai.summary_terlambat > 0 %}bg-warning text-dark{% else %}bg-light text-muted{% endif %} rounded-pill">
                                         {{ pegawai.summary_terlambat }} x
@@ -165,7 +170,7 @@
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="8" class="text-center py-5 text-muted">
+                                <td colspan="11" class="text-center py-5 text-muted">
                                     <i class="fas fa-folder-open d-block fs-2 mb-2 text-light"></i>
                                     Tidak ada data rekap pegawai aktif pada periode terpilih atau hak akses Anda.
                                 </td>

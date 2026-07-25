@@ -1,3 +1,5 @@
+from datetime import date
+
 from django.contrib.auth.models import Group
 from django.contrib.auth import authenticate
 from django.test import TestCase, override_settings
@@ -9,7 +11,16 @@ from allauth.socialaccount.models import SocialApp
 
 from .adapters import RestrictToExistingUserAdapter
 from .models import AccountRegistration, ProfilSDM, Users
-from .roles import ADMIN_AKUN, ADMIN_DOKUMEN
+from .roles import (
+    ADMIN_AKUN,
+    ADMIN_DASHBOARD,
+    ADMIN_DOKUMEN,
+    ADMIN_GROUPS,
+    ADMIN_INFORMASI,
+)
+from strukturorg.models import (
+    InstansiDaerah, PejabatStruktur, SatuanKerjaInduk, UnitOrganisasi,
+)
 
 
 class AccountManagementTests(TestCase):
@@ -97,6 +108,75 @@ class AccountManagementTests(TestCase):
         self.user.refresh_from_db()
         self.assertTrue(self.user.groups.filter(name=ADMIN_DOKUMEN).exists())
 
+    def test_admin_akun_dapat_mengelola_beberapa_hak_akses_admin(self):
+        non_admin_group = Group.objects.create(name='Grup Operasional Uji')
+        old_admin_group, _ = Group.objects.get_or_create(name=ADMIN_DOKUMEN)
+        self.user.groups.add(non_admin_group, old_admin_group)
+
+        response = self.client.post(
+            reverse(
+                'myaccount_urls:account_update_admin_roles',
+                args=[self.user.pk],
+            ),
+            {'roles': [ADMIN_DASHBOARD, ADMIN_INFORMASI]},
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('myaccount_urls:account_management_list'),
+        )
+        admin_roles = set(
+            self.user.groups
+            .filter(name__in=ADMIN_GROUPS)
+            .values_list('name', flat=True)
+        )
+        self.assertEqual(admin_roles, {ADMIN_DASHBOARD, ADMIN_INFORMASI})
+        self.assertTrue(self.user.groups.filter(pk=non_admin_group.pk).exists())
+
+    def test_hak_akses_tidak_menerima_nama_peran_di_luar_daftar(self):
+        response = self.client.post(
+            reverse(
+                'myaccount_urls:account_update_admin_roles',
+                args=[self.user.pk],
+            ),
+            {'roles': ['Admin Tidak Dikenal']},
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('myaccount_urls:account_management_list'),
+        )
+        self.assertFalse(self.user.groups.exists())
+
+    def test_user_biasa_tidak_dapat_mengubah_hak_akses_admin(self):
+        self.client.force_login(self.regular_user)
+
+        response = self.client.post(
+            reverse(
+                'myaccount_urls:account_update_admin_roles',
+                args=[self.user.pk],
+            ),
+            {'roles': [ADMIN_DOKUMEN]},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(self.user.groups.filter(name=ADMIN_DOKUMEN).exists())
+
+    def test_admin_akun_tidak_dapat_mencabut_perannya_sendiri(self):
+        response = self.client.post(
+            reverse(
+                'myaccount_urls:account_update_admin_roles',
+                args=[self.admin.pk],
+            ),
+            {'roles': []},
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('myaccount_urls:account_management_list'),
+        )
+        self.assertTrue(self.admin.groups.filter(name=ADMIN_AKUN).exists())
+
     def test_admin_tidak_dapat_mengubah_status_akun_sendiri(self):
         self.client.post(
             reverse('myaccount_urls:account_toggle_active', args=[self.admin.pk])
@@ -117,6 +197,108 @@ class AccountManagementTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.superuser.refresh_from_db()
         self.assertTrue(self.superuser.is_active)
+
+
+class StructuralOfficerManagementTests(TestCase):
+    password = 'Password-Pejabat-123!'
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = Users.objects.create_user(
+            email='admin-pejabat@example.com', first_name='Admin',
+            last_name='Pejabat', password=cls.password,
+        )
+        admin_group, _ = Group.objects.get_or_create(name=ADMIN_AKUN)
+        cls.admin.groups.add(admin_group)
+        cls.regular_user = Users.objects.create_user(
+            email='user-biasa-pejabat@example.com', first_name='User',
+            last_name='Biasa', password=cls.password,
+        )
+        cls.old_officer = Users.objects.create_user(
+            email='pejabat-lama-ui@example.com', first_name='Pejabat',
+            last_name='Lama', password=cls.password,
+        )
+        cls.temporary_officer = Users.objects.create_user(
+            email='pejabat-plt-ui@example.com', first_name='Pejabat',
+            last_name='Sementara', password=cls.password,
+        )
+        instansi = InstansiDaerah.objects.create(instansi='Instansi UI')
+        satker = SatuanKerjaInduk.objects.create(
+            instansi_daerah=instansi, satuan_kerja='Satker UI',
+        )
+        cls.unor = UnitOrganisasi.objects.create(
+            satker_induk=satker, unor='Unit Organisasi UI', pimpinan='Direktur',
+        )
+
+    def setUp(self):
+        self.client.force_login(self.admin)
+
+    def test_admin_akun_dapat_membuka_pengelolaan_pejabat(self):
+        response = self.client.get(
+            reverse('myaccount_urls:structural_officer_management')
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Aktifkan Pejabat')
+
+    def test_user_biasa_ditolak(self):
+        self.client.force_login(self.regular_user)
+        response = self.client.get(
+            reverse('myaccount_urls:structural_officer_management')
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_aktivasi_plt_menutup_pejabat_lama(self):
+        old_term = PejabatStruktur.objects.create(
+            unit_organisasi=self.unor,
+            pejabat=self.old_officer,
+            nama_jabatan='Direktur',
+            tanggal_mulai=date(2025, 1, 1),
+        )
+        response = self.client.post(
+            reverse('myaccount_urls:structural_officer_management'),
+            {
+                'pejabat': self.temporary_officer.pk,
+                'struktur': f'unit_organisasi:{self.unor.pk}',
+                'jenis_penugasan': PejabatStruktur.PLT,
+                'nama_jabatan': 'Direktur',
+                'tanggal_mulai': date.today().isoformat(),
+            },
+        )
+
+        self.assertRedirects(
+            response, reverse('myaccount_urls:structural_officer_management')
+        )
+        old_term.refresh_from_db()
+        new_term = PejabatStruktur.objects.get(
+            unit_organisasi=self.unor,
+            pejabat=self.temporary_officer,
+            is_active=True,
+        )
+        self.unor.refresh_from_db()
+        self.assertFalse(old_term.is_active)
+        self.assertEqual(new_term.jenis_penugasan, PejabatStruktur.PLT)
+        self.assertEqual(new_term.nama_jabatan, 'Plt. Direktur')
+        self.assertEqual(self.unor.nama_pimpinan, self.temporary_officer)
+
+    def test_admin_dapat_menutup_masa_jabatan_aktif(self):
+        term = PejabatStruktur.objects.create(
+            unit_organisasi=self.unor,
+            pejabat=self.old_officer,
+            nama_jabatan='Direktur',
+            tanggal_mulai=date(2025, 1, 1),
+        )
+        response = self.client.post(
+            reverse('myaccount_urls:structural_officer_deactivate', args=[term.pk]),
+            {'tanggal_selesai': date.today().isoformat()},
+        )
+        self.assertRedirects(
+            response, reverse('myaccount_urls:structural_officer_management')
+        )
+        term.refresh_from_db()
+        self.unor.refresh_from_db()
+        self.assertFalse(term.is_active)
+        self.assertEqual(term.tanggal_selesai, date.today())
+        self.assertIsNone(self.unor.nama_pimpinan)
 
 
 class EmployeeRegistrationTests(TestCase):

@@ -17,7 +17,7 @@ from oauth2_provider.contrib.rest_framework import OAuth2Authentication
 # Pastikan import model Anda sudah benar sesuai struktur aplikasi
 
 from .models import Users, ProfilSDM
-from strukturorg.models import UnitOrganisasi, Bidang, SubBidang
+from strukturorg.models import PejabatStruktur, UnitOrganisasi, Bidang, SubBidang
 from disiplinsdm.models import JenisSDMPerinstalasi
 from .serializers import DataMinimalPegawaiSerializer, PegawaiSerializer, DokterSpesialisSerializer
 from dokumen.models import RiwayatPanggol, RiwayatPendidikan, RiwayatPenempatan, RiwayatJabatan
@@ -85,9 +85,16 @@ class DetailMeAPIView(APIView):
         )
         
         # 3. Subquery evaluasi struktural pimpinan jika pegawai merupakan pejabat
-        direktur = UnitOrganisasi.objects.filter(nama_pimpinan=OuterRef('pk'))
-        bidang = Bidang.objects.filter(nama_pimpinan=OuterRef('pk'))
-        sub_bidang = SubBidang.objects.filter(nama_pimpinan=OuterRef('pk'))
+        direktur = PejabatStruktur.objects.filter(
+            pejabat=OuterRef('pk'), is_active=True,
+            unit_organisasi__isnull=False,
+        )
+        bidang = PejabatStruktur.objects.filter(
+            pejabat=OuterRef('pk'), is_active=True, bidang__isnull=False,
+        )
+        sub_bidang = PejabatStruktur.objects.filter(
+            pejabat=OuterRef('pk'), is_active=True, sub_bidang__isnull=False,
+        )
 
         # 4. Prefetch kustom
         jsdm_qs = (
@@ -113,7 +120,7 @@ class DetailMeAPIView(APIView):
             )
             .annotate(
                 data_pejabat=Coalesce(
-                    Subquery(direktur.values('unor')[:1]),
+                    Subquery(direktur.values('unit_organisasi')[:1]),
                     Subquery(bidang.values('bidang')[:1]),
                     Subquery(sub_bidang.values('sub_bidang')[:1]),
                     default=None

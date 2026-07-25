@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-1">
+                <i class="fas fa-broom mr-2"></i>Pemutihan Pengajuan Cuti
+            </h4>
+            <p class="text-muted mb-0">
+                Koreksi massal khusus admin untuk pengajuan pada masa gangguan sistem.
+            </p>
+        </div>
+        <a href="{% url 'layanan_urls:layanan_cuti_listview' %}"
+           class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left mr-1"></i>Kembali
+        </a>
+    </div>
+
+    <div class="alert alert-warning">
+        <strong>Perhatian:</strong> tindakan ini mengubah status final pengajuan
+        dan status pelaksanaan cuti. Setiap perubahan disimpan dalam log audit
+        beserta admin dan catatannya.
+    </div>
+
+    <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body">
+            <form method="get" class="row">
+                <div class="form-group col-md-3">
+                    <label for="tanggal_mulai">Pengajuan mulai</label>
+                    <input type="date" id="tanggal_mulai" name="tanggal_mulai"
+                           value="{{ filters.tanggal_mulai|date:'Y-m-d' }}"
+                           class="form-control" required>
+                </div>
+                <div class="form-group col-md-3">
+                    <label for="tanggal_akhir">Pengajuan sampai</label>
+                    <input type="date" id="tanggal_akhir" name="tanggal_akhir"
+                           value="{{ filters.tanggal_akhir|date:'Y-m-d' }}"
+                           class="form-control" required>
+                </div>
+                <div class="form-group col-md-2">
+                    <label for="status">Status</label>
+                    <select id="status" name="status" class="form-control">
+                        <option value="proses" {% if filters.status == 'proses' %}selected{% endif %}>
+                            Belum final
+                        </option>
+                        <option value="semua" {% if filters.status == 'semua' %}selected{% endif %}>
+                            Semua status
+                        </option>
+                        {% for value, label in status_choices %}
+                        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>
+                            {{ label }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group col-md-3">
+                    <label for="q">Nama/NIP/email</label>
+                    <input type="text" id="q" name="q" value="{{ filters.q }}"
+                           class="form-control" placeholder="Cari pegawai">
+                </div>
+                <div class="form-group col-md-1 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary btn-block">
+                        <i class="fas fa-filter"></i>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <form method="post" id="pemutihan-form">
+        {% csrf_token %}
+        <input type="hidden" name="tanggal_mulai" value="{{ filters.tanggal_mulai|date:'Y-m-d' }}">
+        <input type="hidden" name="tanggal_akhir" value="{{ filters.tanggal_akhir|date:'Y-m-d' }}">
+        <input type="hidden" name="status" value="{{ filters.status }}">
+        <input type="hidden" name="q" value="{{ filters.q }}">
+
+        <div class="card shadow-sm border-0">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>
+                    Ditemukan <strong>{{ total_data }}</strong> pengajuan.
+                    {% if total_data > 500 %}
+                    Hanya 500 data pertama yang ditampilkan; persempit filter.
+                    {% endif %}
+                </span>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="pilih-semua">
+                    Pilih semua
+                </button>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="thead-light">
+                        <tr>
+                            <th style="width: 45px;">
+                                <input type="checkbox" id="check-all" aria-label="Pilih semua">
+                            </th>
+                            <th>Tanggal Pengajuan</th>
+                            <th>Pegawai</th>
+                            <th>Jenis/Periode Cuti</th>
+                            <th>Status Pengajuan</th>
+                            <th>Status Pelaksanaan</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in data %}
+                        <tr>
+                            <td>
+                                <input type="checkbox" class="pengajuan-check"
+                                       name="pengajuan_ids" value="{{ item.pk }}"
+                                       aria-label="Pilih pengajuan {{ item.pk }}">
+                            </td>
+                            <td>
+                                {{ item.created_at|date:"d/m/Y H:i" }}
+                                <div class="small text-muted">ID #{{ item.pk }}</div>
+                            </td>
+                            <td>
+                                <strong>{{ item.pegawai.full_name }}</strong>
+                                <div class="small text-muted">
+                                    {{ item.pegawai.profil_user.nip|default:item.pegawai.email }}
+                                </div>
+                            </td>
+                            <td>
+                                {% if item.cuti_usulan %}
+                                {{ item.cuti_usulan.jenis_cuti }}
+                                <div class="small text-muted">
+                                    {{ item.cuti_usulan.tgl_mulai_cuti|date:"d/m/Y" }}
+                                    s/d {{ item.cuti_usulan.tgl_akhir_cuti|date:"d/m/Y" }}
+                                    &middot; {{ item.cuti_usulan.lama_cuti }} hari
+                                </div>
+                                {% else %}
+                                <span class="text-danger">Detail cuti tidak ditemukan</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge badge-secondary">{{ item.get_status_display }}</span>
+                            </td>
+                            <td>
+                                {% if item.cuti_usulan %}
+                                <span class="badge badge-light">
+                                    {{ item.cuti_usulan.status_pelaksanaan_display }}
+                                </span>
+                                {% else %}-{% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="6" class="text-center text-muted py-4">
+                                Tidak ada pengajuan pada filter ini.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer">
+                <div class="row">
+                    <div class="form-group col-md-3 mb-md-0">
+                        <label for="aksi">Keputusan pemutihan</label>
+                        <select name="aksi" id="aksi" class="form-control" required>
+                            <option value="">-- Pilih keputusan --</option>
+                            {% for value, label in action_choices %}
+                            <option value="{{ value }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group col-md-7 mb-md-0">
+                        <label for="catatan">Catatan/alasan pemutihan</label>
+                        <textarea name="catatan" id="catatan" class="form-control"
+                                  rows="2" required
+                                  placeholder="Contoh: Pemulihan pengajuan saat gangguan sistem tanggal ..."></textarea>
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <button type="submit" class="btn btn-warning btn-block">
+                            <i class="fas fa-save mr-1"></i>Proses Terpilih
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+
+    <div class="card shadow-sm border-0 mt-4">
+        <div class="card-header">
+            <strong>50 Aktivitas Pemutihan Terakhir</strong>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="thead-light">
+                    <tr>
+                        <th>Waktu</th>
+                        <th>Pegawai</th>
+                        <th>Perubahan</th>
+                        <th>Admin</th>
+                        <th>Catatan</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in recent_logs %}
+                    <tr>
+                        <td>{{ log.created_at|date:"d/m/Y H:i" }}</td>
+                        <td>{{ log.layanan_cuti.pegawai.full_name }}</td>
+                        <td>
+                            {{ log.get_status_pengajuan_sebelum_display|default:log.status_pengajuan_sebelum }}
+                            &rarr; {{ log.get_aksi_display }}
+                        </td>
+                        <td>{{ log.admin.full_name|default:"-" }}</td>
+                        <td>{{ log.catatan }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-muted py-3">
+                            Belum ada aktivitas pemutihan.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock content %}
+
+{% block script %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const checkAll = document.getElementById("check-all");
+    const selectAllButton = document.getElementById("pilih-semua");
+    const form = document.getElementById("pemutihan-form");
+
+    function checks() {
+        return Array.from(document.querySelectorAll(".pengajuan-check"));
+    }
+
+    function setAll(checked) {
+        checks().forEach(function (item) { item.checked = checked; });
+        checkAll.checked = checked;
+    }
+
+    checkAll.addEventListener("change", function () {
+        setAll(checkAll.checked);
+    });
+    selectAllButton.addEventListener("click", function () {
+        setAll(!checks().every(function (item) { return item.checked; }));
+    });
+    form.addEventListener("submit", function (event) {
+        const selected = checks().filter(function (item) { return item.checked; }).length;
+        const action = document.getElementById("aksi");
+        if (!selected) {
+            event.preventDefault();
+            window.alert("Pilih minimal satu pengajuan cuti.");
+            return;
+        }
+        const label = action.options[action.selectedIndex].text;
+        if (!window.confirm(
+            "Ubah " + selected + " pengajuan menjadi " + label +
+            "? Perubahan akan dicatat dalam log audit."
+        )) {
+            event.preventDefault();
+        }
+    });
+});
+</script>
+{% endblock script %}

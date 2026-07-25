@@ -30,13 +30,17 @@
                     </div>
                     {% if request.user.is_dokumen_admin %}
                     <div>
-                        {% if request.user.is_dokumen_admin and not nip %}
-                        <a href="{% url 'riwayat_urls:riwayat_cuti_urutkan' pk=dok.id %}" class="btn btn-outline-info">Urutkan Dokumen</a>
-                        {% elif request.user.is_dokumen_admin and nip %}
+                        {% if nip %}
                         <a href="{% url 'riwayat_urls:riwayat_cuti_urutkan' pk=dok.id %}?nip={{nip}}" class="btn btn-outline-info">Urutkan Dokumen</a>
+                        <a href="{% url 'riwayat_urls:riwayat_penggunaan_cuti' %}?nip={{nip}}" class="btn btn-outline-primary">Penggunaan Cuti</a>
+                        {% else %}
+                        <a href="{% url 'riwayat_urls:riwayat_penggunaan_cuti' %}" class="btn btn-outline-success">Penggunaan Cuti</a>
+                        <a href="{% url 'riwayat_urls:riwayat_cuti_urutkan' pk=dok.id %}" class="btn btn-outline-info">Urutkan Dokumen</a>
                         {% endif %}
                         <input type="button" class="btn btn-outline-success" id="add_data" value="Tambah Data">
                     </div>
+                    {% else %}
+                    <a href="{% url 'riwayat_urls:riwayat_penggunaan_cuti' %}" class="btn btn-outline-success">Penggunaan Cuti</a>
                     {% endif %}
                 </div>
             </div>
@@ -51,23 +55,18 @@
                     </div>
                 </div>
                 <div class="row" id="list_data" style="display: {{data_view}};">
+                    {% if snapshot_saldo_cuti %}
                     <div class="col-md-12 border border-success border-block rounded p-2 mb-2" style="background-color: rgb(164, 233, 176);">
-                        {% if cek_sisa_cuti > 0 %}
+                        {% if snapshot_saldo_cuti.total_tersedia > 0 %}
                             <span>
-                                Sisa cuti tahunan anda {{cek_sisa_cuti}} hari
-                                {% if cek_sisa_tunda_cuti > 0 %}
-                                    dan sisa cuti tertunda {{cek_sisa_tunda_cuti}} hari
-                                {% endif %}
-                            </span> 
-                        {% else %}
-                            <span>
-                                Jatah cuti tahunan anda sudah habis 
-                                {% if cek_sisa_tunda_cuti > 0 %}
-                                    dan sisa cuti tertunda {{cek_sisa_tunda_cuti}} hari
-                                {% endif %}
+                                Total saldo cuti tahunan yang dapat digunakan:
+                                <strong>{{ snapshot_saldo_cuti.total_tersedia }} hari</strong>.
                             </span>
+                        {% else %}
+                            <span>Saldo cuti tahunan yang dapat digunakan sudah habis.</span>
                         {% endif %}
                     </div>
+                    {% endif %}
                     <div class="col-md-12">
                         {% if nip %}
                             {% include '10_riwayat_cuti/riwayat_cuti_perorang.html' %}

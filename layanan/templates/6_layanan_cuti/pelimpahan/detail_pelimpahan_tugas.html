@@ -70,8 +70,8 @@
         </a>
     {% endif %}
 
-    {% if pelimpahan.status == "menunggu_kepala" and user == pelimpahan.kepala_instalasi %}
-        <a href="{% url 'layanan_urls:pelimpahan_kepala_update' pelimpahan.pk %}" class="btn btn-warning">
+    {% if pelimpahan.status == "menunggu_atasan" and user == pelimpahan.atasan_penyetuju %}
+        <a href="{% url 'layanan_urls:pelimpahan_atasan_update' pelimpahan.pk %}" class="btn btn-warning">
             Setujui / Tolak
         </a>
     {% endif %}

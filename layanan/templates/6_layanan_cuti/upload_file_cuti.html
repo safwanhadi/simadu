@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+
+{% block title_page %}Upload Surat Cuti Final{% endblock title_page %}
+
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex align-items-center mb-4">
+    <a href="{% url 'layanan_urls:layanan_cuti_detail' pk=riwayat_cuti.usulan_id %}"
+       class="btn btn-sm btn-light border text-secondary mr-3">
+      <i class="fas fa-arrow-left"></i>
+    </a>
+    <div>
+      <h4 class="mb-1 font-weight-bold">Upload Surat Cuti Final</h4>
+      <p class="text-muted mb-0">
+        {{ riwayat_cuti.pegawai.full_name }} · {{ riwayat_cuti.jenis_cuti }}
+      </p>
+    </div>
+  </div>
+
+  <div class="card shadow-sm border-0">
+    <div class="card-body">
+      <div class="alert alert-info">
+        Setelah PDF berhasil diunggah, status pengajuan otomatis berubah menjadi
+        <strong>SELESAI</strong>.
+      </div>
+
+      <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {{ form|crispy }}
+        <button type="submit" class="btn btn-success">
+          <i class="fas fa-upload mr-1"></i> Upload dan Selesaikan
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock content %}

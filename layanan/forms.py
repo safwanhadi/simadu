@@ -16,6 +16,7 @@ from .models import (
     VerifikasiCuti,
     VerifikasiDiklat,
     PelimpahanTugas,
+    PerubahanJadwalCuti,
     LayananSIP,
     LayananNaikPangkat,
     LayananNaikJabatan,
@@ -30,16 +31,12 @@ from dokumen.forms import (
     FormAlihanRiwayatDiklat,
     FormPenugasanDiklat,
     FormUsulanRiwayatDiklat,
-    RiwayatCutiForm,
     RiwayatPengajuanCutiForm,
 )
-from strukturorg.models import UnitInstalasi
 from myaccount.models import Users
 from dokumen.models import (
-    JENISCUTI, 
     RiwayatCuti, 
     RiwayatGajiBerkala, 
-    DokumenSDM, 
     RiwayatDiklat, 
     RiwayatInovasi,
     KlaimCutiTunda,
@@ -301,104 +298,74 @@ class RiwayatGajiBerkalaForm(forms.ModelForm):
             self.fields['no_srt_gaji'].widget = forms.HiddenInput()
             
             
-# FORM LAYANAN CUTI
-class FormLayananCutiExisting(forms.ModelForm):
-    tgl_mulai_cuti = forms.DateField(required=False, widget=forms.TextInput(attrs={'type':'date', 'class':bootstrap_col}))
-    tgl_akhir_cuti = forms.DateField(required=False, widget=forms.TextInput(attrs={'type':'date', 'class':bootstrap_col}))
-    class Meta:
-        model = LayananCuti
-        fields = ('pegawai', 'layanan', 'status', 'tgl_mulai_cuti', 'tgl_akhir_cuti')
-    
-    def __init__(self, *args, **kwargs):
-        self.request=kwargs.pop("request", None)
-        super(FormLayananCutiExisting, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_cuti_admin:
-            self.fields['pegawai'].widget=forms.HiddenInput()
-            self.fields['layanan'].widget=forms.HiddenInput()
-            self.fields['status'].widget=forms.HiddenInput()
-            # menghilangkan empty label: self.fields['cuti'].empty_label = None
-        # id : self.fields['cuti'].widget.attrs['id'] = 'data_cuti'
-            
-
-class FormLayananCuti(forms.ModelForm):
-    layanan = forms.ModelChoiceField(queryset=JenisLayanan.objects.all(), required=True)
-    status = forms.CharField(required=False)
-    
-    class Meta:
-        model = RiwayatCuti
-        fields = ('pegawai', 'layanan', 'dokumen', 'jenis_cuti', 'alasan_cuti', 'tgl_mulai_cuti', 'tgl_akhir_cuti', 'lama_cuti', 'domisili_saat_cuti', 'status_cuti', 'status')
-
-    def __init__(self, status=None, *args, **kwargs):
-        self.request=kwargs.pop("request", None)
-        super(FormLayananCuti, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_cuti_admin:
-            self.fields['pegawai'].widget = forms.HiddenInput()
-            self.fields['dokumen'].widget = forms.HiddenInput()
-            self.fields['layanan'].widget = forms.HiddenInput()
-            self.fields['status'].widget = forms.HiddenInput()
-            self.fields['status_cuti'].widget = forms.HiddenInput()
-        if status == 'tunda':
-            self.fields['jenis_cuti'].widget = forms.HiddenInput()
-            self.fields['tgl_mulai_cuti'].widget = forms.HiddenInput()
-            self.fields['tgl_akhir_cuti'].widget = forms.HiddenInput()
-            self.fields['jenis_cuti'].initial = 'Cuti Tahunan'
-            self.fields['status_cuti'].initial = 'Tunda'
-        if status == 'baru' or status == 'ambil-tunda':
-            self.fields['status_cuti'].initial = 'Proses'
-            self.fields['tgl_mulai_cuti'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
-            self.fields['tgl_akhir_cuti'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
-
-################# cuti versi inlineform ########################
-STATUS_CUTI = (
-    ('tindaklanjut', 'Tindaklanjut'),
-    ('tidak ditindaklanjut', 'Tidak ditindaklanjut'),
-)
-
-def get_instalasi_queryset(user):
-    qs = UnitInstalasi.objects.all()
-    if user.is_cuti_admin:
-        return qs
-    profil = getattr(user, 'profil_admin', None)
-    if profil:
-        if profil.instalasi.exists():
-            return qs.filter(pk__in=profil.instalasi.values_list('pk', flat=True))
-        if profil.sub_bidang:
-            return qs.filter(sub_bidang=profil.sub_bidang)
-        if profil.bidang:
-            return qs.filter(sub_bidang__bidang=profil.bidang)
-    return qs.none()
-    
 class LayananCutiForm(forms.ModelForm):
-    pegawai = forms.ModelChoiceField(queryset=Users.objects.all().exclude(is_superuser=True, is_active=False))
+    pegawai = forms.ModelChoiceField(
+        queryset=Users.objects.filter(is_active=True).exclude(is_superuser=True),
+        label='Pegawai',
+    )
     class Meta:
         model = LayananCuti
-        fields = ('pegawai', 'cuti_tunda', 'layanan', 'status', 'tahun')
+        fields = ('pegawai', 'layanan', 'status', 'tahun')
 
     def __init__(self, *args, **kwargs):
-        self.action = kwargs.pop("action", None)#edit or add
-        self.case = kwargs.pop("case", None)#dakung/proses/dll
         self.request = kwargs.pop("request", None)
         super(LayananCutiForm, self).__init__(*args, **kwargs)
         for name, field in self.fields.items():
             if not isinstance(field.widget, forms.CheckboxInput):
                 field.widget.attrs.setdefault('class', 'form-control')
-        if self.case == "tindaklanjut":
-            self.fields['status'] = forms.ChoiceField(choices=STATUS_CUTI)
-            self.fields['status'].label = "Pilih tindaklanjut usulan cuti"
-        else:
-            self.fields['status'].widget = forms.HiddenInput()
+        self.fields['status'].widget = forms.HiddenInput()
         self.fields["tahun"].disabled = True
         self.fields['layanan'].widget = forms.HiddenInput()
-        self.fields['pegawai'].widget = forms.HiddenInput()
-        self.fields['cuti_tunda'].widget = forms.HiddenInput()
+        if self.request and self.request.user.is_cuti_admin:
+            self.fields['pegawai'].queryset = (
+                Users.objects.filter(is_active=True)
+                .exclude(is_superuser=True)
+                .order_by('first_name', 'last_name', 'email')
+            )
+        elif self.request and self.request.user.is_authenticated:
+            self.fields['pegawai'].queryset = Users.objects.filter(
+                pk=self.request.user.pk,
+            )
+            self.fields['pegawai'].initial = self.request.user
+            self.fields['pegawai'].widget = forms.HiddenInput()
+
+
+class UploadFileCutiForm(forms.ModelForm):
+    class Meta:
+        model = RiwayatCuti
+        fields = ('file',)
+        widgets = {
+            'file': forms.ClearableFileInput(attrs={
+                'class': 'form-control',
+                'accept': 'application/pdf,.pdf',
+            }),
+        }
+
+    def clean_file(self):
+        uploaded_file = self.cleaned_data.get('file')
+        if not uploaded_file:
+            raise forms.ValidationError('Pilih file surat cuti yang akan diunggah.')
+        if not uploaded_file.name.lower().endswith('.pdf'):
+            raise forms.ValidationError('Surat cuti final harus berupa file PDF.')
+
+        position = uploaded_file.tell()
+        signature = uploaded_file.read(5)
+        uploaded_file.seek(position)
+        if signature != b'%PDF-':
+            raise forms.ValidationError('Isi file tidak dikenali sebagai dokumen PDF yang valid.')
+        return uploaded_file
 
 pengajuan_cuti_formset = inlineformset_factory(
-    LayananCuti, RiwayatCuti, form=RiwayatPengajuanCutiForm, extra=1, can_delete=False
+    LayananCuti,
+    RiwayatCuti,
+    form=RiwayatPengajuanCutiForm,
+    extra=1,
+    min_num=1,
+    max_num=1,
+    validate_min=True,
+    validate_max=True,
+    can_delete=False,
 )
-update_pengajuan_cuti_formset = inlineformset_factory(
-    LayananCuti, RiwayatCuti, form=RiwayatPengajuanCutiForm, extra=0, can_delete=False
-)
-
 class PelimpahanTugasCreateForm(forms.ModelForm):
     class Meta:
         model = PelimpahanTugas
@@ -408,6 +375,11 @@ class PelimpahanTugasCreateForm(forms.ModelForm):
         self.request = kwargs.pop('request', None)
         self.riwayat_cuti = kwargs.pop('riwayat_cuti', None)
         super().__init__(*args, **kwargs)
+
+        queryset = Users.objects.filter(is_active=True).exclude(is_superuser=True)
+        if self.riwayat_cuti:
+            queryset = queryset.exclude(pk=self.riwayat_cuti.pegawai_id)
+        self.fields['penerima_tugas'].queryset = queryset.order_by('first_name', 'last_name')
 
         # Optionally: batasi pilihan penerima_tugas hanya 1 instalasi / unit tertentu.
         # Contoh: semua pegawai 1 SubBidang / Instalasi yg sama.
@@ -423,8 +395,35 @@ class PelimpahanTugasCreateForm(forms.ModelForm):
         cleaned = super().clean()
         a = cleaned.get("tgl_mulai")
         b = cleaned.get("tgl_selesai")
+        penerima = cleaned.get("penerima_tugas")
         if a and b and a > b:
             raise forms.ValidationError("Tanggal mulai tidak boleh melebihi tanggal selesai.")
+        if self.riwayat_cuti:
+            if penerima and penerima.pk == self.riwayat_cuti.pegawai_id:
+                self.add_error('penerima_tugas', "Penerima tugas tidak boleh pegawai yang mengajukan cuti.")
+            if a != self.riwayat_cuti.tgl_mulai_cuti or b != self.riwayat_cuti.tgl_akhir_cuti:
+                raise forms.ValidationError(
+                    "Periode pelimpahan tugas harus sama dengan periode cuti."
+                )
+        if penerima and a and b:
+            bentrok_cuti = RiwayatCuti.objects.filter(
+                pegawai=penerima,
+                tgl_mulai_cuti__lte=b,
+                tgl_akhir_cuti__gte=a,
+            ).exclude(
+                usulan__status__in=('ditolak', 'dibatalkan')
+            ).exists()
+            bentrok_pelimpahan = PelimpahanTugas.objects.filter(
+                penerima_tugas=penerima,
+                tgl_mulai__lte=b,
+                tgl_selesai__gte=a,
+                status__in=('menunggu_penerima', 'menunggu_atasan', 'disetujui'),
+            ).exclude(pk=self.instance.pk).exists()
+            if bentrok_cuti or bentrok_pelimpahan:
+                self.add_error(
+                    'penerima_tugas',
+                    'Pegawai ini sedang cuti atau menerima pelimpahan lain pada periode tersebut.',
+                )
         return cleaned
 
 
@@ -457,17 +456,108 @@ class PelimpahanTugasAtasanForm(forms.ModelForm):
         fields = ['aksi', 'catatan_atasan']
 
 
-class LayananCutiFullForm(forms.ModelForm):
+class PerubahanJadwalCutiForm(forms.ModelForm):
     class Meta:
-        model = LayananCuti
-        fields = '__all__'
+        model = PerubahanJadwalCuti
+        fields = ('tanggal_mulai_baru', 'tanggal_akhir_baru', 'alasan')
+        widgets = {
+            'tanggal_mulai_baru': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}),
+            'tanggal_akhir_baru': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}),
+            'alasan': forms.Textarea(attrs={'rows': 4, 'class': 'form-control'}),
+        }
 
-pengajuan_cuti_fullform_formset = inlineformset_factory(
-    LayananCuti, RiwayatCuti, form=RiwayatPengajuanCutiForm, extra=1, can_delete=False
-)
-update_pengajuan_cuti_fullform_formset = inlineformset_factory(
-    LayananCuti, RiwayatCuti, form=RiwayatPengajuanCutiForm, extra=0, can_delete=False
-)
+    def __init__(self, *args, **kwargs):
+        self.riwayat_cuti = kwargs.pop('riwayat_cuti')
+        self.check_cuti = kwargs.pop('check_cuti')
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        cleaned = super().clean()
+        mulai = cleaned.get('tanggal_mulai_baru')
+        akhir = cleaned.get('tanggal_akhir_baru')
+        if not mulai or not akhir:
+            return cleaned
+        if mulai < date.today():
+            self.add_error('tanggal_mulai_baru', 'Tanggal mulai baru tidak boleh sudah lewat.')
+            return cleaned
+        if akhir < mulai:
+            self.add_error('tanggal_akhir_baru', 'Tanggal akhir tidak boleh sebelum tanggal mulai.')
+            return cleaned
+
+        lama_baru = (akhir - mulai).days + 1
+        self.instance.lama_cuti_baru = lama_baru
+        if (
+            mulai == self.riwayat_cuti.tgl_mulai_cuti
+            and akhir == self.riwayat_cuti.tgl_akhir_cuti
+        ):
+            raise forms.ValidationError('Jadwal baru sama dengan jadwal cuti saat ini.')
+
+        bentrok = RiwayatCuti.objects.filter(
+            pegawai=self.riwayat_cuti.pegawai,
+            tgl_mulai_cuti__lte=akhir,
+            tgl_akhir_cuti__gte=mulai,
+        ).exclude(pk=self.riwayat_cuti.pk).exclude(
+            usulan__status__in=('ditolak', 'dibatalkan')
+        )
+        if bentrok.exists():
+            raise forms.ValidationError('Jadwal baru bertabrakan dengan pengajuan cuti lain.')
+
+        if self.riwayat_cuti.jenis_cuti == 'Cuti Tahunan':
+            total_klaim = self.riwayat_cuti.klaim_masuk.aggregate(
+                total=Coalesce(Sum('jumlah_hari_diklaim'), 0)
+            )['total'] or 0
+            if lama_baru < total_klaim:
+                raise forms.ValidationError(
+                    f'Durasi baru tidak boleh kurang dari {total_klaim} hari yang sudah memakai cuti tunda.'
+                )
+            saldo_tersedia = self.check_cuti.cek_sisa_cuti(self.riwayat_cuti.pegawai)
+            hak_lama_dilepas = self.riwayat_cuti.lama_cuti or 0
+            if lama_baru > saldo_tersedia + hak_lama_dilepas:
+                raise forms.ValidationError('Saldo cuti tidak mencukupi untuk jadwal baru.')
+
+            pelimpahan = getattr(self.riwayat_cuti, 'pelimpahan_tugas', None)
+            if self.riwayat_cuti.usulan.status in ('disetujui', 'selesai') and pelimpahan is None:
+                raise forms.ValidationError(
+                    'Pelimpahan tugas lama tidak ditemukan. Hubungi admin cuti sebelum mengubah jadwal.'
+                )
+            if pelimpahan:
+                penerima = pelimpahan.penerima_tugas
+                penerima_cuti = RiwayatCuti.objects.filter(
+                    pegawai=penerima,
+                    tgl_mulai_cuti__lte=akhir,
+                    tgl_akhir_cuti__gte=mulai,
+                ).exclude(
+                    usulan__status__in=('ditolak', 'dibatalkan')
+                ).exists()
+                penerima_sibuk = PelimpahanTugas.objects.filter(
+                    penerima_tugas=penerima,
+                    tgl_mulai__lte=akhir,
+                    tgl_selesai__gte=mulai,
+                    status__in=('menunggu_penerima', 'menunggu_atasan', 'disetujui'),
+                ).exclude(pk=pelimpahan.pk).exists()
+                if penerima_cuti or penerima_sibuk:
+                    raise forms.ValidationError(
+                        'Penerima pelimpahan tidak tersedia pada jadwal baru. Revisi penerima tugas terlebih dahulu.'
+                    )
+
+        return cleaned
+
+
+class PerubahanJadwalDecisionForm(forms.Form):
+    keputusan = forms.ChoiceField(
+        choices=(('setuju', 'Setujui perubahan'), ('tolak', 'Tolak perubahan')),
+        widget=forms.RadioSelect,
+    )
+    catatan = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 3, 'class': 'form-control'}),
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get('keputusan') == 'tolak' and not (cleaned.get('catatan') or '').strip():
+            self.add_error('catatan', 'Catatan wajib diisi jika perubahan ditolak.')
+        return cleaned
 
 
 class OverrideKlaimTundaForCutiForm(forms.Form):
@@ -502,8 +592,8 @@ class OverrideKlaimTundaForCutiForm(forms.Form):
                 pegawai_id=pegawai_id,
                 jenis_cuti="Cuti Tahunan",
                 status_cuti="Tunda",
-                status_persetujuan="disetujui",
             )
+            .filter(Q(usulan__status__in=('disetujui', 'selesai')) | Q(usulan__isnull=True))
             .annotate(total_terklaim=Coalesce(Sum("klaim_keluar__jumlah_hari_diklaim"), 0))
             .filter(total_terklaim__lt=F("lama_cuti"))
             .order_by("-created_at", "-id")
@@ -581,22 +671,6 @@ class OverrideKlaimTundaForCutiForm(forms.Form):
         return klaim
 
 
-class VerifikatorCutiForm(forms.ModelForm):
-    class Meta:
-        model = VerifikasiCuti
-        fields = '__all__'
-
-    def __init__(self, *args, **kwargs):
-        super(VerifikatorCutiForm, self).__init__(*args, **kwargs)
-        self.fields['layanan_cuti'].widget = forms.HiddenInput()
-
-
-STATUS_PERS = (
-    ("", "— Pilih keputusan —"),
-    ("setuju", "Setuju"),
-    ("tolak", "Tolak"),
-)
-
 KEPUTUSAN_INPUT = (
     ("setuju", "Disetujui"),
     ("tunda", "Ditunda"),
@@ -618,12 +692,10 @@ class Verifikator2CutiForm(forms.ModelForm):
     
     class Meta:
         model = VerifikasiCuti
-        fields = ('layanan_cuti', 'verifikator2', 'keputusan2', 'catatan2')
+        fields = ('keputusan2', 'catatan2')
 
     def __init__(self, *args, **kwargs):
         super(Verifikator2CutiForm, self).__init__(*args, **kwargs)
-        self.fields['layanan_cuti'].widget = forms.HiddenInput()
-        self.fields['verifikator2'].widget = forms.HiddenInput()
         self.fields['keputusan2'].label = 'Apakah anda menyetujui pengajuan cuti pegawai ini?'
         self.fields['catatan2'].label = 'Catatan persetujuan cuti'
 
@@ -634,14 +706,10 @@ class Verifikator3CutiForm(forms.ModelForm):
     
     class Meta:
         model = VerifikasiCuti
-        fields = ('layanan_cuti', 'verifikator3', 'keputusan3', 'catatan3', 'tanggal')
+        fields = ('keputusan3', 'catatan3')
     
     def __init__(self, *args, **kwargs):
         super(Verifikator3CutiForm, self).__init__(*args, **kwargs)
-        self.fields['tanggal'].initial = timezone.now().date()
-        self.fields['layanan_cuti'].widget = forms.HiddenInput()
-        self.fields['verifikator3'].widget = forms.HiddenInput()
-        self.fields['tanggal'].widget = forms.HiddenInput()
         self.fields['keputusan3'].label = 'Apakah anda menyetujui pengajuan cuti pegawai ini?'
         self.fields['catatan3'].label = 'Catatan persetujuan cuti'
 

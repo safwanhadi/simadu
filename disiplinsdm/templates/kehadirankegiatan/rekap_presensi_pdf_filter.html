@@ -1,0 +1,140 @@
+{% extends 'base.html' %}
+
+{% block title_page %}Download Presensi Bulanan{% endblock title_page %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex align-items-center mb-4">
+        <a href="{% url 'disiplinsdm_urls:rekap_kehadiran_bulanan' %}" class="btn btn-sm btn-light border text-secondary mr-3">
+            <i class="fas fa-arrow-left"></i>
+        </a>
+        <div>
+            <h4 class="mb-1 font-weight-bold">Download Presensi Bulanan</h4>
+            <p class="text-muted mb-0">Pilih instalasi dan periode laporan presensi harian.</p>
+        </div>
+    </div>
+
+    {% if error %}
+        <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body">
+            <form method="get" target="_blank">
+                {% if can_filter_status %}
+                <div class="form-group">
+                    <label for="cakupan" class="font-weight-bold">Cakupan Laporan</label>
+                    <select id="cakupan" name="cakupan" class="form-control">
+                        <option value="instalasi" {% if selected_cakupan == "instalasi" %}selected{% endif %}>
+                            Berdasarkan Instalasi
+                        </option>
+                        <option value="status" {% if selected_cakupan == "status" %}selected{% endif %}>
+                            Berdasarkan Status Pegawai (Semua Instalasi)
+                        </option>
+                    </select>
+                    <small class="form-text text-muted">
+                        Pilihan status pegawai menggabungkan pegawai dari seluruh instalasi.
+                    </small>
+                </div>
+                {% else %}
+                    <input type="hidden" name="cakupan" value="instalasi">
+                {% endif %}
+
+                <div id="filter-instalasi" class="form-group">
+                    <label for="instalasi" class="font-weight-bold">Instalasi</label>
+                    <select id="instalasi" name="instalasi" class="form-control">
+                        <option value="">-- Pilih Instalasi --</option>
+                        {% for instalasi in daftar_instalasi %}
+                            <option value="{{ instalasi.pk }}" {% if selected_instalasi == instalasi.pk|stringformat:"s" %}selected{% endif %}>
+                                {{ instalasi }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    {% if not daftar_instalasi %}
+                        <small class="form-text text-danger">Tidak ada instalasi dalam hak akses Anda.</small>
+                    {% endif %}
+                </div>
+
+                {% if can_filter_status %}
+                <div id="filter-status-pegawai" class="form-group">
+                    <label for="status_pegawai" class="font-weight-bold">Status Pegawai</label>
+                    <select id="status_pegawai" name="status_pegawai" class="form-control">
+                        <option value="">-- Pilih Status Pegawai --</option>
+                        {% for value, label in daftar_status_pegawai %}
+                            <option value="{{ value }}" {% if selected_status_pegawai == value %}selected{% endif %}>
+                                {{ label }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <small class="form-text text-muted">
+                        Status mengikuti riwayat pengangkatan terbaru pegawai.
+                    </small>
+                </div>
+                {% endif %}
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="bulan" class="font-weight-bold">Bulan</label>
+                            <select id="bulan" name="bulan" class="form-control" required>
+                                {% for nomor, nama in daftar_bulan.items %}
+                                    <option value="{{ nomor }}" {% if selected_bulan == nomor %}selected{% endif %}>
+                                        {{ nama }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="tahun" class="font-weight-bold">Tahun</label>
+                            <input id="tahun" type="number" name="tahun" class="form-control"
+                                   min="2023" max="2100" value="{{ selected_tahun }}" required>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" name="download" value="pdf" class="btn btn-danger mr-2">
+                    <i class="fas fa-file-pdf mr-1"></i> Download PDF
+                </button>
+                <button type="submit" name="download" value="xlsx" class="btn btn-success">
+                    <i class="fas fa-file-excel mr-1"></i> Download Excel
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock content %}
+
+{% block script %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const cakupan = document.getElementById('cakupan');
+    const instalasiGroup = document.getElementById('filter-instalasi');
+    const instalasi = document.getElementById('instalasi');
+    const statusGroup = document.getElementById('filter-status-pegawai');
+    const statusPegawai = document.getElementById('status_pegawai');
+
+    function updateScopeFields() {
+        const statusMode = cakupan && cakupan.value === 'status';
+
+        if (instalasiGroup && instalasi) {
+            instalasiGroup.style.display = statusMode ? 'none' : '';
+            instalasi.required = !statusMode;
+            instalasi.disabled = statusMode;
+        }
+
+        if (statusGroup && statusPegawai) {
+            statusGroup.style.display = statusMode ? '' : 'none';
+            statusPegawai.required = statusMode;
+            statusPegawai.disabled = !statusMode;
+        }
+    }
+
+    if (cakupan) {
+        cakupan.addEventListener('change', updateScopeFields);
+    }
+    updateScopeFields();
+});
+</script>
+{% endblock script %}

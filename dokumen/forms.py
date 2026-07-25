@@ -2,7 +2,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.forms import modelformset_factory, inlineformset_factory
 from dateutil.relativedelta import relativedelta
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from layanan.services import CheckCuti
 from myaccount.models import Users
@@ -905,6 +905,15 @@ class CutiTundaMultipleChoiceField(forms.ModelMultipleChoiceField):
         return f"Tahun {tahun} – Tunda {total} hari (sisa {sisa} hari)"
     
 class RiwayatPengajuanCutiForm(SecureEmployeeModelForm):
+    JENIS_CUTI_DIGITAL = (
+        'Cuti Tahunan',
+        'Cuti Alasan Penting',
+        'Cuti melahirkan',
+        'Cuti Sakit',
+        'Cuti Besar',
+        'Cuti Diluar Tanggungan Negara',
+    )
+
     pakai_tunda_saja = forms.BooleanField(required=False, label="Ambil cuti tunda saja")
     # field tambahan untuk klaim cuti tunda
     cuti_tunda_dipilih = CutiTundaMultipleChoiceField(
@@ -918,23 +927,23 @@ class RiwayatPengajuanCutiForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatCuti
         fields = (
-            'pegawai', 'dokumen', 'jenis_cuti', 'alasan_cuti',
+            'jenis_cuti', 'alasan_cuti',
             'tgl_mulai_cuti', 'tgl_akhir_cuti', 'lama_cuti',
-            'domisili_saat_cuti', 'status_cuti'
+            'domisili_saat_cuti',
         )
 
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop("request", None)
-        self.status = kwargs.pop("status", None)         # 'baru' / 'ambil-tunda' / dst
-        self.action = kwargs.pop("action", None)         # 'add' / 'edit'
-        self.case = kwargs.pop("case", None)             # 'tindaklanjut' / dst
         self.tahun_pengajuan = kwargs.pop("tahun_pengajuan", None)
         self.check_cuti = kwargs.pop("check_cuti", None) # instance CheckCuti / view
-        self.tahun = kwargs.pop("tahun", None)
+        self.target_pegawai = kwargs.pop("target_pegawai", None)
         super(RiwayatPengajuanCutiForm, self).__init__(*args, **kwargs)
-        if not self.fields['cuti_tunda_dipilih'].queryset.exists():
-            self.fields['cuti_tunda_dipilih'].help_text = "Tidak ada cuti tunda yang dapat diklaim."
-        exclude_from_form_control = ['cuti_tunda_dipilih', 'dokumen']
+        self.fields['jenis_cuti'].choices = [
+            choice
+            for choice in self.fields['jenis_cuti'].choices
+            if not choice[0] or choice[0] in self.JENIS_CUTI_DIGITAL
+        ]
+        exclude_from_form_control = ['cuti_tunda_dipilih']
 
         for name, field in self.fields.items():
             if name in exclude_from_form_control:
@@ -953,70 +962,29 @@ class RiwayatPengajuanCutiForm(SecureEmployeeModelForm):
             attrs={'type': 'date', 'class': bootstrap_col}
         )
 
-        if self.request and not self.request.user.is_dokumen_admin:
-            self.fields['dokumen'].widget = forms.HiddenInput()
-            self.fields['pegawai'].widget = forms.HiddenInput()
-
-        # === LOGIKA STATUS LAMA TETAP ===
-        if self.status == 'tunda' and self.action == 'add':
-            self.fields['jenis_cuti'].widget = forms.HiddenInput()
-            self.fields['tgl_mulai_cuti'].widget = forms.HiddenInput()
-            self.fields['tgl_akhir_cuti'].widget = forms.HiddenInput()
-            self.fields['status_cuti'].widget = forms.HiddenInput()
-            self.fields['jenis_cuti'].initial = 'Cuti Tahunan'
-            self.fields['status_cuti'].initial = 'Tunda'
-        elif self.status == 'baru' and self.action == 'add':
-            self.fields['status_cuti'].widget = forms.HiddenInput()
-            self.fields['dokumen'].widget = forms.HiddenInput()
-            self.fields['status_cuti'].initial = 'Proses'
-        elif self.status == 'ambil-tunda' and self.action == 'add':
-            self.fields['jenis_cuti'].widget = forms.HiddenInput()
-            self.fields['alasan_cuti'].widget = forms.HiddenInput()
-            self.fields['lama_cuti'].widget = forms.HiddenInput()
-            self.fields['domisili_saat_cuti'].widget = forms.HiddenInput()
-            self.fields['status_cuti'].initial = 'Proses'
-        elif self.action == 'edit':
-            self.fields['jenis_cuti'].widget = forms.HiddenInput()
-            self.fields['status_cuti'].widget = forms.HiddenInput()
-
-        if self.case == 'tindaklanjut':
-            self.fields['jenis_cuti'].widget = forms.HiddenInput()
-            self.fields['tgl_mulai_cuti'].widget = forms.HiddenInput()
-            self.fields['tgl_akhir_cuti'].widget = forms.HiddenInput()
-            self.fields['alasan_cuti'].widget = forms.HiddenInput()
-            self.fields['lama_cuti'].widget = forms.HiddenInput()
-            self.fields['domisili_saat_cuti'].widget = forms.HiddenInput()
-            self.fields['status_cuti'].widget = forms.HiddenInput()
-            self.fields['pegawai'].widget = forms.HiddenInput()
-            self.fields['dokumen'].widget = forms.HiddenInput()
-            # field cuti_tunda_dipilih tidak relevan di sini
-            self.fields['cuti_tunda_dipilih'].widget = forms.HiddenInput()
-
         # === SET QUERYSET CUTI TUNDA ELIGIBLE ===
         if (
             self.request
             and self.tahun_pengajuan
             and self.check_cuti
-            and self.request.user.is_authenticated
+            and self.target_pegawai
         ):
             self.fields['cuti_tunda_dipilih'].queryset = self.check_cuti.get_cuti_tunda_eligible(
-                user=self.request.user,
+                user=self.target_pegawai,
                 tahun_pengajuan=self.tahun_pengajuan,
             )
         else:
             self.fields['cuti_tunda_dipilih'].queryset = RiwayatCuti.objects.none()
+        if not self.fields['cuti_tunda_dipilih'].queryset.exists():
+            self.fields['cuti_tunda_dipilih'].help_text = "Tidak ada cuti tunda yang dapat diklaim."
             
-    # def clean_lama_cuti(self):
-    #     lama = self.cleaned_data.get("lama_cuti")
-    #     if lama is None:
-    #         raise forms.ValidationError("Lama cuti wajib diisi.")
-    #     try:
-    #         lama_int = int(lama)
-    #     except (TypeError, ValueError):
-    #         raise forms.ValidationError("Lama cuti harus berupa angka.")
-    #     if lama_int <= 0:
-    #         raise forms.ValidationError("Lama cuti harus lebih dari 0 hari.")
-    #     return lama_int
+    def clean_lama_cuti(self):
+        lama = self.cleaned_data.get("lama_cuti")
+        if lama is None:
+            raise forms.ValidationError("Lama cuti wajib diisi.")
+        if lama <= 0:
+            raise forms.ValidationError("Lama cuti harus lebih dari 0 hari.")
+        return lama
 
     def clean(self):
         cleaned = super().clean()
@@ -1032,11 +1000,24 @@ class RiwayatPengajuanCutiForm(SecureEmployeeModelForm):
         if tgl_mulai and tgl_akhir and tgl_akhir < tgl_mulai:
             self.add_error("tgl_akhir_cuti", "Tanggal akhir tidak boleh lebih kecil dari tanggal mulai.")
 
+        if tgl_mulai and lama:
+            tanggal_akhir_hasil_hitung = tgl_mulai + timedelta(days=lama - 1)
+            if tgl_akhir and tgl_akhir != tanggal_akhir_hasil_hitung:
+                self.add_error(
+                    "tgl_akhir_cuti",
+                    "Tanggal akhir harus sesuai dengan tanggal mulai dan jumlah hari cuti.",
+                )
+            elif not tgl_akhir:
+                cleaned['tgl_akhir_cuti'] = tanggal_akhir_hasil_hitung
+                self.instance.tgl_akhir_cuti = tanggal_akhir_hasil_hitung
+                tgl_akhir = tanggal_akhir_hasil_hitung
+
         # Hanya cek untuk Cuti Tahunan (sesuai requirement)
         if jenis_cuti == CheckCuti.CUTI_TAHUNAN and tgl_mulai and tgl_akhir:
-            checker = CheckCuti()
+            checker = self.check_cuti or CheckCuti()
+            target_pegawai = self.target_pegawai or self.request.user
             if checker.is_penerima_memiliki_pelimpahan_aktif(
-                self.request.user,
+                target_pegawai,
                 tgl_mulai,
                 tgl_akhir
             ):
@@ -1045,47 +1026,21 @@ class RiwayatPengajuanCutiForm(SecureEmployeeModelForm):
                     "pada rentang tanggal tersebut."
                 )
 
+        target_pegawai = self.target_pegawai or self.request.user
+        if tgl_mulai and tgl_akhir and self.check_cuti:
+            if self.check_cuti.is_memiliki_cuti_bentrok(
+                target_pegawai,
+                tgl_mulai,
+                tgl_akhir,
+            ):
+                raise ValidationError(
+                    "Pegawai sudah memiliki pengajuan atau pelaksanaan cuti lain "
+                    "yang bertabrakan dengan rentang tanggal tersebut."
+                )
+
         return cleaned
 
             
-
-class RiwayatCutiUploadDakungForm(SecureEmployeeModelForm):
-    class Meta:
-        model = RiwayatCuti
-        fields = ('pegawai', 'dokumen', 'file_pengajuan', 'file_pendukung')
-
-    def __init__(self, *args, **kwargs):
-        self.request=kwargs.pop("request", None)
-        super(RiwayatCutiUploadDakungForm, self).__init__(*args, **kwargs)
-        self.fields['file_pengajuan'].widget.attrs['class'] = bootstrap_col
-        self.fields['file_pendukung'].widget.attrs['class'] = bootstrap_col
-        self.fields['pegawai'].widget=forms.HiddenInput()
-        self.fields['dokumen'].widget=forms.HiddenInput()
-
-    # def clean(self):
-    #     file_pendukung = self.cleaned_data.get('file_pendukung')
-    #     file_pengajuan = self.cleaned_data.get('file_pengajuan')
-    #     file_size = 2.5 * 1024 * 1024
-    #     print('file pendukung: ', file_pendukung.size)
-    #     print('file_pengajuan: ', file_pengajuan.size)
-    #     if file_pendukung.size > file_size or file_pengajuan.size > file_size:  # 5 MB limit
-    #         raise forms.ValidationError("Ukuran file tidak boleh melebihi 2,5 MB")
-    #     return file_pendukung
-
-
-class RiwayatCutiUploadSuratForm(SecureEmployeeModelForm):
-    class Meta:
-        model = RiwayatCuti
-        fields = ('pegawai', 'dokumen', 'no_surat', 'tgl_surat', 'file')
-
-    def __init__(self, *args, **kwargs):
-        self.request=kwargs.pop("request", None)
-        super(RiwayatCutiUploadSuratForm, self).__init__(*args, **kwargs)
-        self.fields['file'].widget.attrs['class'] = bootstrap_col
-        self.fields['tgl_surat'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
-        self.fields['pegawai'].widget=forms.HiddenInput()
-        self.fields['dokumen'].widget=forms.HiddenInput()
-
 
 class RiwayatHukumanForm(SecureEmployeeModelForm):
     class Meta:

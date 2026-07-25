@@ -44,9 +44,10 @@
     </div>
 
     <!-- ALERT -->
-    {% if request.user.is_cuti_admin %}
+    {% if view_only %}
         <div class="alert alert-info">
-            Mode monitoring: form dikunci (read-only).
+            <i class="fas fa-eye me-1"></i>
+            Mode melihat hasil: keputusan verifikasi sudah tersimpan dan tidak dapat diubah kembali.
         </div>
     {% endif %}
 
@@ -150,8 +151,15 @@
                         <i class="fas fa-sitemap me-2 text-primary"></i>Verifikasi Berjenjang
                     </h6>
                     <p class="small text-muted mb-0">
-                        Anda saat ini berada pada
-                        <strong>Level {{ current_level }}</strong> verifikator.
+                        {% if can_submit_verification %}
+                            Anda saat ini berada pada
+                            <strong>Level {{ current_level }}</strong> verifikator.
+                        {% elif user_level %}
+                            Hasil keputusan Anda sebagai
+                            <strong>verifikator Level {{ user_level }}</strong>.
+                        {% else %}
+                            Ringkasan hasil verifikasi seluruh level.
+                        {% endif %}
                     </p>
                 </div>
                 <div class="card-body">
@@ -242,11 +250,11 @@
                                     <i class="fas fa-file-word me-1"></i>Surat Cuti
                                 </a>
                             {% else %}
-                                <button onclick="showAlert()" class="btn btn-success">Surat Cuti</button>
+                                <button type="button" onclick="showAlert()" class="btn btn-success">Surat Cuti</button>
                             {% endif %}
                             
                             
-                            {% if not request.user.is_cuti_admin %}
+                            {% if can_submit_verification %}
                                 <button type="submit" class="btn btn-primary">
                                     <i class="fas fa-save me-1"></i> Simpan Verifikasi
                                 </button>

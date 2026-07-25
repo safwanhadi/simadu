@@ -130,7 +130,7 @@ def notifikasi_layanan(request):
     # === Blok 2: Untuk Superuser (Melihat Semua Notifikasi Pengajuan) ===
     if request.user.is_superuser:
         layanan_cuti = _cuti_notification_values(
-            LayananCuti.objects.filter(status="pengajuan")
+            LayananCuti.objects.filter(status__in=("pengajuan", "tindaklanjut"))
         )
         layanan_berkala = _berkala_notification_values(
             LayananGajiBerkala.objects.filter(status="pengajuan")
@@ -172,14 +172,20 @@ def notifikasi_layanan(request):
         request.user.is_staff
         and hasattr(request.user, 'profil_admin')
     ):
-        from strukturorg.models import SubBidang, Bidang  # Import di dalam fungsi untuk menghindari circular import
+        from strukturorg.models import Bidang, PejabatStruktur, SubBidang
+        from strukturorg.services import filter_structures_led_by
         profil_admin = request.user.profil_admin
 
+        instalasi_aktif = filter_structures_led_by(profil_admin.instalasi.all(), request.user)
+        sub_bidang_aktif = filter_structures_led_by(profil_admin.sub_bidang.all(), request.user)
+        bidang_aktif = filter_structures_led_by(profil_admin.bidang.all(), request.user)
+        unor_aktif = filter_structures_led_by(profil_admin.unor.all(), request.user)
+
         # Level 4: Kepala Instalasi
-        if profil_admin.instalasi.exists() and profil_admin.is_pejabat:
-            instalasi_pks = profil_admin.instalasi.values_list('pk', flat=True)
+        if instalasi_aktif.exists() and profil_admin.is_pejabat:
+            instalasi_pks = instalasi_aktif.values_list('pk', flat=True)
             layanan_cuti_admin = LayananCuti.objects.filter(
-                status="pengajuan", 
+                status__in=("pengajuan", "tindaklanjut"),
                 pegawai__riwayat_penempatan__penempatan_level4__in=instalasi_pks, 
                 pegawai__riwayat_penempatan__status=True
             )
@@ -190,11 +196,11 @@ def notifikasi_layanan(request):
             ).distinct()
 
         # Level 3: Kepala Seksi/Sub-Bagian
-        elif profil_admin.sub_bidang.exists() and profil_admin.is_pejabat:
+        elif sub_bidang_aktif.exists() and profil_admin.is_pejabat:
             # Perbaikan typo: values_list & flat=True
-            sub_bidang_pks = profil_admin.sub_bidang.values_list('pk', flat=True)
+            sub_bidang_pks = sub_bidang_aktif.values_list('pk', flat=True)
             layanan_cuti_admin = LayananCuti.objects.filter(
-                status="pengajuan", 
+                status__in=("pengajuan", "tindaklanjut"),
                 pegawai__riwayat_penempatan__penempatan_level3__in=sub_bidang_pks, 
                 pegawai__riwayat_penempatan__status=True
             ).exclude(pegawai=request.user)
@@ -206,21 +212,24 @@ def notifikasi_layanan(request):
             ).distinct()
 
         # Level 2: Kepala Bidang (UPDATED)
-        elif profil_admin.bidang.exists() and profil_admin.is_pejabat:
+        elif bidang_aktif.exists() and profil_admin.is_pejabat:
             # 1. Ambil semua PK bidang yang ditekuni admin ini
-            bidang_pks = profil_admin.bidang.values_list('pk', flat=True)
+            bidang_pks = bidang_aktif.values_list('pk', flat=True)
             
             # 2. Cari semua SubBidang yang berada di bawah bidang-bidang tersebut
             sub_bidangs = SubBidang.objects.filter(bidang__in=bidang_pks)
             
             # 3. Ambil pimpinan_ids (Kepala Seksi/Sub-Bagian) dari sub-bidang terkait
-            pimpinan_ids = list(sub_bidangs.values_list('nama_pimpinan_id', flat=True).distinct())
+            pimpinan_ids = list(PejabatStruktur.objects.filter(
+                is_active=True,
+                sub_bidang__in=sub_bidangs,
+            ).values_list('pejabat_id', flat=True).distinct())
 
             # Filter Cuti: Bawahan di penempatan level 3 ATAU user pimpinan itu sendiri
             q_filter = Q(pegawai__riwayat_penempatan__penempatan_level3__in=sub_bidangs) | Q(pegawai_id__in=pimpinan_ids)
             layanan_cuti_admin = LayananCuti.objects.filter(
                 q_filter, 
-                status="pengajuan", 
+                status__in=("pengajuan", "tindaklanjut"),
                 pegawai__riwayat_penempatan__status=True
             ).distinct()
             
@@ -233,21 +242,24 @@ def notifikasi_layanan(request):
             ).distinct()
 
         # Level 1: Direktur / Pimpinan Unit Organisasi (UPDATED)
-        elif profil_admin.unor.exists() and profil_admin.is_pejabat:
+        elif unor_aktif.exists() and profil_admin.is_pejabat:
             # 1. Ambil semua PK unor yang ditekuni admin ini
-            unor_pks = profil_admin.unor.values_list('pk', flat=True)
+            unor_pks = unor_aktif.values_list('pk', flat=True)
             
             # 2. Cari semua Bidang yang berada di bawah unor-unor tersebut
             bidangs = Bidang.objects.filter(unor__in=unor_pks)
             
             # 3. Ambil pimpinan_ids (Kepala Bidang) dari bidang terkait
-            pimpinan_ids = list(bidangs.values_list('nama_pimpinan_id', flat=True).distinct())
+            pimpinan_ids = list(PejabatStruktur.objects.filter(
+                is_active=True,
+                bidang__in=bidangs,
+            ).values_list('pejabat_id', flat=True).distinct())
 
             # Filter Cuti: Bawahan di penempatan level 2 ATAU pimpinan bidang terkait
             q_filter = Q(pegawai__riwayat_penempatan__penempatan_level2__in=bidangs) | Q(pegawai__id__in=pimpinan_ids)
             layanan_cuti_admin = LayananCuti.objects.filter(
                 q_filter, 
-                status="pengajuan", 
+                status__in=("pengajuan", "tindaklanjut"),
                 pegawai__riwayat_penempatan__status=True, 
                 verifikasicuti__persetujuan2=True
             ).distinct()
@@ -273,12 +285,14 @@ def notifikasi_layanan(request):
     # Query notifikasi untuk pegawai (pribadi)
     if request.user.is_cuti_admin:
         layanan_cuti_pegawai = _cuti_notification_values(
-            LayananCuti.objects.filter(status="pengajuan")
+            LayananCuti.objects.filter(status__in=("pengajuan", "tindaklanjut"))
         )
     else:
         layanan_cuti_pegawai = _cuti_notification_values(
             LayananCuti.objects.filter(
-                pegawai=request.user, status='selesai', is_read=False,
+                pegawai=request.user,
+                status__in=('disetujui', 'ditolak'),
+                is_read=False,
             )
         )
     if request.user.is_berkala_admin:

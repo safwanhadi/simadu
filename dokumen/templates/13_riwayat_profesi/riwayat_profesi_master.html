@@ -40,6 +40,12 @@
                     </div>
                     <div>
                         <div>
+                            {% if not sip %}
+                                <a href="{% url 'riwayat_urls:profession_sip_export_excel' %}{% if request.user.is_dokumen_admin and nip %}?nip={{ nip|urlencode }}{% endif %}"
+                                   class="btn btn-success">
+                                    <i class="fas fa-file-excel mr-1"></i>Download Excel
+                                </a>
+                            {% endif %}
                             {% if str_obj and request.user.is_dokumen_admin %}
                                 <a href="{% url 'riwayat_urls:riwayat_sip_urutkan' pk=str_obj.id %}" class="btn btn-outline-info">Urutkan Dokumen</a>
                             {% endif %}

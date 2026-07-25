@@ -1,0 +1,154 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-4">
+        <div class="card card-primary card-outline">
+            <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-user-tie mr-1"></i> Aktifkan Pejabat</h3>
+            </div>
+            <form method="post" novalidate>
+                {% csrf_token %}
+                <div class="card-body">
+                    <div class="alert alert-info py-2">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Pejabat aktif sebelumnya pada struktur yang dipilih akan otomatis ditutup.
+                    </div>
+
+                    {% if form.non_field_errors %}
+                    <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+                    {% endif %}
+
+                    {% for field in form %}
+                    <div class="form-group">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.help_text %}<small class="form-text text-muted">{{ field.help_text }}</small>{% endif %}
+                        {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="card-footer d-flex justify-content-between">
+                    <a href="{% url 'myaccount_urls:account_management_list' %}" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left mr-1"></i>Kembali
+                    </a>
+                    <button type="submit" class="btn btn-primary" onclick="return confirm('Aktifkan pejabat ini dan tutup masa jabatan aktif sebelumnya?');">
+                        <i class="fas fa-check-circle mr-1"></i>Aktifkan Pejabat
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        <div class="row">
+            <div class="col-sm-6">
+                <div class="small-box bg-success">
+                    <div class="inner"><h3>{{ active_count }}</h3><p>Pejabat Aktif</p></div>
+                    <div class="icon"><i class="fas fa-user-check"></i></div>
+                </div>
+            </div>
+            <div class="col-sm-6">
+                <div class="small-box bg-warning">
+                    <div class="inner"><h3>{{ temporary_count }}</h3><p>Pejabat Sementara Aktif</p></div>
+                    <div class="icon"><i class="fas fa-user-clock"></i></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card card-solid">
+            <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-history mr-1"></i> Daftar dan Riwayat Pejabat</h3>
+            </div>
+            <div class="card-body">
+                <div class="btn-group mb-3" role="group" aria-label="Filter status pejabat">
+                    <a href="?status=active{% if q %}&q={{ q|urlencode }}{% endif %}" class="btn btn-sm {% if status == 'active' %}btn-success{% else %}btn-outline-success{% endif %}">Aktif</a>
+                    <a href="?status=inactive{% if q %}&q={{ q|urlencode }}{% endif %}" class="btn btn-sm {% if status == 'inactive' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">Riwayat</a>
+                    <a href="?status=all{% if q %}&q={{ q|urlencode }}{% endif %}" class="btn btn-sm {% if status == 'all' %}btn-primary{% else %}btn-outline-primary{% endif %}">Semua</a>
+                </div>
+
+                <form method="get" class="mb-3">
+                    <input type="hidden" name="status" value="{{ status }}">
+                    <div class="input-group">
+                        <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Cari pejabat, NIP, jabatan, atau unit">
+                        <div class="input-group-append">
+                            <button class="btn btn-primary" type="submit"><i class="fas fa-search"></i></button>
+                            {% if q %}<a href="?status={{ status }}" class="btn btn-secondary">Reset</a>{% endif %}
+                        </div>
+                    </div>
+                </form>
+
+                <div class="table-responsive">
+                    <table class="table table-bordered table-hover table-sm">
+                        <thead>
+                            <tr>
+                                <th>Pejabat</th>
+                                <th>Struktur/Jabatan</th>
+                                <th>Penugasan</th>
+                                <th>Masa Jabatan</th>
+                                <th>Status</th>
+                                <th>Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for appointment in appointment_list %}
+                            <tr>
+                                <td>
+                                    <strong>{{ appointment.pejabat.full_name_2|default:appointment.pejabat.email }}</strong><br>
+                                    <small class="text-muted">{{ appointment.pejabat.profil_user.nip|default:appointment.pejabat.email }}</small>
+                                </td>
+                                <td>
+                                    {{ appointment.struktur_object }}<br>
+                                    <small class="text-muted">{{ appointment.nama_jabatan }}</small>
+                                </td>
+                                <td>
+                                    {% if appointment.jenis_penugasan == 'definitif' %}
+                                    <span class="badge badge-primary">Definitif</span>
+                                    {% else %}
+                                    <span class="badge badge-warning">{{ appointment.get_jenis_penugasan_display }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {{ appointment.tanggal_mulai|date:'d M Y' }}<br>
+                                    <small class="text-muted">
+                                        {% if appointment.tanggal_selesai %}s.d. {{ appointment.tanggal_selesai|date:'d M Y' }}{% else %}sampai sekarang{% endif %}
+                                    </small>
+                                </td>
+                                <td>
+                                    {% if appointment.is_active %}<span class="badge badge-success">Aktif</span>{% else %}<span class="badge badge-secondary">Selesai</span>{% endif %}
+                                </td>
+                                <td>
+                                    {% if appointment.is_active %}
+                                    <form method="post" action="{% url 'myaccount_urls:structural_officer_deactivate' pk=appointment.pk %}" onsubmit="return confirm('Tutup masa jabatan pejabat ini tanpa menetapkan pengganti?');">
+                                        {% csrf_token %}
+                                        <div class="input-group input-group-sm" style="min-width: 175px;">
+                                            <input type="date" name="tanggal_selesai" value="{{ today|date:'Y-m-d' }}" min="{{ appointment.tanggal_mulai|date:'Y-m-d' }}" max="{{ today|date:'Y-m-d' }}" class="form-control" required>
+                                            <div class="input-group-append">
+                                                <button type="submit" class="btn btn-outline-danger" title="Tutup masa jabatan"><i class="fas fa-times"></i></button>
+                                            </div>
+                                        </div>
+                                    </form>
+                                    {% else %}<span class="text-muted">—</span>{% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="6" class="text-center text-muted py-4">Data pejabat tidak ditemukan.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                {% if is_paginated %}
+                <nav aria-label="Navigasi pejabat struktural">
+                    <ul class="pagination justify-content-center mb-0">
+                        {% if page_obj.has_previous %}<li class="page-item"><a class="page-link" href="?status={{ status }}&q={{ q|urlencode }}&page={{ page_obj.previous_page_number }}">Sebelumnya</a></li>{% endif %}
+                        <li class="page-item disabled"><span class="page-link">Halaman {{ page_obj.number }} dari {{ page_obj.paginator.num_pages }}</span></li>
+                        {% if page_obj.has_next %}<li class="page-item"><a class="page-link" href="?status={{ status }}&q={{ q|urlencode }}&page={{ page_obj.next_page_number }}">Berikutnya</a></li>{% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

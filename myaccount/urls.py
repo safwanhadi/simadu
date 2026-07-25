@@ -22,11 +22,14 @@ from .views import (
     AccountToggleActiveView,
     AccountToggleStaffView,
     AccountToggleDocumentAdminView,
+    AccountUpdateAdminRolesView,
     EmployeeRegistrationSuccessView,
     EmployeeRegistrationView,
     AccountRegistrationApproveView,
     AccountRegistrationRejectView,
     AccountRegistrationReviewListView,
+    StructuralOfficerDeactivateView,
+    StructuralOfficerManagementView,
 )
 from .views_api import api_me, PegawaiAPIView, DokterSpesialisAPIView, DetailMeAPIView
 from .telegram_views import (
@@ -65,6 +68,9 @@ urlpatterns=[
     path('pengelolaan-akun/<int:pk>/toggle-active/', AccountToggleActiveView.as_view(), name='account_toggle_active'),
     path('pengelolaan-akun/<int:pk>/toggle-staff/', AccountToggleStaffView.as_view(), name='account_toggle_staff'),
     path('pengelolaan-akun/<int:pk>/toggle-admin-dokumen/', AccountToggleDocumentAdminView.as_view(), name='account_toggle_document_admin'),
+    path('pengelolaan-akun/<int:pk>/hak-akses/', AccountUpdateAdminRolesView.as_view(), name='account_update_admin_roles'),
+    path('pengelolaan-akun/pejabat-struktural/', StructuralOfficerManagementView.as_view(), name='structural_officer_management'),
+    path('pengelolaan-akun/pejabat-struktural/<int:pk>/nonaktifkan/', StructuralOfficerDeactivateView.as_view(), name='structural_officer_deactivate'),
     path('profil/', ProfilListView.as_view(), name='profil_view'),
     path('profil/add/', ProfilCreateView.as_view(), name='profil_create_view'),
     path('profil/detail/<int:pk>/', ProfilDetailView.as_view(), name='profil_detail_view'),
@@ -72,7 +78,7 @@ urlpatterns=[
     path('pegawai-ultah/', UlangTahunSebulanTerakhirListView.as_view(), name='pegawai_ultah_sebulan'),
     path('ajax-pegawai-autocomplete/', PegawaiAutocompleteView.as_view(), name='ajax_pegawai_autocomplete'),
     
-    path('api/me/', api_me, name='api_me'),
+    path('api/me/', DetailMeAPIView.as_view(), name='api_me'),
     path('api/pegawai/', PegawaiAPIView.as_view(), name='pegawai_api_view'),
     path('api/dokter-spesialis/', DokterSpesialisAPIView.as_view(), name='dokter_spesialis_api_view'),
     path('api/pegawai/me/', DetailMeAPIView.as_view(), name='detail_me_api_view'),

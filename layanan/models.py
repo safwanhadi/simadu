@@ -25,7 +25,6 @@ from dokumen.models import (
     RiwayatKeluarga,
     UjiKompetensi,
     JENIS_JABATAN,
-    STATUS_PERS_CUTI
 )
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
@@ -182,12 +181,13 @@ class LayananSIP(models.Model):
         }
     
     
-STATUS_CUTI = (
-    ('draft', 'draft'),
-    ('pengajuan', 'pengajuan'),
-    ('tidak ditindaklanjut', 'tidak ditindaklanjut'),
-    ('tindaklanjut', 'tindaklanjut'),
-    ('selesai', 'selesai')
+STATUS_PENGAJUAN_CUTI = (
+    ('pengajuan', 'Diajukan'),
+    ('tindaklanjut', 'Sedang diverifikasi'),
+    ('disetujui', 'Disetujui'),
+    ('selesai', 'Selesai'),
+    ('ditolak', 'Ditolak'),
+    ('dibatalkan', 'Dibatalkan'),
 )
 
 
@@ -195,16 +195,74 @@ class LayananCuti(models.Model):
     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
     layanan = models.ForeignKey('JenisLayanan', on_delete=models.SET_NULL, null=True)
     jenis_jabatan = models.CharField(choices=JENIS_JABATAN, max_length=25, blank=True, verbose_name='Jenis Jabatan Saat Ini')
-    cuti_tunda = models.BooleanField(default=False)
-    status = models.CharField(max_length=50, choices=STATUS_CUTI, default='draft', verbose_name='Status Cuti')
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_PENGAJUAN_CUTI,
+        default='pengajuan',
+        verbose_name='Status Pengajuan Cuti',
+    )
     is_read = models.BooleanField(default=False)
     tahun = models.IntegerField(blank=True, null=True, verbose_name='Tahun Cuti')
+    snapshot_saldo_cuti = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name='Snapshot Saldo Cuti',
+        help_text='Saldo cuti pada saat pengajuan disimpan.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f'{self.pegawai.full_name} ({self.layanan} - {self.status})'
- 
+
+
+AKSI_PEMUTIHAN_CUTI = (
+    ('disetujui', 'Disetujui'),
+    ('selesai', 'Selesai'),
+    ('ditolak', 'Ditolak'),
+    ('dibatalkan', 'Dibatalkan'),
+)
+
+
+class PemutihanCutiLog(models.Model):
+    """Jejak audit perubahan massal status cuti oleh admin."""
+
+    layanan_cuti = models.ForeignKey(
+        LayananCuti,
+        on_delete=models.CASCADE,
+        related_name='log_pemutihan',
+    )
+    riwayat_cuti = models.ForeignKey(
+        'dokumen.RiwayatCuti',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='log_pemutihan',
+    )
+    admin = models.ForeignKey(
+        Users,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='pemutihan_cuti_dilakukan',
+    )
+    aksi = models.CharField(max_length=20, choices=AKSI_PEMUTIHAN_CUTI)
+    status_pengajuan_sebelum = models.CharField(max_length=20)
+    status_pengajuan_sesudah = models.CharField(max_length=20)
+    status_pelaksanaan_sebelum = models.CharField(max_length=20, blank=True)
+    status_pelaksanaan_sesudah = models.CharField(max_length=20, blank=True)
+    catatan = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-created_at', '-id')
+        verbose_name = 'Log Pemutihan Cuti'
+        verbose_name_plural = 'Log Pemutihan Cuti'
+
+    def __str__(self):
+        return (
+            f'{self.layanan_cuti_id} - {self.get_aksi_display()} '
+            f'oleh {self.admin_id}'
+        )
 
 KEPUTUSAN_VERIF = (
     ("belum", "Belum diputuskan"),
@@ -219,14 +277,17 @@ class VerifikasiCuti(models.Model):
     persetujuan1 = models.BooleanField(null=True, blank=True)
     keputusan1 = models.CharField(max_length=10, choices=KEPUTUSAN_VERIF, default="belum")
     catatan1 = models.TextField(blank=True)
+    diputuskan_pada1 = models.DateTimeField(null=True, blank=True)
     verifikator2 = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name='verifikator2_cuti')
     persetujuan2 = models.BooleanField(null=True, blank=True)
     keputusan2 = models.CharField(max_length=10, choices=KEPUTUSAN_VERIF, default="belum")
     catatan2 = models.TextField(blank=True)
+    diputuskan_pada2 = models.DateTimeField(null=True, blank=True)
     verifikator3 = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name='verifikator3_cuti')
     persetujuan3 = models.BooleanField(null=True, blank=True)
     keputusan3 = models.CharField(max_length=10, choices=KEPUTUSAN_VERIF, default="belum")
     catatan3 = models.TextField(blank=True)
+    diputuskan_pada3 = models.DateTimeField(null=True, blank=True)
     tanggal = models.DateField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -295,6 +356,7 @@ class PelimpahanTugas(models.Model):
     )
     persetujuan_atasan = models.CharField(max_length=20, choices=STATUS_PERS, default="belum")
     catatan_atasan = models.TextField(blank=True)
+    butuh_persetujuan_atasan = models.BooleanField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -315,6 +377,9 @@ class PelimpahanTugas(models.Model):
         - pemberi level4 (UnitInstalasi) => True (wajib persetujuan atasan level3)
         - pemberi level3+ => False
         """
+        if self.butuh_persetujuan_atasan is not None:
+            return self.butuh_persetujuan_atasan
+
         rp = (
             self.pemberi_tugas.riwayat_penempatan.filter(status=True)
             .order_by("-updated_at", "-id")
@@ -337,6 +402,97 @@ class PelimpahanTugas(models.Model):
         if self.requires_atasan_approval():
             return self.persetujuan_atasan == "disetujui"
         return True
+
+
+JENIS_PERUBAHAN_JADWAL = (
+    ('langsung', 'Perubahan sebelum verifikasi'),
+    ('revisi_proses', 'Revisi saat verifikasi berjalan'),
+    ('perubahan_final', 'Perubahan setelah persetujuan final'),
+)
+
+STATUS_PERUBAHAN_JADWAL = (
+    ('menunggu_verifikasi', 'Menunggu verifikasi perubahan'),
+    ('menunggu_pelimpahan', 'Menunggu persetujuan ulang pelimpahan'),
+    ('diterapkan', 'Perubahan diterapkan'),
+    ('ditolak', 'Perubahan ditolak'),
+    ('dibatalkan', 'Dibatalkan pemohon'),
+)
+
+
+class PerubahanJadwalCuti(models.Model):
+    """Audit dan workflow perubahan jadwal yang diajukan oleh pemohon cuti."""
+
+    riwayat_cuti = models.ForeignKey(
+        'dokumen.RiwayatCuti',
+        on_delete=models.CASCADE,
+        related_name='perubahan_jadwal',
+    )
+    diajukan_oleh = models.ForeignKey(
+        Users,
+        on_delete=models.PROTECT,
+        related_name='perubahan_jadwal_cuti_diajukan',
+    )
+    jenis_perubahan = models.CharField(max_length=20, choices=JENIS_PERUBAHAN_JADWAL)
+    status = models.CharField(
+        max_length=25,
+        choices=STATUS_PERUBAHAN_JADWAL,
+        default='menunggu_verifikasi',
+    )
+    tanggal_mulai_lama = models.DateField()
+    tanggal_akhir_lama = models.DateField()
+    lama_cuti_lama = models.PositiveSmallIntegerField()
+    tanggal_mulai_baru = models.DateField()
+    tanggal_akhir_baru = models.DateField()
+    lama_cuti_baru = models.PositiveSmallIntegerField()
+    alasan = models.TextField()
+
+    snapshot_verifikasi = models.JSONField(default=dict, blank=True)
+    snapshot_pelimpahan = models.JSONField(default=dict, blank=True)
+
+    verifikator1 = models.ForeignKey(
+        Users, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='verifikator1_perubahan_jadwal_cuti',
+    )
+    keputusan1 = models.CharField(max_length=10, choices=KEPUTUSAN_VERIF, default='belum')
+    catatan1 = models.TextField(blank=True)
+    diputuskan_pada1 = models.DateTimeField(null=True, blank=True)
+    verifikator2 = models.ForeignKey(
+        Users, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='verifikator2_perubahan_jadwal_cuti',
+    )
+    keputusan2 = models.CharField(max_length=10, choices=KEPUTUSAN_VERIF, default='belum')
+    catatan2 = models.TextField(blank=True)
+    diputuskan_pada2 = models.DateTimeField(null=True, blank=True)
+    verifikator3 = models.ForeignKey(
+        Users, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='verifikator3_perubahan_jadwal_cuti',
+    )
+    keputusan3 = models.CharField(max_length=10, choices=KEPUTUSAN_VERIF, default='belum')
+    catatan3 = models.TextField(blank=True)
+    diputuskan_pada3 = models.DateTimeField(null=True, blank=True)
+
+    diterapkan_pada = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('-created_at', '-id')
+
+    def clean(self):
+        super().clean()
+        if self.tanggal_mulai_baru and self.tanggal_akhir_baru:
+            if self.tanggal_akhir_baru < self.tanggal_mulai_baru:
+                raise ValidationError('Tanggal akhir baru tidak boleh sebelum tanggal mulai baru.')
+            jumlah = (self.tanggal_akhir_baru - self.tanggal_mulai_baru).days + 1
+            if self.lama_cuti_baru and self.lama_cuti_baru != jumlah:
+                raise ValidationError('Jumlah hari perubahan tidak sesuai dengan rentang tanggal baru.')
+
+    @property
+    def is_active(self):
+        return self.status in ('menunggu_verifikasi', 'menunggu_pelimpahan')
+
+    def __str__(self):
+        return f'Perubahan jadwal cuti #{self.riwayat_cuti_id} ({self.get_status_display()})'
 
 
 STATUS_DIKLAT = (

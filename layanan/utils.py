@@ -1,3 +1,6 @@
+from strukturorg.services import get_active_leader, get_active_title
+
+
 def get_nip(user) -> str:
     profil = getattr(user, "profil_user", None)
     return getattr(profil, "nip", None) or "-"
@@ -24,14 +27,14 @@ def get_jabatan_unit(user) -> tuple[str, str]:
 
     obj, level = rp._penempatan_aktif  # property Anda
     try:
-        if level == "level4" and obj and getattr(obj, "nama_pimpinan", None) == user:
-            jabatan = f'{getattr(obj, "pimpinan", "Kepala Instalasi")} {getattr(obj, "instalasi", "")}'
-        elif level == "level3" and obj and getattr(obj, "nama_pimpinan", None) == user:
-            jabatan = f'{getattr(obj, "pimpinan", "Kepala Seksi/Subbag")} {getattr(obj, "sub_bidang", "")}'
-        elif level == "level2" and obj and getattr(obj, "nama_pimpinan", None) == user:
-            jabatan = f'{getattr(obj, "pimpinan", "Kepala Bidang")} {getattr(obj, "bidang", "")}'
-        elif level == "level1" and obj and getattr(obj, "nama_pimpinan", None) == user:
-            jabatan = f'{getattr(obj, "pimpinan", "Kepala Unit Organisasi")} {getattr(obj, "unor", "")}'
+        if level == "level4" and obj and get_active_leader(obj) == user:
+            jabatan = f'{get_active_title(obj) or "Kepala Instalasi"} {getattr(obj, "instalasi", "")}'
+        elif level == "level3" and obj and get_active_leader(obj) == user:
+            jabatan = f'{get_active_title(obj) or "Kepala Seksi/Subbag"} {getattr(obj, "sub_bidang", "")}'
+        elif level == "level2" and obj and get_active_leader(obj) == user:
+            jabatan = f'{get_active_title(obj) or "Kepala Bidang"} {getattr(obj, "bidang", "")}'
+        elif level == "level1" and obj and get_active_leader(obj) == user:
+            jabatan = f'{get_active_title(obj) or "Kepala Unit Organisasi"} {getattr(obj, "unor", "")}'
     except Exception:
         pass
 
@@ -40,12 +43,12 @@ def get_jabatan_unit(user) -> tuple[str, str]:
 
 def resolve_atasan_level3_for_level4(user):
     """
-    Jika user penempatan aktif level4 => atasan = obj.sub_bidang.nama_pimpinan (level3)
+    Jika user penempatan aktif level4 => atasan aktif pada struktur level4.
     """
     rp = get_rp_aktif(user)
     if not rp:
         return None
     obj, level = rp._penempatan_aktif
     if level == "level4" and obj:
-        return getattr(obj, "nama_pimpinan", None)
+        return get_active_leader(obj)
     return None

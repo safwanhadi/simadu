@@ -1,4 +1,5 @@
 from django.urls import path
+from .pdf_views import DownloadPresensiBulananPDFView
 from .views import (    
     JadwalListView,
     DeleteJadwalView,
@@ -95,4 +96,5 @@ urlpatterns = [
     path('rekap-kehadiran/<int:pk>/detail/', DetailPresensiPegawaiView.as_view(), name='detail_presensi_pegawai'),
     path('rekap-khadiran/<int:pk>/update/', UpdatePresensiPegawaiView.as_view(), name='update_kehadiran_pegawai'),
     path('rekap/download-excel/', DownloadRekapPresensiExcelView.as_view(), name='download_excel'),
+    path('rekap/download-pdf/', DownloadPresensiBulananPDFView.as_view(), name='download_presensi_pdf'),
 ]

@@ -3,7 +3,7 @@ from django.shortcuts import render, redirect
 from django.urls import reverse, reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views import View
-from django.views.generic import ListView, DetailView, DeleteView, UpdateView, CreateView
+from django.views.generic import ListView, DetailView, DeleteView, UpdateView, CreateView, TemplateView
 # from rest_framework.views import 
 from django.contrib import messages
 from django.contrib.messages.views import SuccessMessageMixin
@@ -17,8 +17,10 @@ from dateutil.relativedelta import relativedelta
 from itertools import chain, zip_longest
 from functools import lru_cache
 import os
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
 
-from layanan.views import CheckCuti
+from layanan.services import CheckCuti
 from layanan.models import (
     JenisLayanan
 )
@@ -1539,15 +1541,24 @@ class RiwayatCutiView(LoginRequiredMixin, CheckCuti, View):
         if selected_nip:
             nip = selected_nip
             data = RiwayatCuti.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
+        pegawai_saldo = get_user_bynip(nip) if nip else None
+        snapshot_saldo = (
+            self.buat_snapshot_saldo_cuti(pegawai_saldo)
+            if pegawai_saldo
+            else None
+        )
         form = RiwayatCutiForm(initial=initial, request=request)
         context={
-            'user':get_user_bynip(nip),
+            'user':pegawai_saldo,
             'data':data,
             'form':form,
             'nip':nip,
             'dok':dok,
-            'cek_sisa_cuti':self.cek_sisa_cuti(user),
-            'cek_sisa_tunda_cuti':self.cek_sisa_tunda_cuti(user),
+            'snapshot_saldo_cuti': snapshot_saldo,
+            'cek_sisa_cuti': (
+                snapshot_saldo['total_tersedia']
+                if snapshot_saldo else None
+            ),
             'page':'Home',
             'sub_page':'Riwayat',
             'title_page':'Cuti',
@@ -1620,6 +1631,71 @@ class RiwayatCutiUpdateView(LoginRequiredMixin, View):
             messages.error(request, form_not_valid_message)
             return redirect(reverse('riwayat_urls:riwayat_cuti'))
 
+
+class RiwayatPenggunaanCutiView(LoginRequiredMixin, CheckCuti, TemplateView):
+    template_name = '10_riwayat_cuti/riwayat_cuti_penggunaan.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        profil = getattr(self.request.user, 'profil_user', None)
+        requested_nip = self.request.GET.get('nip')
+        is_admin = (
+            self.request.user.is_dokumen_admin
+            or self.request.user.is_cuti_admin
+        )
+        nip = (
+            requested_nip
+            if is_admin and requested_nip
+            else getattr(profil, 'nip', None)
+        )
+        pegawai = get_user_bynip(nip) if nip else None
+        if pegawai is None:
+            raise Http404('Pegawai tidak ditemukan.')
+
+        tahun_sekarang = date.today().year
+        snapshot = self.buat_snapshot_saldo_cuti(
+            pegawai,
+            tahun_sekarang,
+        )
+        label_keterangan = {
+            'N-2': '2 Tahun Lalu',
+            'N-1': '1 Tahun Lalu',
+            'N': 'Tahun Berjalan',
+        }
+        ringkasan = []
+        for row in snapshot['rows']:
+            if row['hak_tunda'] or row['terpakai_tunda']:
+                catatan = (
+                    f"Hak tunda {row['hak_tunda']} hari; "
+                    f"dipakai {row['terpakai_tunda']} hari; "
+                    f"sisa {row['sisa_tunda']} hari."
+                )
+            elif row['label'] in ('N-2', 'N-1'):
+                catatan = (
+                    f"Kompensasi yang dapat digunakan "
+                    f"{row['dapat_digunakan']} hari."
+                )
+            else:
+                catatan = 'Hak cuti tahunan tahun berjalan.'
+            ringkasan.append({
+                'tahun': row['tahun'],
+                'keterangan': label_keterangan[row['label']],
+                'hak_awal': row['hak_awal'],
+                'terpakai': row['terpakai'],
+                'sisa_dapat_diambil': row['dapat_digunakan'],
+                'catatan': catatan,
+            })
+
+        context['pegawai'] = pegawai
+        context['ringkasan_cuti'] = ringkasan
+        context['total_hak_tersedia'] = snapshot['total_tersedia']
+        context['riwayat_all'] = (
+            RiwayatCuti.objects
+            .filter(pegawai=pegawai)
+            .select_related('usulan')
+            .order_by('-tahun_cuti', '-created_at')
+        )
+        return context
 
 class UrutkanRiwayatCutiView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
@@ -1721,7 +1797,7 @@ class RiwayatCutiMonitoringListView(LoginRequiredMixin, ListView):
                 status_priority=Case(
                     When(usulan__status='pengajuan', then=0),
                     When(usulan__status='tindaklanjut', then=1),
-                    When(usulan__status='selesai', then=2),
+                    When(usulan__status__in=('disetujui', 'selesai'), then=2),
                     default=3,
                     output_field=IntegerField(),
                 )

@@ -41,7 +41,6 @@
                         <td>
                             {% if employee.profil_user.nip %}
                             <a href="{% url 'riwayat_urls:riwayat_view' %}?nip={{ employee.profil_user.nip|urlencode }}" class="btn btn-sm btn-info"><i class="fas fa-folder-open"></i> Buka Dokumen</a>
-                            <a href="{% url 'riwayat_urls:riwayat_pendidikan' %}?nip={{ employee.profil_user.nip|urlencode }}" class="btn btn-sm btn-warning"><i class="fas fa-user-check"></i> Periksa Ijazah</a>
                             {% else %}<span class="text-muted">Profil belum lengkap</span>{% endif %}
                         </td>
                     </tr>

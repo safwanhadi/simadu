@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <div class="container">
+        <!-- Header Informasi Pegawai -->
+        <div class="card mb-4 border-0 shadow-sm">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <h3 class="mb-1">Evaluasi & Sisa Kuota Cuti</h3>
+                    <p class="text-muted mb-0">Pegawai: <strong>{{ pegawai.full_name }}</strong> | NIP/ID: {{ pegawai.id }}</p>
+                </div>
+                <div class="bg-primary text-white p-3 rounded text-center">
+                    <span class="d-block small text-uppercase">Total Sisa Dapat Diambil</span>
+                    <h2 class="mb-0 fw-bold">{{ total_hak_tersedia }} Hari</h2>
+                </div>
+            </div>
+        </div>
+
+        <!-- Ringkasan Evaluasi 3 Tahun Terakhir -->
+        <h4 class="mb-3 fw-semibold text-secondary">Analisis Jatah Cuti (Akumulasi 2 Tahun Sebelumnya)</h4>
+        <div class="row mb-5">
+            {% for item in ringkasan_cuti %}
+            <div class="col-md-4 mb-3">
+                <div class="card h-100 border-0 shadow-sm">
+                    <div class="card-header bg-dark text-white fw-bold d-flex justify-content-between">
+                        <span>Tahun {{ item.tahun }}</span>
+                        <small class="badge bg-secondary">{{ item.keterangan }}</small>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span class="text-muted">Jatah Masuk/Awal:</span>
+                            <span class="fw-semibold">{{ item.hak_awal }} Hari</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span class="text-muted">Terpakai/Pengajuan Aktif:</span>
+                            <span class="fw-semibold text-danger">{{ item.terpakai }} Hari</span>
+                        </div>
+                        <hr>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="text-dark fw-bold">Sisa Dapat Diklaim:</span>
+                            <span class="badge bg-success fs-5">{{ item.sisa_dapat_diambil }} Hari</span>
+                        </div>
+                    </div>
+                    <div class="card-footer bg-white border-top-0">
+                        <small class="text-muted d-block italic">ℹ️ {{ item.catatan }}</small>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Tabel Detail Riwayat Cuti Masuk -->
+        <h4 class="mb-3 fw-semibold text-secondary">Log Semua Riwayat Dokumen Cuti</h4>
+        <div class="card border-0 shadow-sm rounded">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Tahun</th>
+                            <th>Jenis Cuti</th>
+                            <th>Tanggal Pelaksanaan</th>
+                            <th>Lama</th>
+                            <th>Status Pelaksanaan</th>
+                            <th>Status Pengajuan</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for riwayat in riwayat_all %}
+                        <tr>
+                            <td class="fw-bold">{{ riwayat.tahun_cuti }}</td>
+                            <td>{{ riwayat.jenis_cuti }}</td>
+                            <td>
+                                {% if riwayat.tgl_mulai_cuti %}
+                                    {{ riwayat.tgl_mulai_cuti }} s/d {{ riwayat.tgl_akhir_cuti }}
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td><span class="badge bg-light text-dark">{{ riwayat.lama_cuti }} Hari</span></td>
+                            <td>
+                                {% if riwayat.status_cuti == 'Tunda' %}
+                                    <span class="badge bg-warning text-dark">📌 Tunda (Sisa HAK: {{ riwayat.sisa_hari_tunda }} Hari)</span>
+                                {% else %}
+                                    <span class="badge bg-info text-dark">{{ riwayat.status_pelaksanaan_display }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if riwayat.usulan.status == 'disetujui' %}
+                                    <span class="text-success fw-semibold">✓ Disetujui</span>
+                                {% elif riwayat.usulan.status == 'selesai' %}
+                                    <span class="text-primary fw-semibold">✓ Selesai</span>
+                                {% elif riwayat.usulan.status == 'ditolak' %}
+                                    <span class="text-danger fw-semibold">✗ Ditolak</span>
+                                {% else %}
+                                    <span class="text-muted">⚠️ Belum Diperiksa</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="6" class="text-center py-4 text-muted">Belum ada riwayat cuti yang tercatat untuk pegawai ini.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

@@ -5,6 +5,9 @@
     <div class="card-header">
         <h3 class="card-title">{{ card_title }}</h3>
         <div class="card-tools">
+            <a href="{% url 'myaccount_urls:structural_officer_management' %}" class="btn btn-sm btn-info">
+                <i class="fas fa-sitemap"></i> Pejabat Struktural
+            </a>
             <a href="{% url 'myaccount_urls:account_registration_review_list' %}" class="btn btn-sm btn-warning">
                 <i class="fas fa-user-clock"></i> Verifikasi Registrasi
                 {% if pending_registration_count %}<span class="badge badge-light">{{ pending_registration_count }}</span>{% endif %}
@@ -51,8 +54,8 @@
                         <th>NIP</th>
                         <th class="text-center">Status Akun</th>
                         <th class="text-center">Staff</th>
-                        <th class="text-center">Admin Dokumen</th>
-                        <th style="min-width: 310px;">Aksi</th>
+                        <th>Hak Akses Admin</th>
+                        <th style="min-width: 360px;">Aksi</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -75,8 +78,16 @@
                             <span class="badge badge-secondary">User</span>
                             {% endif %}
                         </td>
-                        <td class="text-center">
-                            {% if account.has_dokumen_admin_group %}<span class="badge badge-info">Admin Dokumen</span>{% else %}<span class="badge badge-light">-</span>{% endif %}
+                        <td>
+                            {% if account.admin_role_names %}
+                                {% for role in admin_roles %}
+                                    {% if role in account.admin_role_names %}
+                                    <span class="badge badge-info mb-1">{{ role }}</span>
+                                    {% endif %}
+                                {% endfor %}
+                            {% else %}
+                            <span class="text-muted">Tidak ada</span>
+                            {% endif %}
                         </td>
                         <td>
                             <a href="{% url 'myaccount_urls:account_reset_password' pk=account.pk %}" class="btn btn-warning btn-sm">
@@ -89,12 +100,9 @@
                                     {% if account.is_active %}Nonaktifkan{% else %}<i class="fas fa-toggle-on"></i> Aktifkan Kembali{% endif %}
                                 </button>
                             </form>
-                            <form method="post" action="{% url 'myaccount_urls:account_toggle_document_admin' pk=account.pk %}" class="d-inline" onsubmit="return confirm('Ubah peran Admin Dokumen akun ini?');">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-sm {% if account.has_dokumen_admin_group %}btn-outline-info{% else %}btn-info{% endif %}">
-                                    <i class="fas fa-folder-open"></i> {% if account.has_dokumen_admin_group %}Cabut Admin Dokumen{% else %}Jadikan Admin Dokumen{% endif %}
-                                </button>
-                            </form>
+                            <button type="button" class="btn btn-sm btn-info" data-toggle="modal" data-target="#adminRolesModal{{ account.pk }}">
+                                <i class="fas fa-user-shield"></i> Kelola Hak Akses
+                            </button>
                             <form method="post" action="{% url 'myaccount_urls:account_toggle_staff' pk=account.pk %}" class="d-inline" onsubmit="return confirm('Ubah status staff akun ini?');">
                                 {% csrf_token %}
                                 <button type="submit" class="btn btn-sm {% if account.is_staff %}btn-outline-secondary{% else %}btn-primary{% endif %}">
@@ -112,6 +120,56 @@
                 </tbody>
             </table>
         </div>
+
+        {% for account in account_list %}
+            {% if account.pk != request.user.pk %}
+            <div class="modal fade" id="adminRolesModal{{ account.pk }}" tabindex="-1" role="dialog" aria-labelledby="adminRolesTitle{{ account.pk }}" aria-hidden="true">
+                <div class="modal-dialog modal-lg" role="document">
+                    <div class="modal-content">
+                        <form method="post" action="{% url 'myaccount_urls:account_update_admin_roles' pk=account.pk %}">
+                            {% csrf_token %}
+                            <div class="modal-header">
+                                <div>
+                                    <h5 class="modal-title" id="adminRolesTitle{{ account.pk }}">Kelola Hak Akses Admin</h5>
+                                    <small class="text-muted">{{ account.full_name|default:account.email }} &middot; {{ account.email }}</small>
+                                </div>
+                                <button type="button" class="close" data-dismiss="modal" aria-label="Tutup">
+                                    <span aria-hidden="true">&times;</span>
+                                </button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="alert alert-light border py-2">
+                                    <i class="fas fa-info-circle text-info mr-1"></i>
+                                    Pilih peran sesuai tanggung jawab pengguna. Status <strong>Staff</strong> dikelola terpisah dan tidak berubah otomatis.
+                                </div>
+                                <div class="row">
+                                    {% for role in admin_roles %}
+                                    <div class="col-md-6 mb-2">
+                                        <div class="custom-control custom-checkbox">
+                                            <input type="checkbox"
+                                                   class="custom-control-input"
+                                                   id="adminRole{{ account.pk }}_{{ forloop.counter }}"
+                                                   name="roles"
+                                                   value="{{ role }}"
+                                                   {% if role in account.admin_role_names %}checked{% endif %}>
+                                            <label class="custom-control-label" for="adminRole{{ account.pk }}_{{ forloop.counter }}">{{ role }}</label>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-dismiss="modal">Batal</button>
+                                <button type="submit" class="btn btn-primary" onclick="return confirm('Simpan perubahan hak akses admin akun ini?');">
+                                    <i class="fas fa-save mr-1"></i>Simpan Hak Akses
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        {% endfor %}
 
         {% if is_paginated %}
         <nav aria-label="Navigasi halaman akun">

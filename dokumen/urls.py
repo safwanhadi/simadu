@@ -97,10 +97,11 @@ from .views import (
     RiwayatKelengkapan,
     NotFoundPage,
     DocumentAdminDashboardView,
+    RiwayatPenggunaanCutiView,
 )
 
 from .api_views import PendidikanAPIView, JabatanAPIView
-from .export_views import DocumentExportCSVView
+from .export_views import DocumentExportCSVView, ProfessionSIPExportExcelView
 
 
 urlpatterns=[
@@ -109,6 +110,11 @@ urlpatterns=[
         'export/<slug:document_type>/csv/',
         DocumentExportCSVView.as_view(),
         name='document_export_csv',
+    ),
+    path(
+        'export/profesi-sip/excel/',
+        ProfessionSIPExportExcelView.as_view(),
+        name='profession_sip_export_excel',
     ),
     path('', RiwayatHomeView.as_view(), name='riwayat_view'),
     path('pendidikan/', RiwayatPendidikanView.as_view(), name='riwayat_pendidikan'),
@@ -162,6 +168,7 @@ urlpatterns=[
     path('cuti/<int:id>/', RiwayatCutiUpdateView.as_view(), name='riwayat_update_cuti'),
     path('cuti/urutkan/<int:pk>/', UrutkanRiwayatCutiView.as_view(), name='riwayat_cuti_urutkan'),
     path('cuti/monitoring/', RiwayatCutiMonitoringListView.as_view(), name='riwayat_cuti_monitoring'),
+    path('cuti/penggunaan/', RiwayatPenggunaanCutiView.as_view(), name='riwayat_penggunaan_cuti'),
     path('diklat/', RiwayatDiklatListView.as_view(), name='riwayat_diklat'),
     path('diklat/create/', RiwayatDiklatCreateView.as_view(), name='riwayat_diklat_create'),
     path('diklat/<int:pk>/', RiwayatDiklatDetailView.as_view(), name='riwayat_diklat_detail'),

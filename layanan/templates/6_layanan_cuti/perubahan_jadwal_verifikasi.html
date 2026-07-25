@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container py-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h4 class="mb-1">Verifikasi Perubahan Jadwal Cuti</h4>
+      <div class="text-muted">{{ perubahan.riwayat_cuti.pegawai.full_name }}</div>
+    </div>
+    <a href="{% url 'layanan_urls:layanan_cuti_detail' pk=perubahan.riwayat_cuti.usulan_id %}" class="btn btn-light border">
+      <i class="fas fa-arrow-left me-1"></i> Kembali
+    </a>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-7">
+      <div class="card border-0 shadow-sm">
+        <div class="card-body p-4">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="small text-muted">Jadwal lama</div>
+              <strong>{{ perubahan.tanggal_mulai_lama|date:"d/m/Y" }} – {{ perubahan.tanggal_akhir_lama|date:"d/m/Y" }}</strong>
+              <div>{{ perubahan.lama_cuti_lama }} hari</div>
+            </div>
+            <div class="col-md-6">
+              <div class="small text-muted">Jadwal yang diminta</div>
+              <strong>{{ perubahan.tanggal_mulai_baru|date:"d/m/Y" }} – {{ perubahan.tanggal_akhir_baru|date:"d/m/Y" }}</strong>
+              <div>{{ perubahan.lama_cuti_baru }} hari</div>
+            </div>
+            <div class="col-12">
+              <div class="small text-muted">Alasan pemohon</div>
+              <div class="border rounded p-3 bg-light">{{ perubahan.alasan|linebreaksbr }}</div>
+            </div>
+          </div>
+
+          {% if not is_monitor %}
+          <hr class="my-4">
+          <form method="post">
+            {% csrf_token %}
+            {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+            <div class="mb-3">{{ form.keputusan }}</div>
+            <div class="mb-3">
+              <label class="form-label">Catatan</label>
+              {{ form.catatan }}
+              <div class="text-danger small">{{ form.catatan.errors }}</div>
+            </div>
+            <button class="btn btn-primary" type="submit">Simpan Keputusan</button>
+          </form>
+          {% else %}
+            <div class="alert alert-info mt-4 mb-0">Mode monitoring admin: keputusan tidak dapat diubah.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white"><strong>Rantai Persetujuan</strong></div>
+        <div class="list-group list-group-flush">
+          {% for item in chain %}
+          <div class="list-group-item d-flex justify-content-between align-items-start">
+            <div>
+              <div class="fw-semibold">Level {{ item.level }} · {{ item.user.full_name }}</div>
+              {% if item.catatan %}<div class="small text-muted">{{ item.catatan }}</div>{% endif %}
+            </div>
+            {% if item.keputusan == 'setuju' %}
+              <span class="badge bg-success">Disetujui</span>
+            {% elif item.keputusan == 'tolak' %}
+              <span class="badge bg-danger">Ditolak</span>
+            {% else %}
+              <span class="badge bg-warning text-dark">Menunggu</span>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

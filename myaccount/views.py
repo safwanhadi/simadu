@@ -18,6 +18,7 @@ from django.utils import timezone
 from urllib.parse import urlencode
 from django.conf import settings
 from django.http import Http404
+from django.core.paginator import Paginator
 
 
 from datetime import date, timedelta
@@ -33,13 +34,16 @@ from .models import ProfilSDM
 
 from .models import AccountRegistration, ProfilSDM, Users
 from .forms import (
+    AccountAdminRolesForm,
     AdminResetPasswordForm,
     EmployeeRegistrationForm,
     ProfilForm,
+    StructuralOfficerForm,
     UserAdminChangeForm,
 )
 import logging
-from .roles import ADMIN_DOKUMEN
+from .roles import ADMIN_DOKUMEN, ADMIN_GROUPS
+from strukturorg.models import PejabatStruktur
 
 
 class AccountAdminRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
@@ -84,6 +88,12 @@ class AccountManagementListView(AccountAdminRequiredMixin, ListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        for account in context['account_list']:
+            account.admin_role_names = {
+                group.name
+                for group in account.groups.all()
+                if group.name in ADMIN_GROUPS
+            }
         context.update({
             'q': self.request.GET.get('q', '').strip(),
             'status': self.request.GET.get('status', '').strip(),
@@ -97,11 +107,118 @@ class AccountManagementListView(AccountAdminRequiredMixin, ListView):
             'pending_registration_count': AccountRegistration.objects.filter(
                 status=AccountRegistration.PENDING,
             ).count(),
+            'admin_roles': ADMIN_GROUPS,
             'account_management': 'active',
             'card_title': 'Pengelolaan Akun',
             'title_page': 'Pengelolaan Akun',
         })
         return context
+
+
+class StructuralOfficerManagementView(AccountAdminRequiredMixin, FormView):
+    form_class = StructuralOfficerForm
+    template_name = 'account_management/structural_officers.html'
+    success_url = reverse_lazy('myaccount_urls:structural_officer_management')
+
+    def get_queryset(self):
+        queryset = PejabatStruktur.objects.select_related(
+            'pejabat',
+            'pejabat__profil_user',
+            'instansi_daerah',
+            'satuan_kerja_induk',
+            'unit_organisasi',
+            'bidang',
+            'sub_bidang',
+            'unit_instalasi',
+        )
+        status = self.request.GET.get('status', 'active').strip()
+        if status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        elif status != 'all':
+            status = 'active'
+            queryset = queryset.filter(is_active=True)
+
+        query = self.request.GET.get('q', '').strip()
+        if query:
+            queryset = queryset.filter(
+                Q(pejabat__email__icontains=query)
+                | Q(pejabat__first_name__icontains=query)
+                | Q(pejabat__last_name__icontains=query)
+                | Q(pejabat__profil_user__nip__icontains=query)
+                | Q(nama_jabatan__icontains=query)
+                | Q(instansi_daerah__instansi__icontains=query)
+                | Q(satuan_kerja_induk__satuan_kerja__icontains=query)
+                | Q(unit_organisasi__unor__icontains=query)
+                | Q(bidang__bidang__icontains=query)
+                | Q(sub_bidang__sub_bidang__icontains=query)
+                | Q(unit_instalasi__instalasi__icontains=query)
+            )
+        return queryset, status, query
+
+    def form_valid(self, form):
+        appointment = form.save()
+        messages.success(
+            self.request,
+            f'{appointment.get_jenis_penugasan_display()} {appointment.pejabat.full_name_2} '
+            f'berhasil diaktifkan sebagai {appointment.nama_jabatan} pada '
+            f'{appointment.struktur_object}.',
+        )
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        queryset, status, query = self.get_queryset()
+        paginator = Paginator(queryset, 25)
+        page_obj = paginator.get_page(self.request.GET.get('page'))
+        context.update({
+            'appointment_list': page_obj.object_list,
+            'page_obj': page_obj,
+            'is_paginated': page_obj.has_other_pages(),
+            'q': query,
+            'status': status,
+            'today': date.today(),
+            'active_count': PejabatStruktur.objects.filter(is_active=True).count(),
+            'temporary_count': PejabatStruktur.objects.filter(
+                is_active=True,
+                jenis_penugasan__in=(PejabatStruktur.PLT, PejabatStruktur.PLH),
+            ).count(),
+            'account_management': 'active',
+            'card_title': 'Pejabat Struktural',
+            'title_page': 'Pengelolaan Pejabat Struktural',
+        })
+        return context
+
+
+class StructuralOfficerDeactivateView(AccountAdminRequiredMixin, View):
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        appointment = get_object_or_404(
+            PejabatStruktur.objects.select_for_update().select_related('pejabat'),
+            pk=kwargs['pk'],
+            is_active=True,
+        )
+        raw_date = request.POST.get('tanggal_selesai', '').strip()
+        try:
+            end_date = date.fromisoformat(raw_date) if raw_date else date.today()
+        except ValueError:
+            messages.error(request, 'Tanggal selesai tidak valid.')
+            return redirect('myaccount_urls:structural_officer_management')
+        if end_date < appointment.tanggal_mulai or end_date > date.today():
+            messages.error(
+                request,
+                'Tanggal selesai harus berada di antara TMT dan tanggal hari ini.',
+            )
+            return redirect('myaccount_urls:structural_officer_management')
+
+        appointment.is_active = False
+        appointment.tanggal_selesai = end_date
+        appointment.save()
+        messages.success(
+            request,
+            f'Masa jabatan {appointment.pejabat.full_name_2} pada '
+            f'{appointment.struktur_object} berhasil ditutup.',
+        )
+        return redirect('myaccount_urls:structural_officer_management')
 
 
 class EmployeeRegistrationView(FormView):
@@ -266,6 +383,55 @@ class AccountToggleDocumentAdminView(AccountActionMixin, View):
             messages.success(
                 request,
                 f'Peran Admin Dokumen untuk {target.email} berhasil {status}.',
+            )
+        return redirect('myaccount_urls:account_management_list')
+
+
+class AccountUpdateAdminRolesView(AccountActionMixin, View):
+    """Ganti seluruh peran admin SIMADU tanpa mengubah grup non-admin."""
+
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        target = self.get_target()
+        if target.pk == request.user.pk:
+            messages.error(
+                request,
+                'Anda tidak dapat mengubah hak akses admin akun sendiri.',
+            )
+            return redirect('myaccount_urls:account_management_list')
+
+        form = AccountAdminRolesForm(request.POST)
+        if not form.is_valid():
+            messages.error(request, 'Pilihan hak akses admin tidak valid.')
+            return redirect('myaccount_urls:account_management_list')
+
+        selected_names = set(form.cleaned_data['roles'])
+        current_admin_groups = list(
+            target.groups.filter(name__in=ADMIN_GROUPS)
+        )
+        selected_groups = []
+        for role_name in ADMIN_GROUPS:
+            if role_name in selected_names:
+                group, _created = Group.objects.get_or_create(name=role_name)
+                selected_groups.append(group)
+
+        if current_admin_groups:
+            target.groups.remove(*current_admin_groups)
+        if selected_groups:
+            target.groups.add(*selected_groups)
+
+        if selected_names:
+            role_summary = ', '.join(
+                role for role in ADMIN_GROUPS if role in selected_names
+            )
+            messages.success(
+                request,
+                f'Hak akses admin {target.email} diperbarui: {role_summary}.',
+            )
+        else:
+            messages.success(
+                request,
+                f'Seluruh hak akses admin {target.email} berhasil dicabut.',
             )
         return redirect('myaccount_urls:account_management_list')
 

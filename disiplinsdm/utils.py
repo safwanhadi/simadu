@@ -1,5 +1,6 @@
 import calendar
 from datetime import datetime, date, timedelta
+from strukturorg.services import is_active_leader
 
 # def get_mingguan_lengkap(bulan, tahun):
 #     cal = calendar.Calendar(firstweekday=0)
@@ -177,8 +178,8 @@ def is_user_authorized_to_approve(user, jenis_sdm):
 
     return (
         profil and (
-            jenis_sdm.unor and jenis_sdm.unor.nama_pimpinan == user or
-            jenis_sdm.bidang and jenis_sdm.bidang.nama_pimpinan == user or
-            jenis_sdm.sub_bidang and jenis_sdm.sub_bidang.nama_pimpinan == user
+            jenis_sdm.unor and is_active_leader(user, jenis_sdm.unor) or
+            jenis_sdm.bidang and is_active_leader(user, jenis_sdm.bidang) or
+            jenis_sdm.sub_bidang and is_active_leader(user, jenis_sdm.sub_bidang)
         )
     )

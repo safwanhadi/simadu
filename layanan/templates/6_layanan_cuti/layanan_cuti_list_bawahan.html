@@ -13,7 +13,7 @@
                 <i class="fas fa-edit me-1"></i> Riwayat Cuti Saya
             </a>
         </li>
-        {% if request.user.is_staff or request.user.is_cuti_admin %}
+        {% if request.user.profil_admin.is_pejabat or request.user.is_cuti_admin %}
             <li class="nav-item">
                 <a class="nav-link {% if active_tab == 'bawahan' or not active_tab %}active{% endif %}"
                 href="#">
@@ -45,6 +45,12 @@
                 Daftar pengajuan cuti pegawai di bawah kewenangan Anda.
             </p>
         </div>
+        {% if request.user.is_cuti_admin %}
+        <a href="{% url 'layanan_urls:cuti_pemutihan_admin' %}"
+           class="btn btn-outline-warning">
+            <i class="fas fa-broom mr-1"></i>Pemutihan Status
+        </a>
+        {% endif %}
     </div>
 
     <!-- TABEL RIWAYAT BAWAHAN -->
@@ -61,7 +67,8 @@
                                 <th>Periode</th>
                                 <th class="text-center">Lama</th>
                                 <th class="text-center">Tahun</th>
-                                <th>Status</th>
+                                <th>Status Pengajuan</th>
+                                <th>Status Pelaksanaan</th>
                                 <th>Usulan</th>
                                 <th class="text-center">Aksi</th>
                             </tr>
@@ -100,36 +107,31 @@
                                     {{ item.tahun_cuti|default:"-" }}
                                 </td>
                                 <td>
-                                    {% if item.status_persetujuan == "belum" %}
+                                    {% if item.usulan.status == "pengajuan" %}
                                         <span class="badge bg-warning text-dark">
                                             <i class="fas fa-hourglass-half me-1"></i>
-                                            Belum diputuskan
+                                            Diajukan
                                         </span>
-
-                                    {% elif item.status_persetujuan == "disetujui" %}
-                                        {% if item.status_cuti == "Tunda" %}
-                                            <span class="badge bg-info text-dark">
-                                                <i class="fas fa-pause-circle me-1"></i>
-                                                Disetujui (Ditunda)
-                                            </span>
-                                        {% else %}
-                                            <span class="badge bg-success">
-                                                <i class="fas fa-check-circle me-1"></i>
-                                                Disetujui (Dilaksanakan)
-                                            </span>
-                                        {% endif %}
-
-                                    {% elif item.status_persetujuan == "ditolak" %}
+                                    {% elif item.usulan.status == "tindaklanjut" %}
+                                        <span class="badge bg-info text-dark">Sedang diverifikasi</span>
+                                    {% elif item.usulan.status == "disetujui" %}
+                                        <span class="badge bg-success">
+                                            <i class="fas fa-check-circle me-1"></i> Disetujui
+                                        </span>
+                                    {% elif item.usulan.status == "selesai" %}
+                                        <span class="badge bg-primary">
+                                            <i class="fas fa-file-circle-check me-1"></i> Selesai
+                                        </span>
+                                    {% elif item.usulan.status == "ditolak" %}
                                         <span class="badge bg-danger">
-                                            <i class="fas fa-times-circle me-1"></i>
-                                            Ditolak
+                                            <i class="fas fa-times-circle me-1"></i> Ditolak
                                         </span>
-
                                     {% else %}
-                                        <span class="badge bg-secondary">
-                                            {{ item.status_persetujuan }}
-                                        </span>
+                                        <span class="badge bg-secondary">{{ item.usulan.get_status_display|default:"Data lama" }}</span>
                                     {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge bg-secondary">{{ item.status_pelaksanaan_display }}</span>
                                 </td>
                                 <td>
                                     {% if item.usulan %}
@@ -150,9 +152,19 @@
                                         class="btn btn-sm btn-outline-primary">
                                             <i class="fas fa-search"></i>
                                         </a>
-                                        <a href="{% url 'layanan_urls:layanan_cuti_verifikasi' id=item.usulan.pk %}" class="btn btn-sm btn-success">
-                                           <i class="fas fa-check"></i>
+                                       <a href="{% url 'layanan_urls:layanan_cuti_verifikasi' id=item.usulan.pk %}"
+                                          class="btn btn-sm btn-success"
+                                          title="Buka form atau hasil verifikasi">
+                                           <i class="fas fa-clipboard-check"></i>
                                        </a>
+                                       {% for perubahan in item.perubahan_jadwal_menunggu %}
+                                         {% if request.user.pk == perubahan.verifikator1_id or request.user.pk == perubahan.verifikator2_id or request.user.pk == perubahan.verifikator3_id or request.user.is_cuti_admin %}
+                                         <a href="{% url 'layanan_urls:perubahan_jadwal_cuti_verifikasi' pk=perubahan.pk %}"
+                                            class="btn btn-sm btn-warning" title="Verifikasi perubahan jadwal">
+                                           <i class="fas fa-calendar-check"></i>
+                                         </a>
+                                         {% endif %}
+                                       {% endfor %}
                                     {% else %}
                                         <span class="text-muted small">-</span>
                                     {% endif %}
@@ -166,35 +178,89 @@
                 </div>
 
                 {% if is_paginated %}
-                    <nav class="mt-3">
-                        <ul class="pagination pagination-sm mb-0 justify-content-end">
-                            {% if page_obj.has_previous %}
-                                <li class="page-item">
-                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}">&laquo;</a>
-                                </li>
-                            {% else %}
-                                <li class="page-item disabled">
-                                    <span class="page-link">&laquo;</span>
-                                </li>
-                            {% endif %}
+                    <div class="d-flex flex-wrap justify-content-between align-items-center mt-3">
+                        <div class="small text-muted mb-2 mb-md-0">
+                            Menampilkan
+                            <strong>{{ page_obj.start_index }}</strong>–<strong>{{ page_obj.end_index }}</strong>
+                            dari
+                            <strong>{{ page_obj.paginator.count }}</strong> data
+                        </div>
 
-                            {% for num in paginator.page_range %}
-                                <li class="page-item {% if page_obj.number == num %}active{% endif %}">
-                                    <a class="page-link" href="?page={{ num }}">{{ num }}</a>
-                                </li>
-                            {% endfor %}
+                        <nav aria-label="Navigasi halaman riwayat cuti">
+                            <ul class="pagination pagination-sm mb-0">
 
-                            {% if page_obj.has_next %}
-                                <li class="page-item">
-                                    <a class="page-link" href="?page={{ page_obj.next_page_number }}">&raquo;</a>
-                                </li>
-                            {% else %}
-                                <li class="page-item disabled">
-                                    <span class="page-link">&raquo;</span>
-                                </li>
-                            {% endif %}
-                        </ul>
-                    </nav>
+                                {# Tombol First & Previous #}
+                                {% if page_obj.has_previous %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page=1" title="Halaman pertama">
+                                            <i class="fas fa-angle-double-left"></i>
+                                        </a>
+                                    </li>
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}" title="Sebelumnya">
+                                            <i class="fas fa-angle-left"></i>
+                                        </a>
+                                    </li>
+                                {% else %}
+                                    <li class="page-item disabled">
+                                        <span class="page-link">
+                                            <i class="fas fa-angle-double-left"></i>
+                                        </span>
+                                    </li>
+                                    <li class="page-item disabled">
+                                        <span class="page-link">
+                                            <i class="fas fa-angle-left"></i>
+                                        </span>
+                                    </li>
+                                {% endif %}
+
+                                {# Nomor halaman #}
+                                {% for num in paginator.page_range %}
+                                    {% if num == page_obj.number %}
+                                        <li class="page-item active" aria-current="page">
+                                            <span class="page-link">
+                                                {{ num }}
+                                            </span>
+                                        </li>
+                                    {% elif num >= page_obj.number|add:'-2' and num <= page_obj.number|add:'2' or num == 1 or num == paginator.num_pages %}
+                                        <li class="page-item">
+                                            <a class="page-link" href="?page={{ num }}">{{ num }}</a>
+                                        </li>
+                                    {% elif num == page_obj.number|add:'-3' or num == page_obj.number|add:'3' %}
+                                        <li class="page-item disabled">
+                                            <span class="page-link">…</span>
+                                        </li>
+                                    {% endif %}
+                                {% endfor %}
+
+                                {# Tombol Next & Last #}
+                                {% if page_obj.has_next %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page={{ page_obj.next_page_number }}" title="Berikutnya">
+                                            <i class="fas fa-angle-right"></i>
+                                        </a>
+                                    </li>
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}" title="Halaman terakhir">
+                                            <i class="fas fa-angle-double-right"></i>
+                                        </a>
+                                    </li>
+                                {% else %}
+                                    <li class="page-item disabled">
+                                        <span class="page-link">
+                                            <i class="fas fa-angle-right"></i>
+                                        </span>
+                                    </li>
+                                    <li class="page-item disabled">
+                                        <span class="page-link">
+                                            <i class="fas fa-angle-double-right"></i>
+                                        </span>
+                                    </li>
+                                {% endif %}
+
+                            </ul>
+                        </nav>
+                    </div>
                 {% endif %}
 
             {% else %}

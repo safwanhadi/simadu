@@ -85,7 +85,8 @@ class KompetensiAdmin(admin.ModelAdmin):
 #         """Returns a comma-separated list of authors for the book."""
 #         return ", ".join([f'{pegawai.first_name} {pegawai.last_name}' for pegawai in obj.pegawai.all()])
   
-
+class RiwayatCutiAdmin(admin.ModelAdmin):
+    list_display = ('pegawai', 'jenis_cuti', 'tgl_mulai_cuti', 'tgl_akhir_cuti', 'status_cuti')
 admin.site.register(PangkatGolongan)
 admin.site.register(DokumenSDM, DokumenSDMAdmin)
 admin.site.register(JenjangStruktural)
@@ -104,7 +105,7 @@ admin.site.register(RiwayatGajiBerkala)
 admin.site.register(RiwayatSKP)
 admin.site.register(RiwayatOrganisasi)
 admin.site.register(RiwayatDiklat)
-admin.site.register(RiwayatCuti)
+admin.site.register(RiwayatCuti, RiwayatCutiAdmin)
 admin.site.register(KlaimCutiTunda)
 admin.site.register(RiwayatHukuman)
 admin.site.register(RiwayatPenghargaan)
