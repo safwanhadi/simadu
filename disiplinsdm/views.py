@@ -3924,6 +3924,211 @@ class SyncAnalisisPresensiPerInstalasi(View):
 from .models import AbsensiHarian, LogAktivitasAbsen
 from .attendance_rules import is_successful_apel
 
+
+class RawPresensiDatabaseListView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    ListView,
+):
+    """Tampilan read-only transaksi mentah dari tabel LogKehadiran."""
+    model = LogKehadiran
+    template_name = 'kehadirankegiatan/raw_presensi_database.html'
+    context_object_name = 'raw_logs'
+    paginate_by = 100
+
+    def test_func(self):
+        return self.request.user.is_disiplin_admin
+
+    @staticmethod
+    def _excel_safe_text(value):
+        """Cegah nilai mentah perangkat dibaca sebagai formula Excel."""
+        text = str(value or '')
+        return f"'{text}" if text.startswith(('=', '+', '-', '@')) else text
+
+    def get(self, request, *args, **kwargs):
+        if request.GET.get('export') == 'excel':
+            return self.export_excel(self.get_queryset())
+        return super().get(request, *args, **kwargs)
+
+    def _parse_date(self, name, default):
+        raw_value = self.request.GET.get(name, '').strip()
+        try:
+            return datetime.strptime(raw_value, '%Y-%m-%d').date()
+        except (TypeError, ValueError):
+            return default
+
+    def get_queryset(self):
+        today = date.today()
+        self.date_from = self._parse_date('date_from', today)
+        self.date_to = self._parse_date('date_to', self.date_from)
+        if self.date_from > self.date_to:
+            self.date_from, self.date_to = self.date_to, self.date_from
+
+        evaluated_log = LogAktivitasAbsen.objects.filter(
+            absensi_harian__pegawai_id=OuterRef('mapping__pegawai_id'),
+            waktu=OuterRef('datetime'),
+        )
+        queryset = (
+            LogKehadiran.objects
+            .select_related(
+                'mapping',
+                'mapping__pegawai',
+                'mapping__pegawai__profil_user',
+            )
+            .annotate(is_evaluated=Exists(evaluated_log))
+            .filter(
+                datetime__date__gte=self.date_from,
+                datetime__date__lte=self.date_to,
+            )
+        )
+
+        self.keyword = self.request.GET.get('q', '').strip()
+        self.device = self.request.GET.get('device', '').strip()
+        self.direction = self.request.GET.get('direction', '').strip()
+        self.evaluation = self.request.GET.get('evaluation', '').strip()
+
+        if self.keyword:
+            queryset = queryset.filter(
+                Q(personname__icontains=self.keyword)
+                | Q(mapping__mesin_id__icontains=self.keyword)
+                | Q(mapping__pegawai__first_name__icontains=self.keyword)
+                | Q(mapping__pegawai__last_name__icontains=self.keyword)
+                | Q(mapping__pegawai__profil_user__nip__icontains=self.keyword)
+            )
+        if self.device:
+            queryset = queryset.filter(devicename=self.device)
+        if self.direction:
+            queryset = queryset.filter(direction=self.direction)
+        if self.evaluation == 'sudah':
+            queryset = queryset.filter(is_evaluated=True)
+        elif self.evaluation == 'belum':
+            queryset = queryset.filter(is_evaluated=False)
+
+        return queryset.order_by('-datetime', '-pk')
+
+    def export_excel(self, queryset):
+        workbook = openpyxl.Workbook()
+        worksheet = workbook.active
+        worksheet.title = 'Data Mentah Presensi'
+        worksheet.freeze_panes = 'A5'
+
+        worksheet['A1'] = 'DATA MENTAH PRESENSI'
+        worksheet['A1'].font = Font(name='Arial', size=14, bold=True)
+        worksheet['A2'] = (
+            f'Periode {self.date_from:%d-%m-%Y} s.d. '
+            f'{self.date_to:%d-%m-%Y}'
+        )
+        worksheet['A2'].font = Font(name='Arial', size=10, italic=True)
+        worksheet.append([])
+
+        headers = [
+            'No', 'ID Database', 'ID Mesin', 'Nama dari Perangkat',
+            'Pegawai Terpetakan', 'NIP', 'Waktu Mentah', 'Arah',
+            'Perangkat', 'Status Pengolahan',
+        ]
+        worksheet.append(headers)
+        worksheet.auto_filter.ref = 'A4:J4'
+        header_fill = PatternFill(
+            start_color='1F4E78',
+            end_color='1F4E78',
+            fill_type='solid',
+        )
+        header_font = Font(name='Arial', size=10, bold=True, color='FFFFFF')
+        thin_border = Border(
+            left=Side(style='thin', color='D9D9D9'),
+            right=Side(style='thin', color='D9D9D9'),
+            top=Side(style='thin', color='D9D9D9'),
+            bottom=Side(style='thin', color='D9D9D9'),
+        )
+        for cell in worksheet[4]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(
+                horizontal='center',
+                vertical='center',
+                wrap_text=True,
+            )
+
+        for number, log in enumerate(queryset.iterator(), 1):
+            profile = getattr(log.mapping.pegawai, 'profil_user', None)
+            raw_datetime = log.datetime
+            if timezone.is_aware(raw_datetime):
+                raw_datetime = timezone.make_naive(raw_datetime)
+            worksheet.append([
+                number,
+                log.pk,
+                self._excel_safe_text(log.mapping.mesin_id),
+                self._excel_safe_text(log.personname),
+                self._excel_safe_text(log.mapping.pegawai.full_name),
+                self._excel_safe_text(getattr(profile, 'nip', '-')),
+                raw_datetime,
+                self._excel_safe_text(log.direction),
+                self._excel_safe_text(log.devicename),
+                'Sudah diolah' if log.is_evaluated else 'Belum diolah',
+            ])
+            current_row = worksheet.max_row
+            worksheet.cell(current_row, 7).number_format = 'yyyy-mm-dd hh:mm:ss'
+            for cell in worksheet[current_row]:
+                cell.font = Font(name='Arial', size=10)
+                cell.border = thin_border
+                cell.alignment = Alignment(vertical='center')
+
+        widths = {
+            'A': 8, 'B': 13, 'C': 18, 'D': 28, 'E': 28,
+            'F': 22, 'G': 22, 'H': 12, 'I': 22, 'J': 20,
+        }
+        for column, width in widths.items():
+            worksheet.column_dimensions[column].width = width
+
+        response = HttpResponse(
+            content_type=(
+                'application/vnd.openxmlformats-officedocument.'
+                'spreadsheetml.sheet'
+            )
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="Data_Mentah_Presensi_'
+            f'{self.date_from:%Y%m%d}_{self.date_to:%Y%m%d}.xlsx"'
+        )
+        workbook.save(response)
+        return response
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        base_logs = LogKehadiran.objects.filter(
+            datetime__date__gte=self.date_from,
+            datetime__date__lte=self.date_to,
+        )
+        query_params = self.request.GET.copy()
+        query_params.pop('page', None)
+        query_params.pop('export', None)
+        context.update({
+            'date_from': self.date_from,
+            'date_to': self.date_to,
+            'q': self.keyword,
+            'selected_device': self.device,
+            'selected_direction': self.direction,
+            'selected_evaluation': self.evaluation,
+            'devices': (
+                base_logs.exclude(devicename='')
+                .values_list('devicename', flat=True)
+                .distinct()
+                .order_by('devicename')
+            ),
+            'directions': (
+                base_logs.exclude(direction='')
+                .values_list('direction', flat=True)
+                .distinct()
+                .order_by('direction')
+            ),
+            'preserved_filters': query_params.urlencode(),
+            'title_page': 'Data Mentah Presensi',
+            'selected': 'disiplin',
+            'riwayat': 'active',
+        })
+        return context
+
+
 class RekapPresensiBulananView(LoginRequiredMixin, generic.ListView):
     login_url = reverse_lazy('myaccount_urls:login_view')
     model = Users
@@ -4094,6 +4299,11 @@ class RekapPresensiBulananView(LoginRequiredMixin, generic.ListView):
         context['daftar_bulan'] = nama_bulan
         context['title_page'] = 'Rekap Presensi Bulanan'
         context['label_periode'] = f"{nama_bulan.get(bulan)} {tahun}"
+        
+        context.update({
+            'selected': 'disiplin',
+            'riwayat': 'active',
+        })
         
         return context
 

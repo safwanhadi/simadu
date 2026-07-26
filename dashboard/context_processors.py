@@ -1,7 +1,10 @@
 from dokumen.models import DokumenSDM
 from dokumen.access import get_selected_nip
 from dokumen.requirements import get_required_documents
-from dokumen.notifications import get_sip_expiry_notifications
+from dokumen.notifications import (
+    get_sip_expiry_notifications,
+    get_str_expiry_notifications,
+)
 from myaccount.models import Users
 from layanan.models import (
     JenisLayanan,
@@ -122,10 +125,13 @@ def notifikasi_layanan(request):
             'notif_berkala': [], 'notif_diklat': [], 'notif_diklat_admin': [],
             'notif_inovasi': [], 'notif_sip': [], 'notif_pangkat': [],
             'notif_jabatan': [], 'sip_expiry_notifications': [],
+            'str_expiry_notifications': [],
+            'expiry_notification_total': 0,
             'notification_total': 0,
         }
 
     sip_expiry_notifications = get_sip_expiry_notifications(request.user)
+    str_expiry_notifications = get_str_expiry_notifications(request.user)
 
     # === Blok 2: Untuk Superuser (Melihat Semua Notifikasi Pengajuan) ===
     if request.user.is_superuser:
@@ -159,7 +165,15 @@ def notifikasi_layanan(request):
             'notif_jabatan': layanan_jabatan,
             'notif_cuti_admin': [], 'notif_diklat_admin': [],
             'sip_expiry_notifications': sip_expiry_notifications,
-            'notification_total': len(notifikasi) + len(sip_expiry_notifications),
+            'str_expiry_notifications': str_expiry_notifications,
+            'expiry_notification_total': (
+                len(sip_expiry_notifications) + len(str_expiry_notifications)
+            ),
+            'notification_total': (
+                len(notifikasi)
+                + len(sip_expiry_notifications)
+                + len(str_expiry_notifications)
+            ),
         }
 
     # === Blok 3: Untuk User Biasa dan Admin Hirarki ===
@@ -373,7 +387,15 @@ def notifikasi_layanan(request):
         'notif_cuti_admin': layanan_cuti_admin,
         'notif_diklat_admin': layanan_diklat_admin,
         'sip_expiry_notifications': sip_expiry_notifications,
-        'notification_total': len(notifikasi) + len(sip_expiry_notifications),
+        'str_expiry_notifications': str_expiry_notifications,
+        'expiry_notification_total': (
+            len(sip_expiry_notifications) + len(str_expiry_notifications)
+        ),
+        'notification_total': (
+            len(notifikasi)
+            + len(sip_expiry_notifications)
+            + len(str_expiry_notifications)
+        ),
     }
     
 

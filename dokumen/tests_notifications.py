@@ -7,7 +7,11 @@ from django.urls import reverse
 from myaccount.models import ProfilSDM, Users
 
 from .models import RiwayatProfesi, RiwayatSIPProfesi
-from .notifications import get_sip_expiry_notifications
+from .notifications import (
+    get_latest_str_records,
+    get_sip_expiry_notifications,
+    get_str_expiry_notifications,
+)
 
 
 class SIPExpiryNotificationTests(TestCase):
@@ -135,3 +139,114 @@ class SIPExpiryNotificationTests(TestCase):
         self.assertContains(response, 'Pengingat Masa Berlaku SIP')
         self.assertContains(response, 'SIP-MENU')
         self.assertContains(response, 'Pengingat SIP')
+
+    def test_str_tepat_enam_bulan_sebelum_expired_muncul(self):
+        today = date(2026, 1, 15)
+        self.profession.no_str = 'STR-ENAM-BULAN'
+        self.profession.berlaku_sd_str = today + relativedelta(months=6)
+        self.profession.save(update_fields=['no_str', 'berlaku_sd_str'])
+
+        notifications = get_str_expiry_notifications(
+            self.user,
+            today=today,
+        )
+
+        self.assertEqual([item.pk for item in notifications], [self.profession.pk])
+        self.assertFalse(notifications[0].is_expired)
+
+    def test_str_di_luar_enam_bulan_tidak_muncul(self):
+        today = date(2026, 1, 15)
+        self.profession.berlaku_sd_str = (
+            today + relativedelta(months=6) + timedelta(days=1)
+        )
+        self.profession.save(update_fields=['berlaku_sd_str'])
+
+        self.assertEqual(
+            get_str_expiry_notifications(self.user, today=today),
+            [],
+        )
+
+    def test_str_expired_tetap_muncul(self):
+        today = date(2026, 1, 15)
+        self.profession.berlaku_sd_str = today - timedelta(days=10)
+        self.profession.save(update_fields=['berlaku_sd_str'])
+
+        notification = get_str_expiry_notifications(
+            self.user,
+            today=today,
+        )[0]
+
+        self.assertTrue(notification.is_expired)
+        self.assertEqual(notification.expiry_message, 'Kedaluwarsa 10 hari lalu')
+
+    def test_tab_pengingat_str_dapat_dibuka(self):
+        self.profession.no_str = 'STR-TAB'
+        self.profession.berlaku_sd_str = date.today() + timedelta(days=30)
+        self.profession.save(update_fields=['no_str', 'berlaku_sd_str'])
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            f"{reverse('layanan_urls:notifikasi_view')}?layanan=str-expiry"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Pengingat Masa Berlaku STR')
+        self.assertContains(response, 'STR-TAB')
+        self.assertContains(response, 'Masa Berlaku SIP')
+        self.assertContains(response, 'Masa Berlaku STR')
+
+    def test_str_seumur_hidup_tidak_menghasilkan_pengingat_expiry(self):
+        today = date(2026, 1, 15)
+        self.profession.no_str = 'STR-SEUMUR-HIDUP'
+        self.profession.berlaku_sd_str = today - timedelta(days=1)
+        self.profession.str_seumur_hidup = True
+        self.profession.save(update_fields=[
+            'no_str', 'berlaku_sd_str', 'str_seumur_hidup',
+        ])
+
+        self.assertEqual(
+            get_str_expiry_notifications(self.user, today=today),
+            [],
+        )
+        record = get_latest_str_records(self.user, today=today)[0]
+        self.assertEqual(record.validity_status, 'seumur_hidup')
+
+    def test_tab_str_dapat_filter_status_seumur_hidup(self):
+        self.profession.no_str = 'STR-SEUMUR-HIDUP'
+        self.profession.str_seumur_hidup = True
+        self.profession.berlaku_sd_str = None
+        self.profession.save(update_fields=[
+            'no_str', 'str_seumur_hidup', 'berlaku_sd_str',
+        ])
+        RiwayatProfesi.objects.create(
+            pegawai=self.user,
+            no_str='STR-BELUM-ID',
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse('layanan_urls:notifikasi_view'),
+            {'layanan': 'str-expiry', 'status_str': 'seumur_hidup'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'STR-SEUMUR-HIDUP')
+        self.assertNotContains(response, 'STR-BELUM-ID')
+
+    def test_tab_str_memberi_info_jika_semua_str_seumur_hidup(self):
+        self.profession.str_seumur_hidup = True
+        self.profession.berlaku_sd_str = None
+        self.profession.save(update_fields=[
+            'str_seumur_hidup', 'berlaku_sd_str',
+        ])
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse('layanan_urls:notifikasi_view'),
+            {'layanan': 'str-expiry'},
+        )
+
+        self.assertContains(
+            response,
+            'Semua STR terbaru sudah teridentifikasi berlaku seumur hidup.',
+        )

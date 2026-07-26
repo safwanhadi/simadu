@@ -49,12 +49,69 @@
                             <h5>Notifikasi Usulan Kenaikan Jabatan</h5>
                         {% elif data == 'sip-expiry' %}
                             <h5>Pengingat Masa Berlaku SIP</h5>
+                        {% elif data == 'str-expiry' %}
+                            <h5>Pengingat Masa Berlaku STR</h5>
                         {% else %}
                             <h5>Detail Seluruh Notifikasi</h5>
                         {% endif %}
                     </div>
                     <div class="card-body">
                         <div class="mb-3">{% include 'dashboard_nav.html' %}</div>
+                        {% if data == 'sip-expiry' or data == 'str-expiry' %}
+                        <ul class="nav nav-tabs mb-3">
+                            <li class="nav-item">
+                                <a class="nav-link {% if data == 'sip-expiry' %}active{% endif %}"
+                                   href="{% url 'layanan_urls:notifikasi_view' %}?layanan=sip-expiry">
+                                    <i class="fas fa-file-medical mr-1"></i>Masa Berlaku SIP
+                                    {% if sip_expiry_notifications %}
+                                    <span class="badge badge-warning ml-1">{{ sip_expiry_notifications|length }}</span>
+                                    {% endif %}
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link {% if data == 'str-expiry' %}active{% endif %}"
+                                   href="{% url 'layanan_urls:notifikasi_view' %}?layanan=str-expiry">
+                                    <i class="fas fa-id-card-alt mr-1"></i>Masa Berlaku STR
+                                    {% if str_expiry_notifications %}
+                                    <span class="badge badge-warning ml-1">{{ str_expiry_notifications|length }}</span>
+                                    {% endif %}
+                                </a>
+                            </li>
+                        </ul>
+                        {% endif %}
+                        {% if data == 'str-expiry' %}
+                            {% if all_str_lifetime %}
+                            <div class="alert alert-success">
+                                <i class="fas fa-check-circle mr-1"></i>
+                                Semua STR terbaru sudah teridentifikasi berlaku seumur hidup.
+                            </div>
+                            {% endif %}
+                            <form method="get" class="row align-items-end mb-3">
+                                <input type="hidden" name="layanan" value="str-expiry">
+                                <div class="col-md-5 col-lg-4">
+                                    <label for="status_str">Filter status masa berlaku</label>
+                                    <select name="status_str" id="status_str" class="form-control">
+                                        <option value="semua" {% if status_str == 'semua' %}selected{% endif %}>
+                                            Semua STR
+                                        </option>
+                                        <option value="seumur_hidup" {% if status_str == 'seumur_hidup' %}selected{% endif %}>
+                                            Seumur Hidup ({{ str_summary.seumur_hidup }})
+                                        </option>
+                                        <option value="berbatas_waktu" {% if status_str == 'berbatas_waktu' %}selected{% endif %}>
+                                            Berbatas Waktu ({{ str_summary.berbatas_waktu }})
+                                        </option>
+                                        <option value="belum_teridentifikasi" {% if status_str == 'belum_teridentifikasi' %}selected{% endif %}>
+                                            Belum Teridentifikasi ({{ str_summary.belum_teridentifikasi }})
+                                        </option>
+                                    </select>
+                                </div>
+                                <div class="col-auto mt-2">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-filter mr-1"></i>Terapkan
+                                    </button>
+                                </div>
+                            </form>
+                        {% endif %}
                         <table class="table data_table">
                             <thead>
                                 <tr>
@@ -62,6 +119,11 @@
                                     {% if data == 'sip-expiry' %}
                                     <th>Profesi</th>
                                     <th>Nomor SIP</th>
+                                    <th>Masa Berlaku</th>
+                                    <th>Status</th>
+                                    {% elif data == 'str-expiry' %}
+                                    <th>Profesi</th>
+                                    <th>Nomor STR</th>
                                     <th>Masa Berlaku</th>
                                     <th>Status</th>
                                     {% else %}
@@ -102,6 +164,38 @@
                                             <td colspan="6" class="text-center text-muted py-4">
                                                 <i class="fas fa-check-circle text-success mr-1"></i>
                                                 Tidak ada SIP yang akan berakhir dalam enam bulan ke depan.
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% elif data == 'str-expiry' %}
+                                    {% for item in str_monitoring_records %}
+                                        <tr>
+                                            <td>{{ forloop.counter }}</td>
+                                            <td>{{ item.profesi|default:'-' }}</td>
+                                            <td>{{ item.no_str|default:'-' }}</td>
+                                            <td>{{ item.berlaku_sd_str|date:'d M Y' }}</td>
+                                            <td>
+                                                {% if item.validity_status == 'seumur_hidup' %}
+                                                    <span class="badge badge-success">{{ item.validity_message }}</span>
+                                                {% elif item.validity_status == 'belum_teridentifikasi' %}
+                                                    <span class="badge badge-secondary">{{ item.validity_message }}</span>
+                                                {% elif item.is_expired %}
+                                                    <span class="badge badge-danger">{{ item.expiry_message }}</span>
+                                                {% else %}
+                                                    <span class="badge badge-warning">{{ item.expiry_message }}</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <a href="{% url 'riwayat_urls:riwayat_update_profesi' id=item.pk %}"
+                                                   class="btn btn-info btn-sm">
+                                                    <i class="fas fa-eye mr-1"></i>Lihat STR
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    {% empty %}
+                                        <tr>
+                                            <td colspan="6" class="text-center text-muted py-4">
+                                                Tidak ada STR dengan status yang dipilih.
                                             </td>
                                         </tr>
                                     {% endfor %}

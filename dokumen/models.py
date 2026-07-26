@@ -905,6 +905,15 @@ class RiwayatProfesi(models.Model):
     profesi = models.ForeignKey('jenissdm.JenisSDM', on_delete=models.SET_NULL, null=True, blank=True)
     no_str = models.CharField(max_length=50, blank=True, verbose_name='No STR')
     tgl_str = models.DateField(null=True, blank=True, verbose_name='tanggal STR')
+    berlaku_sd_str = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name='STR berlaku s/d',
+    )
+    str_seumur_hidup = models.BooleanField(
+        default=False,
+        verbose_name='STR berlaku seumur hidup',
+    )
     file_str = models.FileField(verbose_name='STR', upload_to="profesi/str/", blank=True, validators=[validate_file_size], help_text='Ukuran maksimal file 2.5MB')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

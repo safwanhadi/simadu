@@ -263,7 +263,10 @@ urutkan_dokumen_penempatan_lainnya = inlineformset_factory(DokumenSDM, RiwayatPe
 class RiwayatProfesiForm(SecureEmployeeModelForm):
     class Meta:
         model = RiwayatProfesi
-        fields = ('pegawai', 'dokumen', 'profesi', 'no_str', 'tgl_str', 'file_str')
+        fields = (
+            'pegawai', 'dokumen', 'profesi', 'no_str',
+            'tgl_str', 'berlaku_sd_str', 'str_seumur_hidup', 'file_str',
+        )
 
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
@@ -272,6 +275,20 @@ class RiwayatProfesiForm(SecureEmployeeModelForm):
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['dokumen'].widget = forms.HiddenInput()
         self.fields['tgl_str'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
+        self.fields['berlaku_sd_str'].widget = forms.TextInput(
+            attrs={'type': 'date', 'class': bootstrap_col}
+        )
+        self.fields['str_seumur_hidup'].help_text = (
+            'Centang jika STR sudah menggunakan ketentuan berlaku seumur hidup. '
+            'Tanggal berlaku sampai akan dikosongkan otomatis.'
+        )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if cleaned_data.get('str_seumur_hidup'):
+            cleaned_data['berlaku_sd_str'] = None
+            self.instance.berlaku_sd_str = None
+        return cleaned_data
 
 class UrutkanRiwayatProfesiForm(SecureEmployeeModelForm):
     class Meta:

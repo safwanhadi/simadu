@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-7">
+        <div class="card card-solid">
+            <div class="card-header">
+                <h5 class="mb-0">{{ card_title }}</h5>
+            </div>
+            <form method="post">
+                {% csrf_token %}
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        Dokumen berisi surat pengantar dan lampiran seluruh pengusul
+                        yang berada pada periode pilihan. Periksa kembali data jabatan
+                        yang diusulkan sebelum mengunduh surat. Placeholder nomor,
+                        tanggal, dan tanda tangan tetap dipertahankan untuk diproses
+                        oleh aplikasi naskah dinas.
+                    </div>
+                    {{ form|crispy }}
+                </div>
+                <div class="card-footer d-flex justify-content-between">
+                    <a href="{% url 'layanan_urls:layanan_jabatan_list' %}" class="btn btn-secondary">
+                        Kembali
+                    </a>
+                    <button type="submit" class="btn btn-success">
+                        <i class="fas fa-file-word mr-1"></i>Generate dan Download DOCX
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock content %}

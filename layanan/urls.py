@@ -58,6 +58,7 @@ from .views import (
     LayananNaikJabatanUpdateView,
     LayananNaikJabatanDetailView,
     LayananNaikJabatanProcessView,
+    SuratUsulanJabatanView,
 )
 
 
@@ -168,6 +169,7 @@ urlpatterns=[
     path('yanpangkat/<int:pk>/proses/', LayananNaikPangkatProcessView.as_view(), name='layanan_pangkat_process'),
     path('yanjabatan/', LayananNaikJabatanListView.as_view(), name='layanan_jabatan_list'),
     path('yanjabatan/tambah/', LayananNaikJabatanCreateView.as_view(), name='layanan_jabatan_create'),
+    path('yanjabatan/surat/', SuratUsulanJabatanView.as_view(), name='layanan_jabatan_surat'),
     path('yanjabatan/<int:pk>/', LayananNaikJabatanDetailView.as_view(), name='layanan_jabatan_detail'),
     path('yanjabatan/<int:pk>/ubah/', LayananNaikJabatanUpdateView.as_view(), name='layanan_jabatan_update'),
     path('yanjabatan/<int:pk>/proses/', LayananNaikJabatanProcessView.as_view(), name='layanan_jabatan_process'),

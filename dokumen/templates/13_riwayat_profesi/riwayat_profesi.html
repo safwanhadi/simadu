@@ -7,6 +7,8 @@
                 <th>Profesi</th>
                 <th>No STR</th>
                 <th>Tanggal STR</th>
+                <th>Berlaku s/d</th>
+                <th>Status Berlaku</th>
                 <th>File STR</th>
                 <th>Aksi</th>
             </tr>
@@ -19,6 +21,16 @@
                 <td>{{item.profesi}}</td>
                 <td>{{item.no_str}}</td>
                 <td>{{item.tgl_str}}</td>
+                <td>{{ item.berlaku_sd_str|date:'d M Y'|default:'-' }}</td>
+                <td>
+                    {% if item.str_seumur_hidup %}
+                    <span class="badge badge-success">Seumur hidup</span>
+                    {% elif item.berlaku_sd_str %}
+                    <span class="badge badge-warning">Berbatas waktu</span>
+                    {% else %}
+                    <span class="badge badge-secondary">Belum teridentifikasi</span>
+                    {% endif %}
+                </td>
                 <td>
                     {% if item.file_str %}
                     <a href="{{item.file_str.url}}"><i class="fas fa-file-download"></i></a>
@@ -36,4 +48,3 @@
         </tbody>
     </table>
 </div>
-                    

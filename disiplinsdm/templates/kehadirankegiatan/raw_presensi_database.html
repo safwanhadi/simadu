@@ -1,0 +1,154 @@
+{% extends 'base.html' %}
+
+{% block title_page %}{{ title_page }}{% endblock title_page %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
+        <div>
+            <h3 class="mb-1"><i class="fas fa-database mr-2"></i>{{ title_page }}</h3>
+            <p class="text-muted mb-0">
+                Transaksi read-only dari tabel LogKehadiran sebelum diolah menjadi penilaian presensi.
+            </p>
+        </div>
+        <div>
+            <a href="?{{ preserved_filters }}{% if preserved_filters %}&{% endif %}export=excel"
+               class="btn btn-success">
+                <i class="fas fa-file-excel mr-1"></i>Download Excel
+            </a>
+            <a href="{% url 'disiplinsdm_urls:rekap_kehadiran_bulanan' %}" class="btn btn-light border">
+                <i class="fas fa-arrow-left mr-1"></i>Kembali ke Rekap
+            </a>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <form method="get">
+                <div class="row">
+                    <div class="col-md-3 col-lg-2 mb-2">
+                        <label for="date_from">Tanggal awal</label>
+                        <input type="date" id="date_from" name="date_from"
+                               value="{{ date_from|date:'Y-m-d' }}" class="form-control">
+                    </div>
+                    <div class="col-md-3 col-lg-2 mb-2">
+                        <label for="date_to">Tanggal akhir</label>
+                        <input type="date" id="date_to" name="date_to"
+                               value="{{ date_to|date:'Y-m-d' }}" class="form-control">
+                    </div>
+                    <div class="col-md-6 col-lg-3 mb-2">
+                        <label for="q">Pegawai, NIP, atau ID mesin</label>
+                        <input type="search" id="q" name="q" value="{{ q }}"
+                               placeholder="Ketik kata pencarian" class="form-control">
+                    </div>
+                    <div class="col-md-4 col-lg-2 mb-2">
+                        <label for="device">Perangkat</label>
+                        <select id="device" name="device" class="form-control">
+                            <option value="">Semua perangkat</option>
+                            {% for item in devices %}
+                            <option value="{{ item }}" {% if item == selected_device %}selected{% endif %}>{{ item }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4 col-lg-1 mb-2">
+                        <label for="direction">Arah</label>
+                        <select id="direction" name="direction" class="form-control">
+                            <option value="">Semua</option>
+                            {% for item in directions %}
+                            <option value="{{ item }}" {% if item == selected_direction %}selected{% endif %}>{{ item }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4 col-lg-2 mb-2">
+                        <label for="evaluation">Status pengolahan</label>
+                        <select id="evaluation" name="evaluation" class="form-control">
+                            <option value="">Semua status</option>
+                            <option value="sudah" {% if selected_evaluation == 'sudah' %}selected{% endif %}>Sudah diolah</option>
+                            <option value="belum" {% if selected_evaluation == 'belum' %}selected{% endif %}>Belum diolah</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-filter mr-1"></i>Terapkan Filter
+                    </button>
+                    <a href="{% url 'disiplinsdm_urls:raw_presensi_database' %}" class="btn btn-outline-secondary">
+                        Reset
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover table-striped mb-0 text-nowrap">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>No</th>
+                            <th>ID Database</th>
+                            <th>ID Mesin</th>
+                            <th>Nama dari Perangkat</th>
+                            <th>Pegawai Terpetakan</th>
+                            <th>NIP</th>
+                            <th>Waktu Mentah</th>
+                            <th>Arah</th>
+                            <th>Perangkat</th>
+                            <th>Status Pengolahan</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in raw_logs %}
+                        <tr>
+                            <td>{{ forloop.counter0|add:page_obj.start_index }}</td>
+                            <td><code>{{ log.pk }}</code></td>
+                            <td><code>{{ log.mapping.mesin_id }}</code></td>
+                            <td>{{ log.personname|default:'-' }}</td>
+                            <td>{{ log.mapping.pegawai.full_name }}</td>
+                            <td>{{ log.mapping.pegawai.profil_user.nip|default:'-' }}</td>
+                            <td>{{ log.datetime|date:'Y-m-d H:i:s' }}</td>
+                            <td><span class="badge badge-info">{{ log.direction|default:'-' }}</span></td>
+                            <td>{{ log.devicename|default:'-' }}</td>
+                            <td>
+                                {% if log.is_evaluated %}
+                                <span class="badge badge-success">Sudah diolah</span>
+                                {% else %}
+                                <span class="badge badge-secondary">Belum diolah</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="10" class="text-center text-muted py-5">
+                                Tidak ada transaksi mentah yang sesuai dengan filter.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {% if is_paginated %}
+        <div class="card-footer bg-white d-flex justify-content-between align-items-center">
+            <small class="text-muted">
+                Menampilkan {{ page_obj.start_index }}–{{ page_obj.end_index }}
+                dari {{ paginator.count }} transaksi
+            </small>
+            <div>
+                {% if page_obj.has_previous %}
+                <a class="btn btn-sm btn-outline-secondary"
+                   href="?{{ preserved_filters }}&page={{ page_obj.previous_page_number }}">Sebelumnya</a>
+                {% endif %}
+                <span class="btn btn-sm btn-primary disabled">{{ page_obj.number }} / {{ paginator.num_pages }}</span>
+                {% if page_obj.has_next %}
+                <a class="btn btn-sm btn-outline-secondary"
+                   href="?{{ preserved_filters }}&page={{ page_obj.next_page_number }}">Berikutnya</a>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock content %}

@@ -15,6 +15,7 @@ from django.utils import timezone
 from dateutil.relativedelta import relativedelta
 from typing import Optional
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.http import HttpResponse
 import os
 import locale
 import logging 
@@ -112,7 +113,10 @@ from .forms import (
     RiwayatPanggolHasilLayananForm,
     LayananNaikJabatanForm,
     RiwayatJabatanHasilLayananForm,
+    SuratUsulanJabatanForm,
     )
+from file_dokumen.services.jabatan_docx import generate_usulan_jabatan_docx
+from dokumen.notifications import get_latest_str_records
 from .cuti_schedule import (
     apply_nonfinal_change,
     approve_final_change,
@@ -223,6 +227,40 @@ class NotifikasiView(LoginRequiredMixin, View):
             'data': get_layanan,
             'notification_menu': 'active',
         }
+        if get_layanan == 'str-expiry':
+            status_str = request.GET.get('status_str', 'semua')
+            valid_statuses = {
+                'semua', 'seumur_hidup',
+                'berbatas_waktu', 'belum_teridentifikasi',
+            }
+            if status_str not in valid_statuses:
+                status_str = 'semua'
+
+            all_records = get_latest_str_records(request.user)
+            context['str_summary'] = {
+                status: sum(
+                    item.validity_status == status
+                    for item in all_records
+                )
+                for status in (
+                    'seumur_hidup',
+                    'berbatas_waktu',
+                    'belum_teridentifikasi',
+                )
+            }
+            context['all_str_lifetime'] = bool(all_records) and all(
+                item.validity_status == 'seumur_hidup'
+                for item in all_records
+            )
+            context['status_str'] = status_str
+            context['str_monitoring_records'] = (
+                all_records
+                if status_str == 'semua'
+                else [
+                    item for item in all_records
+                    if item.validity_status == status_str
+                ]
+            )
         return render(request, 'layanan_view_from_notif.html', context)
     
     def post(self, request, *args, **kwargs):
@@ -3941,6 +3979,58 @@ class LayananNaikJabatanListView(LoginRequiredMixin, ListView):
         context.update({
             'card_title': 'Usulan Kenaikan Jabatan',
             'title_page': 'Layanan Kenaikan Jabatan',
+            'layanan': 'active',
+            'selected': 'yanjabatan',
+        })
+        return context
+
+
+class SuratUsulanJabatanView(
+    LoginRequiredMixin, UserPassesTestMixin, FormView
+):
+    form_class = SuratUsulanJabatanForm
+    template_name = 'layanan_jabatan/surat_form.html'
+
+    def test_func(self):
+        return self.request.user.is_jabatan_admin
+
+    def form_valid(self, form):
+        periode = datetime.strptime(
+            form.cleaned_data['periode'], '%Y-%m-%d'
+        ).date()
+        usulan = (
+            LayananNaikJabatan.objects.filter(periode=periode)
+            .select_related(
+                'pegawai', 'pegawai__profil_user', 'pak', 'kompetensi',
+            )
+            .prefetch_related('kinerja_dua_thn')
+            .order_by('pegawai__first_name', 'pegawai__last_name', 'id')
+        )
+        if not usulan.exists():
+            form.add_error('periode', 'Tidak ada pengajuan pada periode tersebut.')
+            return self.form_invalid(form)
+
+        output = generate_usulan_jabatan_docx(
+            usulan,
+            periode=periode,
+        )
+        response = HttpResponse(
+            output.getvalue(),
+            content_type=(
+                'application/vnd.openxmlformats-officedocument.'
+                'wordprocessingml.document'
+            ),
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="Usulan_Jabatan_{periode:%Y_%m}.docx"'
+        )
+        return response
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'card_title': 'Generate Surat Usulan Kenaikan Jabatan',
+            'title_page': 'Surat Usulan Kenaikan Jabatan',
             'layanan': 'active',
             'selected': 'yanjabatan',
         })

@@ -4,9 +4,16 @@
 <div class="card card-solid">
     <div class="card-header d-flex align-items-center">
         <h5 class="mb-0">{{ card_title }}</h5>
-        <a href="{% url 'layanan_urls:layanan_jabatan_create' %}" class="btn btn-success btn-sm ml-auto">
-            <i class="fas fa-plus"></i> Ajukan Kenaikan Jabatan
-        </a>
+        <div class="ml-auto">
+            {% if request.user.is_jabatan_admin %}
+            <a href="{% url 'layanan_urls:layanan_jabatan_surat' %}" class="btn btn-primary btn-sm">
+                <i class="fas fa-file-word"></i> Generate Surat Kolektif
+            </a>
+            {% endif %}
+            <a href="{% url 'layanan_urls:layanan_jabatan_create' %}" class="btn btn-success btn-sm">
+                <i class="fas fa-plus"></i> Ajukan Kenaikan Jabatan
+            </a>
+        </div>
     </div>
     <div class="card-body">
         <div class="table-responsive">
@@ -15,6 +22,8 @@
                     <tr>
                         <th>No</th>
                         {% if request.user.is_jabatan_admin %}<th>Pegawai</th>{% endif %}
+                        <th>Periode</th>
+                        <th>Jabatan Diusulkan</th>
                         <th>PAK Terakhir</th>
                         <th>Status</th>
                         <th>Tanggal</th>
@@ -26,6 +35,8 @@
                     <tr>
                         <td>{{ forloop.counter }}</td>
                         {% if request.user.is_jabatan_admin %}<td>{{ item.pegawai.full_name }}</td>{% endif %}
+                        <td>{{ item.periode|date:'F Y'|default:'-' }}</td>
+                        <td>{{ item.jabatan_diusulkan|default:'-' }}</td>
                         <td>{{ item.pak|default:'-' }}</td>
                         <td>
                             {% if item.status == 'selesai' %}
@@ -47,7 +58,7 @@
                         </td>
                     </tr>
                     {% empty %}
-                    <tr><td colspan="6" class="text-center text-muted">Belum ada usulan kenaikan jabatan.</td></tr>
+                    <tr><td colspan="8" class="text-center text-muted">Belum ada usulan kenaikan jabatan.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

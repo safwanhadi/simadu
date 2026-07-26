@@ -108,8 +108,28 @@ class LayananNaikPangkat(models.Model):
 
 # PAK terakhir, SKP dua tahun, sertifikat kompetensi, STR
 class LayananNaikJabatan(models.Model):
+    KATEGORI_PENGELOLAAN = (
+        ('kenaikan', 'Kenaikan Jabatan'),
+        ('pengangkatan_kembali', 'Pengangkatan Kembali'),
+        ('perpindahan', 'Perpindahan dari Jabatan Lain'),
+        ('penyesuaian', 'Inpassing/Penyesuaian'),
+    )
+
     pegawai = models.ForeignKey(Users, on_delete=models.CASCADE)
     layanan = models.ForeignKey('JenisLayanan', on_delete=models.SET_NULL, null=True)
+    periode = models.DateField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text='Bulan pengusulan yang digunakan untuk surat kolektif.',
+    )
+    kategori_pengelolaan = models.CharField(
+        max_length=30,
+        choices=KATEGORI_PENGELOLAAN,
+        default='kenaikan',
+    )
+    jabatan_diusulkan = models.CharField(max_length=150, blank=True)
+    formasi_tersedia = models.BooleanField(default=True)
     kinerja_dua_thn = models.ManyToManyField('dokumen.RiwayatKinerja', blank=True)
     kompetensi = models.ForeignKey('dokumen.UjiKompetensi', on_delete=models.SET_NULL, null=True)
     pendidikan = models.ForeignKey('dokumen.RiwayatPendidikan', on_delete=models.SET_NULL, null=True, blank=True)

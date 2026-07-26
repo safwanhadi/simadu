@@ -35,13 +35,14 @@
 
                 {% if request.user.is_superuser %}
                 <a href="{% url 'dashboard_urls:export_harian_excel' %}" class="btn btn-success">
-                    <i class="fas fa-file-excel"></i> Download Excel Hari Ini
+                    <i class="fas fa-file-excel"></i> Excel TK Kemarin & Presensi Hari Ini
                 </a>
                 {% endif %}
             </form>
         </div>
     </div>
 
+    <h5 class="text-gray-800 mb-3">Ringkasan {{ target_user.full_name }} — {{ periode|title }} Ini</h5>
     <!-- Kartu Statistik Individu -->
     <div class="row mb-4">
         <div class="col-xl-3 col-md-6 mb-3">
@@ -121,89 +122,130 @@
     {% if request.user.is_superuser %}
     <!-- BAGIAN KHUSUS SUPERUSER: DATA HARI INI -->
     <h4 class="text-gray-800 mt-4 mb-3"><i class="fas fa-eye"></i> Monitoring Khusus Hari Ini ({{ today|date:"d F Y" }})</h4>
-    <div class="row mb-4">
-        <!-- TK/ALPA Hari Ini -->
-        <div class="col-lg-6 mb-4">
-            <div class="card shadow border-bottom-danger">
-                <div class="card-header py-3 d-flex justify-content-between align-items-center bg-danger text-white">
-                    <h6 class="m-0 font-weight-bold">Daftar TK/ALPA Hari Ini</h6>
-                    <span class="badge bg-light text-danger fs-6">{{ hari_ini_alpa.count }}</span>
-                </div>
-                <div class="card-body p-0" style="max-height: 300px; overflow-y: auto;">
-                    <table class="table table-sm table-hover table-striped mb-0">
-                        <thead class="thead-light"><tr><th>Pegawai</th><th>Instalasi</th><th>Keterangan</th></tr></thead>
-                        <tbody>
-                            {% for abs in hari_ini_alpa %}
-                            <tr>
-                                <td>{{ abs.pegawai.full_name }}</td>
-                                <td>{{ abs.instalasi.instalasi|default:"-" }}</td>
-                                <td>{{ abs.keterangan|default:"-" }}</td>
-                            </tr>
-                            {% empty %}
-                            <tr><td colspan="3" class="text-center p-3 text-success fw-bold">Tidak ada pegawai ALPA hari ini</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+    <div class="row mb-2">
+        <div class="col-xl col-md-4 col-6 mb-3">
+            <div class="card shadow-sm border-left-primary h-100">
+                <div class="card-body py-3">
+                    <div class="text-xs text-primary text-uppercase font-weight-bold">Sudah Presensi</div>
+                    <div class="h4 mb-0 font-weight-bold">{{ total_presensi_hari_ini }}</div>
                 </div>
             </div>
         </div>
-
-        <!-- Tidak Apel Hari Ini -->
-        <div class="col-lg-6 mb-4">
-            <div class="card shadow border-bottom-info">
-                <div class="card-header py-3 d-flex justify-content-between align-items-center bg-info text-white">
-                    <h6 class="m-0 font-weight-bold">Tidak Ikut Apel Hari Ini</h6>
-                    <span class="badge bg-light text-info fs-6">{{ hari_ini_tidak_apel.count }}</span>
+        <div class="col-xl col-md-4 col-6 mb-3">
+            <div class="card shadow-sm border-left-success h-100">
+                <div class="card-body py-3">
+                    <div class="text-xs text-success text-uppercase font-weight-bold">Tepat Waktu</div>
+                    <div class="h4 mb-0 font-weight-bold">{{ tepat_waktu_hari_ini }}</div>
                 </div>
-                <div class="card-body p-0" style="max-height: 300px; overflow-y: auto;">
-                    <table class="table table-sm table-hover table-striped mb-0">
-                        <thead class="thead-light"><tr><th>Pegawai</th><th>Instalasi</th></tr></thead>
-                        <tbody>
-                            {% for abs in hari_ini_tidak_apel %}
-                            <tr>
-                                <td>{{ abs.pegawai.full_name }}</td>
-                                <td>{{ abs.instalasi.nama|default:"-" }}</td>
-                            </tr>
-                            {% empty %}
-                            <tr><td colspan="2" class="text-center p-3 text-success fw-bold">Semua hadir ikut apel hari ini</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+            </div>
+        </div>
+        <div class="col-xl col-md-4 col-6 mb-3">
+            <div class="card shadow-sm border-left-warning h-100">
+                <div class="card-body py-3">
+                    <div class="text-xs text-warning text-uppercase font-weight-bold">Terlambat</div>
+                    <div class="h4 mb-0 font-weight-bold">{{ terlambat_hari_ini }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl col-md-6 col-6 mb-3">
+            <div class="card shadow-sm border-left-secondary h-100">
+                <div class="card-body py-3">
+                    <div class="text-xs text-secondary text-uppercase font-weight-bold">Belum Pulang</div>
+                    <div class="h4 mb-0 font-weight-bold">{{ belum_pulang_hari_ini }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl col-md-6 col-12 mb-3">
+            <div class="card shadow-sm border-left-info h-100">
+                <div class="card-body py-3">
+                    <div class="text-xs text-info text-uppercase font-weight-bold">TK Kemarin, Presensi Hari Ini</div>
+                    <div class="h4 mb-0 font-weight-bold">{{ tk_kemarin_presensi_hari_ini }}</div>
                 </div>
             </div>
         </div>
     </div>
+    <div class="card shadow border-bottom-success mb-4">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center bg-success text-white">
+            <h6 class="m-0 font-weight-bold">
+                <i class="fas fa-fingerprint mr-1"></i>Sudah Presensi Hari Ini
+            </h6>
+            <span class="badge bg-light text-success fs-6">{{ total_presensi_hari_ini }}</span>
+        </div>
+        <div class="card-body p-0" style="max-height: 420px; overflow-y: auto;">
+            <table class="table table-sm table-hover table-striped mb-0">
+                <thead class="thead-light">
+                    <tr>
+                        <th>Pegawai</th>
+                        <th>Instalasi</th>
+                        <th>Jam Datang</th>
+                        <th>Status Datang</th>
+                        <th>Jam Pulang</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for abs in sudah_presensi_hari_ini %}
+                    <tr>
+                        <td>{{ abs.pegawai.full_name }}</td>
+                        <td>{{ abs.instalasi.instalasi|default:"-" }}</td>
+                        <td>{{ abs.jam_datang|date:"H:i:s" }}</td>
+                        <td>{{ abs.status_datang|default:"-" }}</td>
+                        <td>
+                            {% if abs.jam_pulang %}
+                                {{ abs.jam_pulang|date:"H:i:s" }}
+                            {% else %}
+                                <span class="text-muted">Belum pulang</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center p-3 text-muted">
+                            Belum ada pegawai yang melakukan presensi datang hari ini.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
     {% endif %}
 
-    <!-- DATA KEMARIN, JADWAL, DAN RANKING -->
-    <div class="row">
-        <!-- Kolom Kiri -->
-        <div class="col-lg-6 mb-4">
-            <!-- Belum Presensi Hari Ini -->
-            <div class="card shadow mb-4 border-left-warning">
-                <div class="card-header py-3 bg-warning text-white">
-                    <h6 class="m-0 font-weight-bold"><i class="fas fa-calendar-check"></i> Belum Presensi Hari Ini (Berdasarkan Jadwal)</h6>
+    <!-- DATA KEMARIN DAN RANKING -->
+    <h4 class="text-gray-800 mt-4 mb-3"><i class="fas fa-chart-bar"></i> Evaluasi dan Perbandingan Instalasi</h4>
+    <div class="row align-items-stretch">
+        <div class="col-xl-4 col-lg-6 mb-4">
+            <div class="card shadow h-100 border-left-secondary">
+                <div class="card-header py-3 bg-secondary text-white">
+                    <h6 class="m-0 font-weight-bold"><i class="fas fa-history"></i> Daftar TK/ALPA Kemarin</h6>
                 </div>
-                <div class="card-body p-0" style="max-height: 300px; overflow-y: auto;">
+                <div class="card-body p-0" style="max-height: 360px; overflow-y: auto;">
                     <table class="table table-sm table-hover mb-0">
-                        <thead class="thead-light"><tr><th>Pegawai</th><th>Jadwal</th><th>Instalasi</th></tr></thead>
+                        <thead class="thead-light"><tr><th>Pegawai</th><th>Instalasi</th></tr></thead>
                         <tbody>
-                            {% for jadwal in belum_presensi_hari_ini %}
+                            {% for pegawai in kemarin_alpa %}
                             <tr>
-                                <td>{{ jadwal.pegawai.pegawai.full_name }}</td>
-                                <td><span class="badge bg-primary">{{ jadwal.kategori_jadwal.kategori_jadwal }}</span></td>
-                                <td>{{ jadwal.pegawai.instalasi.instalasi|default:"-" }}</td>
+                                <td>{{ pegawai.full_name }}</td>
+                                <td>
+                                    {% with sk=pegawai.sk_aktif.0 %}
+                                        {% if sk and sk.penempatan_level4 %}
+                                            {{ sk.penempatan_level4.instalasi }}
+                                        {% else %}
+                                            <span class="text-muted">Belum plotting</span>
+                                        {% endif %}
+                                    {% endwith %}
+                                </td>
                             </tr>
                             {% empty %}
-                            <tr><td colspan="3" class="text-center p-3 text-success">Semua pegawai sudah presensi!</td></tr>
+                            <tr><td colspan="2" class="text-center p-3 text-success">Tidak ada yang ALPA kemarin!</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
             </div>
+        </div>
 
-            <!-- Instalasi Paling Banyak ALPA -->
-            <div class="card shadow mb-4 border-left-danger">
+        <div class="col-xl-4 col-lg-6 mb-4">
+            <div class="card shadow h-100 border-left-danger">
                 <div class="card-header py-3 bg-danger text-white">
                     <h6 class="m-0 font-weight-bold"><i class="fas fa-building"></i> Top 5 Instalasi Paling Banyak ALPA/TK</h6>
                 </div>
@@ -222,54 +264,8 @@
             </div>
         </div>
 
-        <!-- Kolom Kanan -->
-        <div class="col-lg-6 mb-4">
-            <!-- Kemarin ALPA -->
-            <div class="card shadow mb-4 border-left-secondary">
-                <div class="card-header py-3 bg-secondary text-white">
-                    <h6 class="m-0 font-weight-bold"><i class="fas fa-history"></i> Daftar TK/ALPA Kemarin</h6>
-                </div>
-                <div class="card-body p-0" style="max-height: 200px; overflow-y: auto;">
-                    <table class="table table-sm table-hover mb-0">
-                        <thead class="thead-light"><tr><th>Pegawai</th><th>Instalasi</th></tr></thead>
-                        <tbody>
-                            {% for abs in kemarin_alpa %}
-                            <tr>
-                                <td>{{ abs.pegawai.full_name }}</td>
-                                <td>{{ abs.instalasi.instalasi|default:"-" }}</td>
-                            </tr>
-                            {% empty %}
-                            <tr><td colspan="2" class="text-center p-3 text-success">Tidak ada yang ALPA kemarin!</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Kemarin Tidak Apel -->
-            <div class="card shadow mb-4 border-left-info">
-                <div class="card-header py-3 bg-info text-white">
-                    <h6 class="m-0 font-weight-bold"><i class="fas fa-flag"></i> Tidak Ikut Apel Kemarin</h6>
-                </div>
-                <div class="card-body p-0" style="max-height: 200px; overflow-y: auto;">
-                    <table class="table table-sm table-hover mb-0">
-                        <thead class="thead-light"><tr><th>Pegawai</th><th>Instalasi</th></tr></thead>
-                        <tbody>
-                            {% for abs in kemarin_tidak_apel %}
-                            <tr>
-                                <td>{{ abs.pegawai.full_name }}</td>
-                                <td>{{ abs.instalasi.instalasi|default:"-" }}</td>
-                            </tr>
-                            {% empty %}
-                            <tr><td colspan="2" class="text-center p-3 text-success">Semua hadir ikut apel kemarin!</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Instalasi Paling Rajin -->
-            <div class="card shadow mb-4 border-left-success">
+        <div class="col-xl-4 col-lg-12 mb-4">
+            <div class="card shadow h-100 border-left-success">
                 <div class="card-header py-3 bg-success text-white">
                     <h6 class="m-0 font-weight-bold"><i class="fas fa-trophy"></i> Top 5 Instalasi Paling Rajin (Hadir)</h6>
                 </div>

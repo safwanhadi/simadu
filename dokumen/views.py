@@ -1,7 +1,7 @@
 from django.db.models import Q, Count, F, Case, When, Sum, Prefetch, IntegerField
 from django.shortcuts import render, redirect
 from django.urls import reverse, reverse_lazy
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.views import View
 from django.views.generic import ListView, DetailView, DeleteView, UpdateView, CreateView, TemplateView
 # from rest_framework.views import 
@@ -1738,73 +1738,31 @@ class UrutkanRiwayatCutiView(DocumentAdminRequiredMixin, SuccessMessageMixin, Up
         return super().form_valid(form)
     
 
-class RiwayatCutiMonitoringListView(LoginRequiredMixin, ListView):
+class RiwayatCutiMonitoringListView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    CheckCuti,
+    ListView,
+):
+    """Monitoring saldo cuti tahunan seluruh pegawai untuk admin cuti."""
     login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
-    model = RiwayatCuti
+    model = Users
     template_name = '10_riwayat_cuti/riwayat_cuti_monitoring.html'
-    context_object_name = 'data'
+    context_object_name = 'pegawai_list'
+    paginate_by = 25
 
-    def get_active_penempatan(self):
-        return (
-            self.request.user.riwayat_penempatan.filter(status=True)
-            .select_related(
-                'penempatan_level1',
-                'penempatan_level2',
-                'penempatan_level3',
-                'penempatan_level4',
-                'penempatan_level4__sub_bidang',
-                'penempatan_level3__bidang',
-                'penempatan_level2__unor',
-            )
-            .last()
-        )
-
-    def _build_penempatan_filter(self, penempatan):
-        filters = Q(pegawai__riwayat_penempatan__status=True)
-        if penempatan.penempatan_level4:
-            unit = penempatan.penempatan_level4
-            filters &= Q(pegawai__riwayat_penempatan__penempatan_level4=unit)
-        elif penempatan.penempatan_level3:
-            sub_bidang = penempatan.penempatan_level3
-            filters &= (
-                Q(pegawai__riwayat_penempatan__penempatan_level3=sub_bidang)
-                | Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang=sub_bidang)
-            )
-        elif penempatan.penempatan_level2:
-            bidang = penempatan.penempatan_level2
-            filters &= (
-                Q(pegawai__riwayat_penempatan__penempatan_level2=bidang)
-                | Q(pegawai__riwayat_penempatan__penempatan_level3__bidang=bidang)
-                | Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang=bidang)
-            )
-        elif penempatan.penempatan_level1:
-            unor = penempatan.penempatan_level1
-            filters &= (
-                Q(pegawai__riwayat_penempatan__penempatan_level1=unor)
-                | Q(pegawai__riwayat_penempatan__penempatan_level2__unor=unor)
-                | Q(pegawai__riwayat_penempatan__penempatan_level3__bidang__unor=unor)
-                | Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang__unor=unor)
-            )
-        return filters
+    def test_func(self):
+        return self.request.user.is_cuti_admin
 
     def get_queryset(self):
-        base_queryset = (
-            super()
-            .get_queryset()
-            .select_related('pegawai', 'pegawai__profil_user', 'usulan')
-            .annotate(
-                status_priority=Case(
-                    When(usulan__status='pengajuan', then=0),
-                    When(usulan__status='tindaklanjut', then=1),
-                    When(usulan__status__in=('disetujui', 'selesai'), then=2),
-                    default=3,
-                    output_field=IntegerField(),
-                )
-            )
+        queryset = (
+            Users.objects.filter(is_active=True)
+            .exclude(is_superuser=True)
+            .select_related('profil_user')
             .prefetch_related(
                 Prefetch(
-                    'pegawai__riwayat_penempatan',
+                    'riwayat_penempatan',
                     queryset=RiwayatPenempatan.objects.filter(status=True)
                     .select_related(
                         'penempatan_level1',
@@ -1819,34 +1777,51 @@ class RiwayatCutiMonitoringListView(LoginRequiredMixin, ListView):
                     to_attr='active_penempatan',
                 )
             )
-            .order_by('status_priority', '-created_at')
+            .order_by('first_name', 'last_name', 'id')
         )
 
-        if self.request.user.is_dokumen_admin:
-            return base_queryset
-
-        if not self.request.user.is_staff:
-            return base_queryset.filter(pegawai=self.request.user)
-
-        penempatan = self.get_active_penempatan()
-        if not penempatan:
-            return base_queryset.none()
-
-        return base_queryset.filter(self._build_penempatan_filter(penempatan)).distinct()
+        keyword = self.request.GET.get('q', '').strip()
+        if keyword:
+            for term in keyword.split():
+                queryset = queryset.filter(
+                    Q(first_name__icontains=term)
+                    | Q(last_name__icontains=term)
+                    | Q(email__icontains=term)
+                    | Q(profil_user__nip__icontains=term)
+                )
+        return queryset.distinct()
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        active_penempatan = self.get_active_penempatan()
+        tahun = date.today().year
+        monitoring_rows = []
+        for pegawai in context['pegawai_list']:
+            snapshot = self.buat_snapshot_saldo_cuti(pegawai, tahun)
+            saldo = {row['label']: row for row in snapshot['rows']}
+            monitoring_rows.append({
+                'pegawai': pegawai,
+                'penempatan': (
+                    pegawai.active_penempatan[0].penempatan
+                    if pegawai.active_penempatan else '-'
+                ),
+                'n2': saldo['N-2'],
+                'n1': saldo['N-1'],
+                'n': saldo['N'],
+                'total_tersedia': snapshot['total_tersedia'],
+            })
+
         context.update(
             {
+                'monitoring_rows': monitoring_rows,
+                'tahun': tahun,
+                'q': self.request.GET.get('q', '').strip(),
                 'page': 'Home',
                 'sub_page': 'Riwayat',
-                'title_page': 'Monitoring Cuti',
+                'title_page': 'Monitoring Sisa Cuti Pegawai',
                 'form_view': 'none',
                 'data_view': 'block',
                 'riwayat': 'active',
                 'selected': 'cuti',
-                'penempatan_aktif': active_penempatan.penempatan if active_penempatan else None,
             }
         )
         return context

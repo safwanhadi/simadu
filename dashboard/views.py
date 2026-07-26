@@ -2,7 +2,7 @@ from django.shortcuts import render, redirect
 from django.urls import reverse
 from django.views import View
 from django.views.generic import ListView, TemplateView
-from django.db.models import Sum, F, Q, Case, When, Value, Count, Prefetch, Max, IntegerField, ExpressionWrapper, FloatField, OuterRef, Subquery
+from django.db.models import Sum, F, Q, Case, When, Value, Count, Prefetch, Max, Min, IntegerField, ExpressionWrapper, FloatField, OuterRef, Subquery, Exists
 from django.db.models.functions import Concat, Coalesce
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin, UserPassesTestMixin
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
@@ -46,7 +46,7 @@ from openpyxl.utils import get_column_letter
 
 def get_accessible_takah(user):
     """Daftar pegawai yang boleh dilihat pada kartu takah dashboard."""
-    queryset = Users.objects.exclude(is_superuser=True)
+    queryset = Users.objects.exclude(is_superuser=True, pegawai__is_active=False)
     if user.is_superuser:
         return queryset
     if not user.is_staff or not hasattr(user, 'profil_admin'):
@@ -79,6 +79,65 @@ logger = logging.getLogger(__name__)
 # logger.warning('This is a warning message')
 
 # Create your views here.
+
+
+def pegawai_tk_pada_tanggal(target_date):
+    """Pegawai aktif yang tidak memiliki kehadiran/izin/libur sah pada tanggal."""
+    aman_ids = AbsensiHarian.objects.filter(
+        tanggal=target_date,
+        status_final__in=['HADIR', 'IZIN', 'DINAS', 'LIBUR'],
+    ).values_list('pegawai_id', flat=True).exclude(pegawai__is_active=False)
+
+    libur_jadwal_ids = list(
+        JadwalDinasSDM.objects.filter(tanggal=target_date)
+        .filter(
+            Q(kategori_jadwal__kategori_jadwal__icontains='libur')
+            | Q(kategori_jadwal__kategori_dinas__kategori_dinas__icontains='libur')
+        )
+        .values_list('pegawai__pegawai_id', flat=True)
+    )
+
+    if target_date.weekday() == 6 or HariLibur.objects.filter(tanggal=target_date).exists():
+        libur_jadwal_ids.extend(
+            JadwalDinasSDM.objects.filter(
+                tanggal=target_date,
+                kategori_jadwal__kategori_dinas__kategori_dinas='Reguler',
+            ).values_list('pegawai__pegawai_id', flat=True)
+        )
+
+    return (
+        Users.objects.filter(is_active=True)
+        .exclude(
+            Q(is_superuser=True)
+            | Q(id__in=aman_ids)
+            | Q(id__in=libur_jadwal_ids)
+        )
+    )
+
+
+def presensi_datang_pada_tanggal(target_date):
+    """Absensi harian yang benar-benar memiliki transaksi presensi DATANG."""
+    return (
+        AbsensiHarian.objects.filter(tanggal=target_date).exclude(pegawai__is_active=False)
+        .annotate(
+            memiliki_presensi_datang=Exists(
+                LogAktivitasAbsen.objects.filter(
+                    absensi_harian_id=OuterRef('pk'),
+                    tipe='DATANG',
+                )
+            )
+        )
+        .filter(memiliki_presensi_datang=True)
+        .select_related('pegawai', 'pegawai__profil_user', 'instalasi', 'unor', 'bidang')
+        .annotate(
+            jam_datang=Min('logs__waktu', filter=Q(logs__tipe='DATANG')),
+            jam_pulang=Max('logs__waktu', filter=Q(logs__tipe='PULANG')),
+            status_datang=Max(
+                'logs__status_ketepatan',
+                filter=Q(logs__tipe='DATANG'),
+            ),
+        )
+    )
 
 def get_date_from_string(tanggal):
     tanggal_sekarang = datetime.now()
@@ -446,11 +505,11 @@ class KehadiranGrafikView(APIView):
         tanggal = request.GET.get('tanggal')
         inst = request.GET.get('inst', 0)
         disiplin = None
-        data = DaftarKegiatanPegawai.objects.all()
+        data = DaftarKegiatanPegawai.objects.all().exclude(pegawai__is_active=False)
         ##filter data berdasarkan tanggal (default tanggal hari ini)
         get_tanggal = get_date_from_string(tanggal)
         if get_tanggal:
-            data = DaftarKegiatanPegawai.objects.filter(bulan=get_tanggal.month, tahun=get_tanggal.year).order_by('id')
+            data = DaftarKegiatanPegawai.objects.filter(bulan=get_tanggal.month, tahun=get_tanggal.year).order_by('id').exclude(pegawai__is_active=False)
             disiplin = data
         instalasi = UnitInstalasi.objects.first()
         disiplin = data.filter(instalasi__id=instalasi.id)
@@ -709,124 +768,35 @@ class DashboardAbsensiTemplateView(LoginRequiredMixin, TemplateView):
         # Pikirkan ini secara terbalik: Kita cari siapa saja orang yang "Aman" kemarin,
         # lalu kita keluarkan mereka dari total daftar Users. Sisanya adalah orang yang "Bermasalah".
         
-        # a. Kumpulkan ID Pegawai yang kemarin dinilai AMAN (karena Hadir, Izin, Dinas, atau Libur Resmi)
-        kemarin_aman_ids = AbsensiHarian.objects.filter(
-            tanggal=yesterday,
-            status_final__in=['HADIR', 'IZIN', 'DINAS', 'LIBUR']
-        ).values_list('pegawai_id', flat=True)
-
-        # b. Kumpulkan ID Pegawai yang kemarin tercatat LIBUR di master shift (jika record harian belum digenerate)
-        # Cek apakah hari kemarin adalah hari Ahad/Minggu (6 = Minggu dalam format python weekday)
-        is_kemarin_ahad = yesterday.weekday() == 6
-
-        # a. ID Pegawai yang kemarin sudah aman (Hadir, Izin, Dinas, Libur Resmi di tabel AbsensiHarian)
-        kemarin_aman_ids = AbsensiHarian.objects.filter(
-            tanggal=yesterday,
-            status_final__in=['HADIR', 'IZIN', 'DINAS', 'LIBUR']
-        ).values_list('pegawai_id', flat=True)
-
-        # b. ID Pegawai yang kemarin punya plot Libur Sah, ATAU pegawai reguler yang libur karena hari Minggu
-        # Kita filter jadwal dinas kemarin yang memang bertipe 'Libur'
-        kemarin_libur_jadwal_qs = JadwalDinasSDM.objects.filter(
-            tanggal=yesterday,
-            # is_approved=True
-        ).filter(
-            Q(kategori_jadwal__kategori_jadwal__icontains='libur') |
-            Q(kategori_jadwal__kategori_dinas__kategori_dinas__icontains='libur')
-        )
-
-        # Ambil list ID-nya
-        kemarin_libur_jadwal_ids = list(kemarin_libur_jadwal_qs.values_list('pegawai__pegawai_id', flat=True))
-
-        # c. JIKA KEMARIN HARI MINGGU/AHAD: 
-        # Cari pegawai yang terjadwal bertipe 'Reguler' kemarin, mereka berhak otomatis LIBUR
-        if is_kemarin_ahad:
-            pegawai_reguler_kemarin_ids = JadwalDinasSDM.objects.filter(
-                tanggal=yesterday,
-                # is_approved=True,
-                kategori_jadwal__kategori_dinas__kategori_dinas='Reguler' # Mengunci kategori dinas reguler
-            ).values_list('pegawai__pegawai_id', flat=True)
-            
-            # Gabungkan ID pegawai reguler ke dalam rumpun daftar libur agar tidak dianggap ALPA
-            kemarin_libur_jadwal_ids.extend(list(pegawai_reguler_kemarin_ids))
-
-        # d. JIKA KEMARIN HARI LIBUR NASIONAL:
-        # Cek apakah tanggal kemarin terdaftar di model HariLibur Anda
-        is_kemarin_libur_nasional = HariLibur.objects.filter(tanggal=yesterday).exists()
-        if is_kemarin_libur_nasional:
-            # Pegawai reguler otomatis libur massal jika libur nasional
-            pegawai_reguler_nasional_ids = JadwalDinasSDM.objects.filter(
-                tanggal=yesterday,
-                # is_approved=True,
-                kategori_jadwal__kategori_dinas__kategori_dinas='Reguler'
-            ).values_list('pegawai__pegawai_id', flat=True)
-            
-            kemarin_libur_jadwal_ids.extend(list(pegawai_reguler_nasional_ids))
-
-        # c. Eksekusi: Tarik Users Aktif yang TIDAK MASUK daftar aman & libur kemarin, BATASI 50 ORANG.
-        kemarin_alpa = Users.objects.filter(
-            is_active=True
-        ).exclude(
-            Q(is_superuser=True) | Q(id__in=kemarin_aman_ids) | Q(id__in=kemarin_libur_jadwal_ids)
-        ).prefetch_related(
+        kemarin_alpa_qs = pegawai_tk_pada_tanggal(yesterday)
+        kemarin_alpa = kemarin_alpa_qs.prefetch_related(
             Prefetch(
                 'riwayat_penempatan',
                 queryset=RiwayatPenempatan.objects.filter(status=True).select_related('penempatan_level4'),
                 to_attr='sk_aktif'
             )
-        ).order_by('first_name', 'last_name')[:50] # Di-slice 50 agar database optimal
-
-        # d. Kemarin tidak apel (Tetap berbasis data record absensi nyata kemarin yang statusnya HADIR)
-        kemarin_hadir_ids = AbsensiHarian.objects.filter(tanggal=yesterday, status_final='HADIR').values_list('id', flat=True)
-        kemarin_tidak_apel = AbsensiHarian.objects.filter(id__in=kemarin_hadir_ids).exclude(logs__tipe='APEL').select_related('pegawai', 'instalasi')[:50]
-
+        ).order_by('first_name', 'last_name')[:50]
 
         # =========================================================================
         # LOGIKA 3: MONITORING HARI INI (REALTIME RUNNING - MAX 50 USER)
         # =========================================================================
-        
-        is_hari_ini_ahad = today.weekday() == 6
-        is_hari_ini_libur_nasional = HariLibur.objects.filter(tanggal=today).exists()
-        
-        # a. Hari Ini Alpa (Record Alpa yang sudah divonis oleh sistem hari ini jika ada)
-        hari_ini_alpa = AbsensiHarian.objects.filter(tanggal=today, status_final='ALPA').select_related('pegawai', 'instalasi')[:50]
-        
-        # b. Hari Ini Mangkir Apel
-        hari_ini_hadir_ids = AbsensiHarian.objects.filter(tanggal=today, status_final='HADIR').values_list('id', flat=True)
-        hari_ini_tidak_apel = AbsensiHarian.objects.filter(id__in=hari_ini_hadir_ids).exclude(logs__tipe='APEL').select_related('pegawai', 'instalasi')[:50]
-
-        # c. Hari Ini BELUM PRESENSI & TANPA JADWAL (Sama seperti logika kemarin, kita keluarkan orang aman/libur)
-        sudah_ada_record_ids = AbsensiHarian.objects.filter(tanggal=today).values_list('pegawai_id', flat=True)
-        terjadwal_libur_qs = JadwalDinasSDM.objects.filter(
-            tanggal=today, 
-            # is_approved=True
-        ).filter(
-            Q(kategori_jadwal__kategori_jadwal__icontains='libur') |
-            Q(kategori_jadwal__kategori_dinas__kategori_dinas__icontains='libur')
-        )
-        terjadwal_libur_ids = list(terjadwal_libur_qs.values_list('pegawai__pegawai_id', flat=True))
-
-        # Intervensi Hari Ahad atau Libur Nasional untuk Pegawai Reguler hari ini
-        if is_hari_ini_ahad or is_hari_ini_libur_nasional:
-            pegawai_reguler_hari_ini_ids = JadwalDinasSDM.objects.filter(
-                tanggal=today,
-                # is_approved=True,
-                kategori_jadwal__kategori_dinas__kategori_dinas='Reguler'
-            ).values_list('pegawai__pegawai_id', flat=True)
-            
-            terjadwal_libur_ids.extend(list(pegawai_reguler_hari_ini_ids))
-
-        belum_presensi_hari_ini = Users.objects.filter(
-            is_active=True
-        ).exclude(
-            Q(is_superuser=True) | Q(id__in=sudah_ada_record_ids) | Q(id__in=terjadwal_libur_ids)
-        ).prefetch_related(
-            Prefetch(
-                'riwayat_penempatan',
-                queryset=RiwayatPenempatan.objects.filter(status=True).select_related('penempatan_level4'),
-                to_attr='sk_aktif'
-            )
-        ).order_by('first_name', 'last_name')[:50] # Di-slice 50 demi performa ringan
+        presensi_hari_ini_qs = presensi_datang_pada_tanggal(today)
+        sudah_presensi_hari_ini = presensi_hari_ini_qs.order_by(
+            'jam_datang', 'pegawai__first_name', 'pegawai__last_name'
+        )[:100]
+        total_presensi_hari_ini = presensi_hari_ini_qs.count()
+        tepat_waktu_hari_ini = presensi_hari_ini_qs.filter(
+            status_datang__iexact='Tepat Waktu'
+        ).count()
+        terlambat_hari_ini = presensi_hari_ini_qs.filter(
+            status_datang__icontains='Terlambat'
+        ).count()
+        belum_pulang_hari_ini = presensi_hari_ini_qs.filter(
+            jam_pulang__isnull=True
+        ).count()
+        tk_kemarin_presensi_hari_ini = presensi_hari_ini_qs.filter(
+            pegawai_id__in=kemarin_alpa_qs.values('id')
+        ).count()
 
 
         # =========================================================================
@@ -850,6 +820,7 @@ class DashboardAbsensiTemplateView(LoginRequiredMixin, TemplateView):
         # =========================================================================
         context.update({
             'periode': periode,
+            'today': today,
             'target_user': target_user,
             'list_pegawai': Users.objects.filter(is_active=True).exclude(is_superuser=True).order_by('first_name') if self.request.user.is_superuser else None,
             
@@ -865,10 +836,12 @@ class DashboardAbsensiTemplateView(LoginRequiredMixin, TemplateView):
             
             # Lists Data Terbatas (Max 50)
             'kemarin_alpa': kemarin_alpa,
-            'kemarin_tidak_apel': kemarin_tidak_apel,
-            'hari_ini_alpa': hari_ini_alpa,
-            'hari_ini_tidak_apel': hari_ini_tidak_apel,
-            'belum_presensi_hari_ini': belum_presensi_hari_ini,
+            'sudah_presensi_hari_ini': sudah_presensi_hari_ini,
+            'total_presensi_hari_ini': total_presensi_hari_ini,
+            'tepat_waktu_hari_ini': tepat_waktu_hari_ini,
+            'terlambat_hari_ini': terlambat_hari_ini,
+            'belum_pulang_hari_ini': belum_pulang_hari_ini,
+            'tk_kemarin_presensi_hari_ini': tk_kemarin_presensi_hari_ini,
             
             # Analytics
             'instalasi_alpa': instalasi_alpa,
@@ -890,78 +863,24 @@ class ExportAbsensiHarianExcelView(LoginRequiredMixin, UserPassesTestMixin, View
     def get(self, request, *args, **kwargs):
         today = date.today()
         yesterday = today - timedelta(days=1)
-        
-        # =========================================================================
-        # SINKRONISASI LOGIKA MASTER DATA (MENJARING SELURUH USER TANPA KECUALI)
-        # =========================================================================
-        
-        # --- 1. PROSES DATA KEMARIN (SHEET 1: ALPA & TANPA JADWAL) ---
-        # Ambil ID Pegawai yang kemarin sudah aman (Hadir, Izin, Dinas, Libur Resmi)
-        kemarin_aman_ids = AbsensiHarian.objects.filter(
-            tanggal=yesterday,
-            status_final__in=['HADIR', 'IZIN', 'DINAS', 'LIBUR']
-        ).values_list('pegawai_id', flat=True)
-
-        # b. ID Pegawai yang kemarin punya plot Libur Sah, ATAU pegawai reguler yang libur karena hari Minggu
-        # Kita filter jadwal dinas kemarin yang memang bertipe 'Libur'
-        kemarin_libur_jadwal_qs = JadwalDinasSDM.objects.filter(
-            tanggal=yesterday,
-            # is_approved=True
-        ).filter(
-            Q(kategori_jadwal__kategori_jadwal__icontains='libur') |
-            Q(kategori_jadwal__kategori_dinas__kategori_dinas__icontains='libur')
-        )
-
-        # Ambil list ID-nya
-        kemarin_libur_jadwal_ids = list(kemarin_libur_jadwal_qs.values_list('pegawai__pegawai_id', flat=True))
-
-        # c. JIKA KEMARIN HARI MINGGU/AHAD: 
-        # Cek apakah hari kemarin adalah hari Ahad/Minggu (6 = Minggu dalam format python weekday)
-        is_kemarin_ahad = yesterday.weekday() == 6
-        # Cari pegawai yang terjadwal bertipe 'Reguler' kemarin, mereka berhak otomatis LIBUR
-        if is_kemarin_ahad:
-            pegawai_reguler_kemarin_ids = JadwalDinasSDM.objects.filter(
-                tanggal=yesterday,
-                # is_approved=True,
-                kategori_jadwal__kategori_dinas__kategori_dinas='Reguler' # Mengunci kategori dinas reguler
-            ).values_list('pegawai__pegawai_id', flat=True)
-            
-            # Gabungkan ID pegawai reguler ke dalam rumpun daftar libur agar tidak dianggap ALPA
-            kemarin_libur_jadwal_ids.extend(list(pegawai_reguler_kemarin_ids))
-
-        # d. JIKA KEMARIN HARI LIBUR NASIONAL:
-        # Cek apakah tanggal kemarin terdaftar di model HariLibur Anda
-        is_kemarin_libur_nasional = HariLibur.objects.filter(tanggal=yesterday).exists()
-        if is_kemarin_libur_nasional:
-            # Pegawai reguler otomatis libur massal jika libur nasional
-            pegawai_reguler_nasional_ids = JadwalDinasSDM.objects.filter(
-                tanggal=yesterday,
-                # is_approved=True,
-                kategori_jadwal__kategori_dinas__kategori_dinas='Reguler'
-            ).values_list('pegawai__pegawai_id', flat=True)
-            
-            kemarin_libur_jadwal_ids.extend(list(pegawai_reguler_nasional_ids))
-
-
-        # Tarik SELURUH user yang tidak masuk kedua daftar aman di atas (Berarti Mangkir/Tanpa Jadwal)
-        alpa_qs = Users.objects.filter(
-            is_active=True
-        ).exclude(
-            Q(is_superuser=True) | Q(id__in=kemarin_aman_ids) | Q(id__in=kemarin_libur_jadwal_ids)
-        ).prefetch_related(
-            Prefetch(
-                'riwayat_penempatan',
-                queryset=RiwayatPenempatan.objects.filter(status=True).select_related('penempatan_level4'),
-                to_attr='sk_aktif'
+        tk_kemarin_qs = (
+            pegawai_tk_pada_tanggal(yesterday)
+            .prefetch_related(
+                Prefetch(
+                    'riwayat_penempatan',
+                    queryset=RiwayatPenempatan.objects.filter(status=True).select_related(
+                        'penempatan_level1',
+                        'penempatan_level2',
+                        'penempatan_level4',
+                    ),
+                    to_attr='sk_aktif',
+                )
             )
-        ).order_by('first_name', 'last_name')
-
-        # --- 2. PROSES DATA HARI INI (SHEET 2: TIDAK APEL) ---
-        hadir_ids = AbsensiHarian.objects.filter(tanggal=today, status_final='HADIR').values_list('id', flat=True)
-        tidak_apel_qs = AbsensiHarian.objects.filter(
-            tanggal=today, 
-            id__in=hadir_ids
-        ).exclude(logs__tipe='APEL').select_related('pegawai__profil_user', 'instalasi', 'unor', 'bidang').order_by('pegawai__first_name')
+            .order_by('first_name', 'last_name')
+        )
+        presensi_hari_ini_qs = presensi_datang_pada_tanggal(today).order_by(
+            'jam_datang', 'pegawai__first_name', 'pegawai__last_name'
+        )
         
         # =========================================================================
         # INASIALISASI & DEKORASI WORKBOOK
@@ -984,20 +903,23 @@ class ExportAbsensiHarianExcelView(LoginRequiredMixin, UserPassesTestMixin, View
         )
 
         # ==========================================
-        # SHEET 1: TK / ALPA & TANPA JADWAL (KEMARIN)
+        # SHEET 1: SELURUH PEGAWAI TK KEMARIN
         # ==========================================
         ws1 = wb.active
-        ws1.title = "Mangkir (Kemarin)"
+        ws1.title = "TK Kemarin"
         ws1.views.sheetView[0].showGridLines = True
         
         # Header Dokumen Sheet 1
-        ws1['A1'] = "DAFTAR PEGAWAI MANGKIR / TANPA PLOTTING JADWAL"
+        ws1['A1'] = "DAFTAR PEGAWAI TK / ALPA KEMARIN"
         ws1['A1'].font = font_title
-        ws1['A2'] = f"Bahan Evaluasi Disiplin Tanggal: {yesterday.strftime('%d %B %Y')}"
+        ws1['A2'] = f"Tanggal evaluasi: {yesterday.strftime('%d-%m-%Y')}"
         ws1['A2'].font = font_subtitle
         
         # Header Struktur Tabel Sheet 1
-        headers_ws1 = ['No', 'Nama Pegawai', 'NIP', 'Instalasi / Unit Kerja', 'Keterangan Evaluasi']
+        headers_ws1 = [
+            'No', 'Nama Pegawai', 'NIP', 'Unit Organisasi', 'Bidang',
+            'Instalasi', 'Keterangan',
+        ]
         ws1.append([]) # Spacer baris 3
         ws1.append(headers_ws1) # Baris 4
         
@@ -1007,18 +929,19 @@ class ExportAbsensiHarianExcelView(LoginRequiredMixin, UserPassesTestMixin, View
             cell.alignment = align_center
         ws1.row_dimensions[4].height = 26
 
-        # Inject Data Sheet 1 (Looping Objek Master Users)
-        for idx, pegawai in enumerate(alpa_qs, 1):
+        for idx, pegawai in enumerate(tk_kemarin_qs, 1):
             profil_user = getattr(pegawai, 'profil_user', None)
             nip = getattr(profil_user, 'nip', '-') if profil_user else '-'
             sk = pegawai.sk_aktif[0] if pegawai.sk_aktif else None
             
             row_values = [
                 idx,
-                f"{pegawai.first_name} {pegawai.last_name}".strip(),
+                pegawai.full_name,
                 nip,
-                sk.penempatan_level4.instalasi if sk and sk.penempatan_level4 else 'Belum Plotting Unit',
-                'Mangkir Kerja (Tidak ada data presensi & tidak terdaftar libur/izin sah)'
+                sk.penempatan_level1.unor if sk and sk.penempatan_level1 else '-',
+                sk.penempatan_level2.bidang if sk and sk.penempatan_level2 else '-',
+                sk.penempatan_level4.instalasi if sk and sk.penempatan_level4 else '-',
+                'Tidak memiliki kehadiran, izin, dinas, atau libur yang sah',
             ]
             ws1.append(row_values)
             
@@ -1030,50 +953,47 @@ class ExportAbsensiHarianExcelView(LoginRequiredMixin, UserPassesTestMixin, View
                 cell.alignment = align_center if col_idx in [1, 3] else align_left
 
         # ==========================================
-        # SHEET 2: TIDAK IKUT APEL (HARI INI)
+        # SHEET 2: SELURUH PEGAWAI SUDAH PRESENSI HARI INI
         # ==========================================
-        ws2 = wb.create_sheet(title="Mangkir Apel (Hari Ini)")
+        ws2 = wb.create_sheet(title="Presensi Hari Ini")
         ws2.views.sheetView[0].showGridLines = True
-        
-        # Header Dokumen Sheet 2
-        ws2['A1'] = "DAFTAR PEGAWAI TIDAK MENGIKUTI APEL PAGI"
+        ws2['A1'] = "DAFTAR PEGAWAI SUDAH PRESENSI HARI INI"
         ws2['A1'].font = font_title
-        ws2['A2'] = f"Pemantauan Riil Tanggal: {today.strftime('%d %B %Y')} (Realtime)"
+        ws2['A2'] = f"Tanggal presensi: {today.strftime('%d-%m-%Y')}"
         ws2['A2'].font = font_subtitle
-        
-        # Header Struktur Tabel Sheet 2
-        headers_ws2 = ['No', 'Nama Pegawai', 'NIP', 'Unit Organisasi', 'Bidang', 'Instalasi', 'Status']
-        ws2.append([]) # Spacer baris 3
-        ws2.append(headers_ws2) # Baris 4
-        
+
+        headers_ws2 = [
+            'No', 'Nama Pegawai', 'NIP', 'Unit Organisasi', 'Bidang',
+            'Instalasi', 'Jam Datang', 'Status Datang', 'Jam Pulang',
+        ]
+        ws2.append([])
+        ws2.append(headers_ws2)
         for cell in ws2[4]:
             cell.font = font_header
             cell.fill = fill_header
             cell.alignment = align_center
         ws2.row_dimensions[4].height = 26
 
-        # Inject Data Sheet 2 (Looping Objek AbsensiHarian)
-        for idx, absen in enumerate(tidak_apel_qs, 1):
+        for idx, absen in enumerate(presensi_hari_ini_qs, 1):
             profil_user = getattr(absen.pegawai, 'profil_user', None)
             nip = getattr(profil_user, 'nip', '-') if profil_user else '-'
-            
-            row_values = [
+            ws2.append([
                 idx,
-                absen.pegawai.full_name if hasattr(absen.pegawai, 'full_name') else f"{absen.pegawai.first_name} {absen.pegawai.last_name}".strip(),
+                absen.pegawai.full_name,
                 nip,
                 absen.unor.unor if absen.unor else '-',
                 absen.bidang.bidang if absen.bidang else '-',
                 absen.instalasi.instalasi if absen.instalasi else '-',
-                'Hadir Kerja (Tanpa Transaksi Apel)'
-            ]
-            ws2.append(row_values)
-            
+                absen.jam_datang.strftime('%H:%M:%S') if absen.jam_datang else '-',
+                absen.status_datang or '-',
+                absen.jam_pulang.strftime('%H:%M:%S') if absen.jam_pulang else 'Belum pulang',
+            ])
             current_row = ws2.max_row
             ws2.row_dimensions[current_row].height = 20
             for col_idx, cell in enumerate(ws2[current_row], start=1):
                 cell.font = font_data
                 cell.border = border_thin
-                cell.alignment = align_center if col_idx in [1, 3, 7] else align_left
+                cell.alignment = align_center if col_idx in [1, 3, 7, 8, 9] else align_left
 
         # ==========================================
         # KOREKSI OTOMATIS: AUTO-FIT COLUMN WIDTH
@@ -1093,7 +1013,7 @@ class ExportAbsensiHarianExcelView(LoginRequiredMixin, UserPassesTestMixin, View
         response = HttpResponse(
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
-        filename = f"Laporan_Evaluasi_Disiplin_{today.strftime('%Y%m%d')}.xlsx"
+        filename = f"Monitoring_TK_dan_Presensi_{today.strftime('%Y%m%d')}.xlsx"
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         
         wb.save(response)

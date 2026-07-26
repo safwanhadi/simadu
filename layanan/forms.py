@@ -160,14 +160,28 @@ class RiwayatPanggolHasilLayananForm(forms.ModelForm):
 
 
 class LayananNaikJabatanForm(forms.ModelForm):
+    periode = forms.DateField(
+        input_formats=['%Y-%m'],
+        widget=forms.DateInput(
+            format='%Y-%m',
+            attrs={'class': bootstrap_col, 'type': 'month'},
+        ),
+        label='Periode Pengusulan',
+        help_text='Semua pengajuan pada bulan yang sama akan masuk dalam satu lampiran surat.',
+    )
+
     class Meta:
         model = LayananNaikJabatan
         fields = (
-           'pegawai', 'kinerja_dua_thn', 'kompetensi', 'pendidikan',
-            'str_profesi', 'pak',
+            'pegawai', 'periode', 'kategori_pengelolaan',
+            'jabatan_diusulkan', 'formasi_tersedia',
+            'kinerja_dua_thn', 'kompetensi', 'pendidikan', 'str_profesi', 'pak',
         )
         widgets = {
             'pegawai': forms.Select(attrs={'class': select2_col}),
+            'kategori_pengelolaan': forms.Select(attrs={'class': bootstrap_col}),
+            'jabatan_diusulkan': forms.TextInput(attrs={'class': bootstrap_col}),
+            'formasi_tersedia': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'kinerja_dua_thn': forms.SelectMultiple(attrs={'class': select2_col}),
             'kompetensi': forms.Select(attrs={'class': select2_col}),
             'pendidikan': forms.Select(attrs={'class': select2_col}),
@@ -178,21 +192,29 @@ class LayananNaikJabatanForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
+        if not self.is_bound and not self.instance.pk:
+            self.initial['periode'] = date.today().replace(day=1)
         if user and not user.is_jabatan_admin:
             queryset = Users.objects.filter(pk=user.pk)
             self.fields['pegawai'].queryset = queryset
             self.fields['pegawai'].initial = queryset.first()
-            self.fields['pegawai'].widget=forms.HiddenInput()
+            self.fields['pegawai'].required = False
+            self.fields['pegawai'].widget = forms.HiddenInput()
 
         self.fields['kinerja_dua_thn'].label = 'SKP/Kinerja Dua Tahun Terakhir'
         self.fields['kinerja_dua_thn'].required = True
         self.fields['kompetensi'].label = 'Sertifikat Uji Kompetensi'
+        self.fields['jabatan_diusulkan'].required = True
+        self.fields['jabatan_diusulkan'].label = 'Jabatan Fungsional yang Diusulkan'
         self.fields['pendidikan'].label = 'Ijazah Pendidikan (jika diperlukan)'
         self.fields['str_profesi'].label = 'STR Profesi (jika diperlukan)'
         self.fields['pak'].label = 'Penetapan Angka Kredit (PAK) Terakhir'
 
         if not user:
-            for field_name in self.fields:
+            for field_name in (
+                'pegawai', 'kinerja_dua_thn', 'kompetensi',
+                'pendidikan', 'str_profesi', 'pak',
+            ):
                 self.fields[field_name].queryset = self.fields[field_name].queryset.none()
             return
 
@@ -212,11 +234,34 @@ class LayananNaikJabatanForm(forms.ModelForm):
             pegawai=user
         ).order_by('-tgl_srt', '-id')
 
+    def clean_periode(self):
+        return self.cleaned_data['periode'].replace(day=1)
+
     def clean_kinerja_dua_thn(self):
         values = self.cleaned_data['kinerja_dua_thn']
         if values.count() != 2:
             raise forms.ValidationError('Pilih tepat dua dokumen kinerja tahunan terakhir.')
         return values
+
+
+class SuratUsulanJabatanForm(forms.Form):
+    periode = forms.ChoiceField(
+        label='Periode Pengusulan',
+        widget=forms.Select(attrs={'class': bootstrap_col}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        periods = (
+            LayananNaikJabatan.objects.exclude(periode__isnull=True)
+            .values_list('periode', flat=True)
+            .distinct()
+            .order_by('-periode')
+        )
+        self.fields['periode'].choices = [
+            (period.isoformat(), period.strftime('%B %Y'))
+            for period in periods
+        ]
 
 
 class RiwayatJabatanHasilLayananForm(forms.ModelForm):

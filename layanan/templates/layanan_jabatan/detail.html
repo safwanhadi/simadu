@@ -10,6 +10,10 @@
     </div>
     <div class="card-body">
         <div class="row mb-2"><div class="col-md-3 font-weight-bold">Pegawai</div><div class="col-md-9">{{ usulan.pegawai.full_name }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Periode</div><div class="col-md-9">{{ usulan.periode|date:'F Y'|default:'-' }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Kategori Pengelolaan</div><div class="col-md-9">{{ usulan.get_kategori_pengelolaan_display }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Jabatan Diusulkan</div><div class="col-md-9">{{ usulan.jabatan_diusulkan|default:'-' }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Formasi</div><div class="col-md-9">{% if usulan.formasi_tersedia %}Tersedia{% else %}Belum tersedia{% endif %}</div></div>
         <div class="row mb-2"><div class="col-md-3 font-weight-bold">Status</div><div class="col-md-9">{{ usulan.get_status_display }}</div></div>
         <div class="row mb-2"><div class="col-md-3 font-weight-bold">Uji Kompetensi</div><div class="col-md-9">{{ usulan.kompetensi|default:'-' }}</div></div>
         <div class="row mb-2"><div class="col-md-3 font-weight-bold">PAK Terakhir</div><div class="col-md-9">{{ usulan.pak|default:'-' }}</div></div>

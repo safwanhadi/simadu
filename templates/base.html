@@ -234,6 +234,26 @@
             </a>
             {% endfor %}
           {% endif %}
+          {% if str_expiry_notifications %}
+            {% for str_item in str_expiry_notifications %}
+            <div class="dropdown-divider"></div>
+            <a href="{% url 'riwayat_urls:riwayat_update_profesi' id=str_item.pk %}"
+               class="dropdown-item py-2">
+              <div class="d-flex align-items-start">
+                <span class="mr-2 mt-1 {% if str_item.is_expired %}text-danger{% else %}text-warning{% endif %}">
+                  <i class="fas {% if str_item.is_expired %}fa-exclamation-circle{% else %}fa-clock{% endif %}"></i>
+                </span>
+                <span class="text-wrap" style="line-height:1.2;">
+                  <strong class="d-block text-sm">STR {{ str_item.no_str|default:'-' }}</strong>
+                  <small class="d-block text-muted">
+                    {{ str_item.profesi|default:'Profesi' }} · {{ str_item.expiry_message }}
+                  </small>
+                  <small class="text-muted">Berlaku s.d. {{ str_item.berlaku_sd_str|date:'d M Y' }}</small>
+                </span>
+              </div>
+            </a>
+            {% endfor %}
+          {% endif %}
           {% if notif_pangkat|length != 0 %}
           <div class="dropdown-divider"></div>
           <a href="{% url 'layanan_urls:notifikasi_view' %}?layanan=yanpangkat" class="dropdown-item">
@@ -340,8 +360,10 @@
               <i class="nav-icon fas fa-file-medical-alt"></i>
               <p>
                 Pengingat SIP
-                {% if sip_expiry_notifications %}
-                  <span class="right badge badge-warning">{{ sip_expiry_notifications|length }}</span>
+                {% if sip_expiry_notifications or str_expiry_notifications %}
+                  <span class="right badge badge-warning">
+                    {{ expiry_notification_total }}
+                  </span>
                 {% endif %}
               </p>
             </a>

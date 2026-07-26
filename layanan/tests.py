@@ -1,10 +1,12 @@
 from datetime import date
+from io import BytesIO
 from tempfile import TemporaryDirectory
 
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from docx import Document
 
 from dashboard.context_processors import notifikasi_layanan
 from dokumen.models import (
@@ -123,7 +125,11 @@ class LayananNaikPangkatWorkflowTests(TestCase):
                 'mutasi': '',
             },
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.status_code,
+            302,
+            response.context['form'].errors if response.context else '',
+        )
 
         usulan = LayananNaikPangkat.objects.get(pegawai=self.pegawai)
         self.assertEqual(usulan.status, 'pengajuan')
@@ -295,6 +301,10 @@ class LayananNaikJabatanWorkflowTests(TestCase):
         response = self.client.post(
             reverse('layanan_urls:layanan_jabatan_create'),
             {
+                'periode': '2026-07',
+                'kategori_pengelolaan': 'kenaikan',
+                'jabatan_diusulkan': 'Perawat Ahli Pertama',
+                'formasi_tersedia': 'on',
                 'kinerja_dua_thn': [self.kinerja_1.pk, self.kinerja_2.pk],
                 'kompetensi': self.uji_kompetensi.pk,
                 'pendidikan': '',
@@ -302,7 +312,11 @@ class LayananNaikJabatanWorkflowTests(TestCase):
                 'pak': self.pak.pk,
             },
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.status_code,
+            302,
+            response.context['form'].errors if response.context else '',
+        )
 
         usulan = LayananNaikJabatan.objects.get(pegawai=self.pegawai)
         self.assertEqual(usulan.status, 'pengajuan')
@@ -341,3 +355,85 @@ class LayananNaikJabatanWorkflowTests(TestCase):
         request = type('Request', (), {'user': self.pegawai})()
         notifications = notifikasi_layanan(request)
         self.assertEqual(len(notifications['notif_jabatan']), 1)
+
+    def test_surat_jabatan_memuat_semua_pengusul_dalam_periode_yang_sama(self):
+        layanan = JenisLayanan.objects.get(url='yanjabatan')
+        usulan_utama = LayananNaikJabatan.objects.create(
+            pegawai=self.pegawai,
+            layanan=layanan,
+            periode=date(2026, 7, 1),
+            kategori_pengelolaan='kenaikan',
+            jabatan_diusulkan='Perawat Ahli Pertama',
+            kompetensi=self.uji_kompetensi,
+            pak=self.pak,
+            status='pengajuan',
+        )
+        usulan_utama.kinerja_dua_thn.set([self.kinerja_1, self.kinerja_2])
+
+        pegawai_lain = Users.objects.create_user(
+            email='pegawai-lampiran-jabatan@example.com',
+            first_name='Pegawai',
+            last_name='Lampiran',
+            password='test-password',
+        )
+        LayananNaikJabatan.objects.create(
+            pegawai=pegawai_lain,
+            layanan=layanan,
+            periode=date(2026, 7, 1),
+            kategori_pengelolaan='pengangkatan_kembali',
+            jabatan_diusulkan='Administrator Kesehatan Ahli Muda',
+            status='proses',
+        )
+        pegawai_periode_lain = Users.objects.create_user(
+            email='pegawai-periode-lain@example.com',
+            first_name='Periode',
+            last_name='Lain',
+            password='test-password',
+        )
+        LayananNaikJabatan.objects.create(
+            pegawai=pegawai_periode_lain,
+            layanan=layanan,
+            periode=date(2026, 8, 1),
+            jabatan_diusulkan='Perawat Ahli Muda',
+            status='pengajuan',
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            reverse('layanan_urls:layanan_jabatan_surat'),
+            {
+                'periode': '2026-07-01',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        )
+        document = Document(BytesIO(response.content))
+        document_text = '\n'.join(
+            [paragraph.text for paragraph in document.paragraphs]
+            + [
+                cell.text
+                for table in document.tables
+                for row in table.rows
+                for cell in row.cells
+            ]
+        )
+        self.assertIn('${nomor_naskah}', document_text)
+        self.assertIn('${tanggal_naskah}', document_text)
+        self.assertIn('${ttd_pengirim}', document_text)
+        self.assertIn('Pegawai Jabatan', document_text)
+        self.assertIn('Pegawai Lampiran', document_text)
+        self.assertIn('Administrator Kesehatan Ahli Muda', document_text)
+        self.assertNotIn('Periode Lain', document_text)
+
+    def test_non_admin_tidak_dapat_generate_surat_jabatan(self):
+        self.client.force_login(self.pegawai)
+
+        response = self.client.get(
+            reverse('layanan_urls:layanan_jabatan_surat')
+        )
+
+        self.assertEqual(response.status_code, 403)

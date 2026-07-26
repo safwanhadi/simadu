@@ -42,6 +42,7 @@ from .views import (
     UpdatePresensiPegawaiView,
     DetailPresensiPegawaiView,
     DownloadRekapPresensiExcelView,
+    RawPresensiDatabaseListView,
 )
 
 urlpatterns = [
@@ -93,6 +94,7 @@ urlpatterns = [
     
     # URL UNTUK MODEL BARU
     path('rekap-kehadiran/', RekapPresensiBulananView.as_view(), name='rekap_kehadiran_bulanan'),
+    path('presensi/data-mentah/', RawPresensiDatabaseListView.as_view(), name='raw_presensi_database'),
     path('rekap-kehadiran/<int:pk>/detail/', DetailPresensiPegawaiView.as_view(), name='detail_presensi_pegawai'),
     path('rekap-khadiran/<int:pk>/update/', UpdatePresensiPegawaiView.as_view(), name='update_kehadiran_pegawai'),
     path('rekap/download-excel/', DownloadRekapPresensiExcelView.as_view(), name='download_excel'),
