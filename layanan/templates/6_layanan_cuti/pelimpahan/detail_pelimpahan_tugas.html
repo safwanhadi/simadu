@@ -64,6 +64,12 @@
     </a>
     <a href="{% url 'file_urls:pelimpahan_tugas_pdf' pk=pelimpahan.pk %}" class="btn btn-info">Unduh File Pelimpahan</a>
 
+    {% if can_reassign %}
+        <a href="{% url 'layanan_urls:pelimpahan_alihkan' pelimpahan.pk %}" class="btn btn-danger">
+            Alihkan Penerima Tugas
+        </a>
+    {% endif %}
+
     {% if pelimpahan.status == "menunggu_penerima" and user == pelimpahan.penerima_tugas %}
         <a href="{% url 'layanan_urls:pelimpahan_penerima_update' pelimpahan.pk %}" class="btn btn-primary">
             Berikan Persetujuan

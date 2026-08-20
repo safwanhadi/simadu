@@ -540,18 +540,27 @@ class CheckCuti:
         if not user or not getattr(user, 'is_authenticated', False):
             return False
 
-        from .models import PelimpahanTugas  # sesuaikan path
+        from .models import PelimpahanTugas, PengalihanPelimpahanTugas
 
         overlap_filter = (
             Q(tgl_mulai__lte=tgl_selesai) &
             Q(tgl_selesai__gte=tgl_mulai)
         )
 
-        return PelimpahanTugas.objects.filter(
+        pelimpahan_final = PelimpahanTugas.objects.filter(
             penerima_tugas=user,
             persetujuan_penerima='disetujui',
             persetujuan_atasan='disetujui'
         ).filter(overlap_filter).exists()
+        if pelimpahan_final:
+            return True
+
+        return PengalihanPelimpahanTugas.objects.filter(
+            penerima_lama=user,
+            status='menunggu',
+            pelimpahan__tgl_mulai__lte=tgl_selesai,
+            pelimpahan__tgl_selesai__gte=tgl_mulai,
+        ).exists()
 
     def is_memiliki_cuti_bentrok(
         self,

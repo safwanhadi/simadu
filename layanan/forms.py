@@ -35,6 +35,7 @@ from .models import (
     VerifikasiCuti,
     VerifikasiDiklat,
     PelimpahanTugas,
+    PengalihanPelimpahanTugas,
     PerubahanJadwalCuti,
     LayananSIP,
     LayananNaikPangkat,
@@ -668,6 +669,51 @@ class PelimpahanTugasPenerimaForm(forms.ModelForm):
     class Meta:
         model = PelimpahanTugas
         fields = ['aksi', 'catatan_penerima']
+
+
+class PengalihanPelimpahanTugasForm(forms.ModelForm):
+    class Meta:
+        model = PengalihanPelimpahanTugas
+        fields = ['penerima_baru', 'alasan']
+        widgets = {
+            'alasan': forms.Textarea(attrs={'rows': 4}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.pelimpahan = kwargs.pop('pelimpahan')
+        super().__init__(*args, **kwargs)
+        self.fields['penerima_baru'].label = 'Penerima tugas baru'
+        self.fields['alasan'].label = 'Alasan pengalihan'
+        self.fields['penerima_baru'].queryset = Users.objects.filter(
+            is_active=True,
+        ).exclude(
+            is_superuser=True,
+        ).exclude(
+            pk__in=(
+                self.pelimpahan.pemberi_tugas_id,
+                self.pelimpahan.penerima_tugas_id,
+            ),
+        ).order_by('first_name', 'last_name')
+
+    def clean_penerima_baru(self):
+        penerima = self.cleaned_data['penerima_baru']
+        awal, akhir = self.pelimpahan.tgl_mulai, self.pelimpahan.tgl_selesai
+        bentrok_cuti = RiwayatCuti.objects.filter(
+            pegawai=penerima,
+            tgl_mulai_cuti__lte=akhir,
+            tgl_akhir_cuti__gte=awal,
+        ).exclude(usulan__status__in=('ditolak', 'dibatalkan')).exists()
+        bentrok_pelimpahan = PelimpahanTugas.objects.filter(
+            penerima_tugas=penerima,
+            tgl_mulai__lte=akhir,
+            tgl_selesai__gte=awal,
+            status__in=('menunggu_penerima', 'menunggu_atasan', 'disetujui'),
+        ).exclude(pk=self.pelimpahan.pk).exists()
+        if bentrok_cuti or bentrok_pelimpahan:
+            raise forms.ValidationError(
+                'Pegawai ini sedang cuti atau menerima pelimpahan lain pada periode tersebut.'
+            )
+        return penerima
 
 
 class PelimpahanTugasAtasanForm(forms.ModelForm):

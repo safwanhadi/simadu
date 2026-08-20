@@ -12,10 +12,12 @@ from myaccount.roles import ADMIN_LAYANAN_CUTI
 
 from .forms import Verifikator2CutiForm, Verifikator3CutiForm
 from .models import (
-    JenisLayanan, LayananCuti, PelimpahanTugas, PerubahanJadwalCuti,
+    JenisLayanan, LayananCuti, PelimpahanTugas, PengalihanPelimpahanTugas,
+    PerubahanJadwalCuti,
     PemutihanCutiLog, VerifikasiCuti,
 )
 from .services import CheckCuti
+from .views import PelimpahanKepalaListView, PelimpahanTugasPenerimaListView
 from .cuti_schedule import (
     apply_nonfinal_change,
     approve_final_change,
@@ -205,6 +207,197 @@ class CutiSecurityTests(TestCase):
         )
         self.assertNotContains(response, decision_url)
         self.assertEqual(self.client.get(decision_url).status_code, 404)
+
+    def test_admin_dapat_mencari_pegawai_pada_daftar_pelimpahan(self):
+        pelimpahan = PelimpahanTugas.objects.create(
+            riwayat_cuti=self.riwayat,
+            pemberi_tugas=self.pemilik,
+            penerima_tugas=self.orang_lain,
+            atasan_penyetuju=self.admin_cuti,
+            deskripsi_tugas='Menjalankan tugas selama cuti',
+            tgl_mulai=self.riwayat.tgl_mulai_cuti,
+            tgl_selesai=self.riwayat.tgl_akhir_cuti,
+            status='menunggu_penerima',
+            butuh_persetujuan_atasan=True,
+        )
+        self.client.force_login(self.admin_cuti)
+
+        for url_name in (
+            'layanan_urls:pelimpahan_penerima_list',
+            'layanan_urls:pelimpahan_atasan_list',
+        ):
+            response = self.client.get(
+                reverse(url_name), {'q': self.orang_lain.email}
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, pelimpahan.penerima_tugas.full_name)
+            self.assertEqual(response.context['q'], self.orang_lain.email)
+
+            response_kosong = self.client.get(
+                reverse(url_name), {'q': 'pegawai-tidak-ditemukan'}
+            )
+            self.assertNotContains(
+                response_kosong, pelimpahan.penerima_tugas.full_name
+            )
+
+    def test_daftar_pelimpahan_memakai_pagination_dua_puluh_baris(self):
+        self.assertEqual(PelimpahanTugasPenerimaListView.paginate_by, 20)
+        self.assertEqual(PelimpahanKepalaListView.paginate_by, 20)
+
+    def test_penerima_lama_baru_bebas_setelah_pengalihan_disetujui(self):
+        penerima_baru = Users.objects.create_user(
+            email='penerima-baru@example.com',
+            first_name='Penerima',
+            last_name='Baru',
+            password='password-test',
+        )
+        pelimpahan = PelimpahanTugas.objects.create(
+            riwayat_cuti=self.riwayat,
+            pemberi_tugas=self.pemilik,
+            penerima_tugas=self.orang_lain,
+            deskripsi_tugas='Menjalankan tugas selama cuti',
+            tgl_mulai=self.riwayat.tgl_mulai_cuti,
+            tgl_selesai=self.riwayat.tgl_akhir_cuti,
+            status='disetujui',
+            persetujuan_penerima='disetujui',
+            persetujuan_atasan='disetujui',
+            butuh_persetujuan_atasan=False,
+        )
+        self.client.force_login(self.admin_cuti)
+
+        response = self.client.post(
+            reverse('layanan_urls:pelimpahan_alihkan', kwargs={'pk': pelimpahan.pk}),
+            {'penerima_baru': penerima_baru.pk, 'alasan': 'Keperluan keluarga mendesak.'},
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('layanan_urls:pelimpahan_detail', kwargs={'pk': pelimpahan.pk}),
+        )
+        pelimpahan.refresh_from_db()
+        self.assertEqual(pelimpahan.penerima_tugas, penerima_baru)
+        self.assertEqual(pelimpahan.status, 'menunggu_penerima')
+        self.assertEqual(pelimpahan.persetujuan_penerima, 'belum')
+        self.assertTrue(CheckCuti().is_penerima_memiliki_pelimpahan_aktif(
+            self.orang_lain, pelimpahan.tgl_mulai, pelimpahan.tgl_selesai
+        ))
+        log = PengalihanPelimpahanTugas.objects.get(pelimpahan=pelimpahan)
+        self.assertEqual(log.penerima_lama, self.orang_lain)
+        self.assertEqual(log.penerima_baru, penerima_baru)
+        self.assertEqual(log.dialihkan_oleh, self.admin_cuti)
+        self.assertEqual(log.status, 'menunggu')
+
+        self.client.force_login(penerima_baru)
+        response = self.client.post(
+            reverse(
+                'layanan_urls:pelimpahan_penerima_update',
+                kwargs={'pk': pelimpahan.pk},
+            ),
+            {'aksi': 'setuju', 'catatan_penerima': 'Bersedia menerima tugas.'},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        log.refresh_from_db()
+        self.assertEqual(log.status, 'disetujui')
+        self.assertFalse(CheckCuti().is_penerima_memiliki_pelimpahan_aktif(
+            self.orang_lain, pelimpahan.tgl_mulai, pelimpahan.tgl_selesai
+        ))
+
+    def test_penolakan_pengalihan_memulihkan_penerima_lama(self):
+        penerima_baru = Users.objects.create_user(
+            email='penerima-menolak@example.com', password='password-test'
+        )
+        pelimpahan = PelimpahanTugas.objects.create(
+            riwayat_cuti=self.riwayat,
+            pemberi_tugas=self.pemilik,
+            penerima_tugas=self.orang_lain,
+            deskripsi_tugas='Menjalankan tugas selama cuti',
+            tgl_mulai=self.riwayat.tgl_mulai_cuti,
+            tgl_selesai=self.riwayat.tgl_akhir_cuti,
+            status='disetujui',
+            persetujuan_penerima='disetujui',
+            persetujuan_atasan='disetujui',
+            butuh_persetujuan_atasan=False,
+        )
+        self.client.force_login(self.admin_cuti)
+        self.client.post(
+            reverse('layanan_urls:pelimpahan_alihkan', kwargs={'pk': pelimpahan.pk}),
+            {'penerima_baru': penerima_baru.pk, 'alasan': 'Pengalihan darurat.'},
+        )
+        self.client.force_login(penerima_baru)
+
+        self.client.post(
+            reverse(
+                'layanan_urls:pelimpahan_penerima_update',
+                kwargs={'pk': pelimpahan.pk},
+            ),
+            {'aksi': 'tolak', 'catatan_penerima': 'Tidak dapat menerima.'},
+        )
+
+        pelimpahan.refresh_from_db()
+        log = PengalihanPelimpahanTugas.objects.get(pelimpahan=pelimpahan)
+        self.assertEqual(pelimpahan.penerima_tugas, self.orang_lain)
+        self.assertEqual(pelimpahan.status, 'disetujui')
+        self.assertEqual(log.status, 'ditolak')
+        self.assertTrue(CheckCuti().is_penerima_memiliki_pelimpahan_aktif(
+            self.orang_lain, pelimpahan.tgl_mulai, pelimpahan.tgl_selesai
+        ))
+
+    def test_penerima_aktif_tidak_dapat_mengalihkan_sendiri(self):
+        penerima_baru = Users.objects.create_user(
+            email='pengganti-mandiri@example.com', password='password-test'
+        )
+        pelimpahan = PelimpahanTugas.objects.create(
+            riwayat_cuti=self.riwayat,
+            pemberi_tugas=self.pemilik,
+            penerima_tugas=self.orang_lain,
+            deskripsi_tugas='Menjalankan tugas selama cuti',
+            tgl_mulai=self.riwayat.tgl_mulai_cuti,
+            tgl_selesai=self.riwayat.tgl_akhir_cuti,
+            status='disetujui',
+            persetujuan_penerima='disetujui',
+            persetujuan_atasan='disetujui',
+            butuh_persetujuan_atasan=False,
+        )
+        self.client.force_login(self.orang_lain)
+
+        response = self.client.post(
+            reverse('layanan_urls:pelimpahan_alihkan', kwargs={'pk': pelimpahan.pk}),
+            {'penerima_baru': penerima_baru.pk, 'alasan': 'Keperluan mendesak.'},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        pelimpahan.refresh_from_db()
+        self.assertEqual(pelimpahan.penerima_tugas, self.orang_lain)
+        self.assertFalse(PengalihanPelimpahanTugas.objects.exists())
+
+    def test_pegawai_di_luar_pelimpahan_tidak_dapat_mengalihkan(self):
+        penerima_baru = Users.objects.create_user(
+            email='calon-penerima@example.com', password='password-test'
+        )
+        pelimpahan = PelimpahanTugas.objects.create(
+            riwayat_cuti=self.riwayat,
+            pemberi_tugas=self.pemilik,
+            penerima_tugas=self.admin_cuti,
+            deskripsi_tugas='Menjalankan tugas selama cuti',
+            tgl_mulai=self.riwayat.tgl_mulai_cuti,
+            tgl_selesai=self.riwayat.tgl_akhir_cuti,
+            status='disetujui',
+            persetujuan_penerima='disetujui',
+            persetujuan_atasan='disetujui',
+            butuh_persetujuan_atasan=False,
+        )
+        self.client.force_login(self.orang_lain)
+
+        response = self.client.post(
+            reverse('layanan_urls:pelimpahan_alihkan', kwargs={'pk': pelimpahan.pk}),
+            {'penerima_baru': penerima_baru.pk, 'alasan': 'Tidak berwenang.'},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        pelimpahan.refresh_from_db()
+        self.assertEqual(pelimpahan.penerima_tugas, self.admin_cuti)
+        self.assertFalse(PengalihanPelimpahanTugas.objects.exists())
 
     def test_admin_dapat_memutihkan_pengajuan_dengan_log_audit(self):
         self.client.force_login(self.admin_cuti)

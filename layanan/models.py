@@ -424,6 +424,46 @@ class PelimpahanTugas(models.Model):
         return True
 
 
+class PengalihanPelimpahanTugas(models.Model):
+    """Jejak audit setiap perubahan penerima pelimpahan tugas cuti."""
+
+    STATUS_CHOICES = (
+        ('menunggu', 'Menunggu persetujuan'),
+        ('disetujui', 'Disetujui'),
+        ('ditolak', 'Ditolak'),
+    )
+
+    pelimpahan = models.ForeignKey(
+        PelimpahanTugas,
+        on_delete=models.CASCADE,
+        related_name="riwayat_pengalihan",
+    )
+    penerima_lama = models.ForeignKey(
+        "myaccount.Users",
+        on_delete=models.PROTECT,
+        related_name="pengalihan_pelimpahan_keluar",
+    )
+    penerima_baru = models.ForeignKey(
+        "myaccount.Users",
+        on_delete=models.PROTECT,
+        related_name="pengalihan_pelimpahan_masuk",
+    )
+    dialihkan_oleh = models.ForeignKey(
+        "myaccount.Users",
+        on_delete=models.PROTECT,
+        related_name="pengalihan_pelimpahan_dilakukan",
+    )
+    alasan = models.TextField()
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='menunggu')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Pengalihan {self.penerima_lama} -> {self.penerima_baru}"
+
+
 JENIS_PERUBAHAN_JADWAL = (
     ('langsung', 'Perubahan sebelum verifikasi'),
     ('revisi_proses', 'Revisi saat verifikasi berjalan'),

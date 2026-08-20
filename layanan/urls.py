@@ -24,6 +24,7 @@ from .views import (
     PelimpahanKepalaListView,
     PelimpahanTugasAtasanUpdateView,
     PelimpahanTugasDetailView,
+    PengalihanPelimpahanTugasView,
     
     BerkalaListView,
     createlayananberkala,
@@ -112,6 +113,7 @@ urlpatterns=[
     path("layanan-cuti/<int:riwayat_id>/override-klaim-tunda/", AdminOverrideKlaimTundaForCutiView.as_view(),name="cuti_override_klaim_tunda"),
     path('pelimpahan-tugas/penerima-list/', PelimpahanTugasPenerimaListView.as_view(), name='pelimpahan_penerima_list'),
     path('pelimpahan-tugas/<int:pk>/detail/', PelimpahanTugasDetailView.as_view(), name='pelimpahan_detail'),
+    path('pelimpahan-tugas/<int:pk>/alihkan/', PengalihanPelimpahanTugasView.as_view(), name='pelimpahan_alihkan'),
     path('pelimpahan-tugas/penerima-list/<int:pk>/update/', PelimpahanTugasPenerimaUpdateView.as_view(), name='pelimpahan_penerima_update'),
     path('pelimpahan-tugas/kepala-list/', PelimpahanKepalaListView.as_view(), name='pelimpahan_atasan_list'),
     path('pelimpahan-tugas/kepala-list/<int:pk>/update/', PelimpahanTugasAtasanUpdateView.as_view(), name='pelimpahan_atasan_update'),

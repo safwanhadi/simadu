@@ -79,7 +79,10 @@ from strukturorg.services import get_active_leader
 logger = logging.getLogger(__name__)
 
 
-from .forms import OverrideKlaimTundaForCutiForm, PolaKerjaPegawaiForm
+from .forms import (
+    OverrideKlaimTundaForCutiForm, PolaKerjaPegawaiForm,
+    PengalihanPelimpahanTugasForm,
+)
 from disiplinsdm.models import PolaKerjaPegawai
 
 from .models import (
@@ -91,6 +94,7 @@ from .models import (
     VerifikasiDiklat, 
     LayananUsulanInovasi,
     PelimpahanTugas,
+    PengalihanPelimpahanTugas,
     PerubahanJadwalCuti,
     PemutihanCutiLog,
     STATUS_PENGAJUAN_CUTI,
@@ -1243,13 +1247,91 @@ class PelimpahanTugasDetailView(LoginRequiredMixin, DetailView):
         ctx = super().get_context_data(**kwargs)
         ctx["needs_atasan"] = self.object.requires_atasan_approval()
         ctx["is_final"] = self.object.is_final_approved()
+        ctx["can_reassign"] = (
+            self.object.status == 'disetujui'
+            and is_leave_admin(
+                self.request.user, self.object.riwayat_cuti.pegawai
+            )
+        )
         return ctx
+
+
+class PengalihanPelimpahanTugasView(LoginRequiredMixin, FormView):
+    template_name = '6_layanan_cuti/pelimpahan/form_pengalihan_penerima.html'
+    form_class = PengalihanPelimpahanTugasForm
+
+    def dispatch(self, request, *args, **kwargs):
+        self.pelimpahan = get_object_or_404(
+            PelimpahanTugas.objects.select_related(
+                'riwayat_cuti__pegawai', 'pemberi_tugas', 'penerima_tugas'
+            ),
+            pk=kwargs['pk'],
+        )
+        if not is_leave_admin(request.user, self.pelimpahan.riwayat_cuti.pegawai):
+            raise PermissionDenied(
+                'Pengalihan pelimpahan hanya dapat dilakukan oleh Admin Layanan Cuti.'
+            )
+        if self.pelimpahan.status != 'disetujui':
+            messages.error(
+                request,
+                'Hanya pelimpahan yang sudah disetujui yang dapat dialihkan.',
+            )
+            return redirect('layanan_urls:pelimpahan_detail', pk=self.pelimpahan.pk)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['pelimpahan'] = self.pelimpahan
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['pelimpahan'] = self.pelimpahan
+        return context
+
+    @transaction.atomic
+    def form_valid(self, form):
+        pelimpahan = PelimpahanTugas.objects.select_for_update().get(
+            pk=self.pelimpahan.pk
+        )
+        if pelimpahan.status != 'disetujui':
+            form.add_error(None, 'Status pelimpahan telah berubah. Muat ulang halaman.')
+            return self.form_invalid(form)
+
+        penerima_lama = pelimpahan.penerima_tugas
+        penerima_baru = form.cleaned_data['penerima_baru']
+        PengalihanPelimpahanTugas.objects.create(
+            pelimpahan=pelimpahan,
+            penerima_lama=penerima_lama,
+            penerima_baru=penerima_baru,
+            dialihkan_oleh=self.request.user,
+            alasan=form.cleaned_data['alasan'],
+        )
+        pelimpahan.penerima_tugas = penerima_baru
+        pelimpahan.status = 'menunggu_penerima'
+        pelimpahan.persetujuan_penerima = 'belum'
+        pelimpahan.catatan_penerima = ''
+        pelimpahan.persetujuan_atasan = (
+            'belum' if pelimpahan.requires_atasan_approval() else 'disetujui'
+        )
+        pelimpahan.catatan_atasan = ''
+        pelimpahan.save(update_fields=(
+            'penerima_tugas', 'status', 'persetujuan_penerima',
+            'catatan_penerima', 'persetujuan_atasan', 'catatan_atasan',
+            'updated_at',
+        ))
+        messages.success(
+            self.request,
+            'Pengalihan diajukan. Penerima lama tetap bertanggung jawab sampai seluruh persetujuan selesai.',
+        )
+        return redirect('layanan_urls:pelimpahan_detail', pk=pelimpahan.pk)
 
 
 class PelimpahanTugasPenerimaListView(LoginRequiredMixin, ListView):
     model = PelimpahanTugas
     template_name = '6_layanan_cuti/pelimpahan/list_penerima.html'
     context_object_name = 'pelimpahan_list'
+    paginate_by = 20
 
     def get_queryset(self):
         queryset = PelimpahanTugas.objects.filter(
@@ -1265,14 +1347,26 @@ class PelimpahanTugasPenerimaListView(LoginRequiredMixin, ListView):
             'atasan_penyetuju',
         )
         if is_leave_admin(self.request.user):
-            return filter_queryset_for_leave_admin(
+            queryset = filter_queryset_for_leave_admin(
                 queryset,
                 self.request.user,
                 employee_path='riwayat_cuti__pegawai',
-            ).order_by('-created_at')
-        return queryset.filter(
-            penerima_tugas=self.request.user,
-        ).order_by('-created_at')
+            )
+        else:
+            queryset = queryset.filter(penerima_tugas=self.request.user)
+        kata_kunci = self.request.GET.get('q', '').strip()
+        if kata_kunci:
+            queryset = queryset.filter(
+                Q(pemberi_tugas__first_name__icontains=kata_kunci)
+                | Q(pemberi_tugas__last_name__icontains=kata_kunci)
+                | Q(pemberi_tugas__email__icontains=kata_kunci)
+                | Q(pemberi_tugas__profil_user__nip__icontains=kata_kunci)
+                | Q(penerima_tugas__first_name__icontains=kata_kunci)
+                | Q(penerima_tugas__last_name__icontains=kata_kunci)
+                | Q(penerima_tugas__email__icontains=kata_kunci)
+                | Q(penerima_tugas__profil_user__nip__icontains=kata_kunci)
+            )
+        return queryset.distinct().order_by('-created_at')
         
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1287,6 +1381,7 @@ class PelimpahanTugasPenerimaListView(LoginRequiredMixin, ListView):
             'selected': 'yancuti',
             'active_tab': 'pelimpahan',  # untuk nav/tab
             'is_cuti_scope_admin': is_admin,
+            'q': self.request.GET.get('q', '').strip(),
         })
         return context
 
@@ -1306,11 +1401,32 @@ class PelimpahanTugasPenerimaUpdateView(LoginRequiredMixin, UpdateView):
     @transaction.atomic
     def form_valid(self, form):
         obj = PelimpahanTugas.objects.select_for_update().get(pk=form.instance.pk)
+        pengalihan = PengalihanPelimpahanTugas.objects.select_for_update().filter(
+            pelimpahan=obj,
+            penerima_baru=obj.penerima_tugas,
+            status='menunggu',
+        ).first()
 
         aksi = form.cleaned_data["aksi"]
         obj.catatan_penerima = form.cleaned_data.get("catatan_penerima", "")
 
         if aksi == "tolak":
+            if pengalihan:
+                obj.penerima_tugas = pengalihan.penerima_lama
+                obj.persetujuan_penerima = "disetujui"
+                obj.persetujuan_atasan = "disetujui"
+                obj.status = "disetujui"
+                obj.save(update_fields=[
+                    "penerima_tugas", "catatan_penerima",
+                    "persetujuan_penerima", "persetujuan_atasan", "status",
+                ])
+                pengalihan.status = 'ditolak'
+                pengalihan.save(update_fields=['status'])
+                messages.info(
+                    self.request,
+                    "Pengalihan ditolak. Penerima lama tetap memegang pelimpahan tugas.",
+                )
+                return redirect("layanan_urls:pelimpahan_detail", pk=obj.pk)
             obj.persetujuan_penerima = "ditolak"
             obj.status = "ditolak_penerima"
             obj.save(update_fields=["catatan_penerima", "persetujuan_penerima", "status"])
@@ -1336,6 +1452,13 @@ class PelimpahanTugasPenerimaUpdateView(LoginRequiredMixin, UpdateView):
             perubahan_diterapkan = finalize_pending_schedule_change(obj.pk)
             if perubahan_diterapkan:
                 messages.success(self.request, "Jadwal cuti baru resmi diterapkan.")
+            if pengalihan:
+                pengalihan.status = 'disetujui'
+                pengalihan.save(update_fields=['status'])
+                messages.success(
+                    self.request,
+                    "Pengalihan telah final. Penerima lama kini dapat mengajukan cuti.",
+                )
 
         messages.success(self.request, "Persetujuan penerima tersimpan.")
         return redirect("layanan_urls:pelimpahan_detail", pk=obj.pk)
@@ -1387,6 +1510,19 @@ class PelimpahanKepalaListView(LoginRequiredMixin, ListView):
             )
         else:
             qs = qs.filter(atasan_penyetuju=user)
+
+        kata_kunci = self.request.GET.get('q', '').strip()
+        if kata_kunci:
+            qs = qs.filter(
+                Q(pemberi_tugas__first_name__icontains=kata_kunci)
+                | Q(pemberi_tugas__last_name__icontains=kata_kunci)
+                | Q(pemberi_tugas__email__icontains=kata_kunci)
+                | Q(pemberi_tugas__profil_user__nip__icontains=kata_kunci)
+                | Q(penerima_tugas__first_name__icontains=kata_kunci)
+                | Q(penerima_tugas__last_name__icontains=kata_kunci)
+                | Q(penerima_tugas__email__icontains=kata_kunci)
+                | Q(penerima_tugas__profil_user__nip__icontains=kata_kunci)
+            )
         return qs.distinct()
 
     def get_context_data(self, **kwargs):
@@ -1400,6 +1536,7 @@ class PelimpahanKepalaListView(LoginRequiredMixin, ListView):
             ),
             "active_tab": "pelimpahan_kepala",
             "is_cuti_scope_admin": is_leave_admin(self.request.user),
+            "q": self.request.GET.get('q', '').strip(),
         })
         return ctx
 
@@ -1420,6 +1557,11 @@ class PelimpahanTugasAtasanUpdateView(LoginRequiredMixin, UpdateView):
         aksi = form.cleaned_data["aksi"]
 
         locked_object = PelimpahanTugas.objects.select_for_update().get(pk=form.instance.pk)
+        pengalihan = PengalihanPelimpahanTugas.objects.select_for_update().filter(
+            pelimpahan=locked_object,
+            penerima_baru=locked_object.penerima_tugas,
+            status='menunggu',
+        ).first()
         form.instance = locked_object
         self.object = form.save(commit=False)
 
@@ -1430,16 +1572,35 @@ class PelimpahanTugasAtasanUpdateView(LoginRequiredMixin, UpdateView):
             self.object.status = "disetujui"
             messages.success(self.request, "Pelimpahan disetujui Kepala Instalasi/Unit.")
         else:
-            self.object.persetujuan_atasan = "ditolak"
-            self.object.status = "ditolak_atasan"
-            messages.error(self.request, "Pelimpahan ditolak Kepala Instalasi/Unit.")
+            if pengalihan:
+                self.object.penerima_tugas = pengalihan.penerima_lama
+                self.object.persetujuan_penerima = "disetujui"
+                self.object.persetujuan_atasan = "disetujui"
+                self.object.status = "disetujui"
+                pengalihan.status = 'ditolak'
+                pengalihan.save(update_fields=['status'])
+                messages.error(
+                    self.request,
+                    "Pengalihan ditolak. Penerima lama tetap memegang pelimpahan tugas.",
+                )
+            else:
+                self.object.persetujuan_atasan = "ditolak"
+                self.object.status = "ditolak_atasan"
+                messages.error(self.request, "Pelimpahan ditolak Kepala Instalasi/Unit.")
 
         self.object.save()
         if aksi == "setuju":
+            if pengalihan:
+                pengalihan.status = 'disetujui'
+                pengalihan.save(update_fields=['status'])
+                messages.success(
+                    self.request,
+                    "Pengalihan telah final. Penerima lama kini dapat mengajukan cuti.",
+                )
             perubahan_diterapkan = finalize_pending_schedule_change(self.object.pk)
             if perubahan_diterapkan:
                 messages.success(self.request, "Jadwal cuti baru resmi diterapkan.")
-        else:
+        elif not pengalihan:
             perubahan_ditolak = reject_pending_schedule_change(self.object.pk)
             if perubahan_ditolak:
                 messages.info(

@@ -53,6 +53,17 @@
         </div>
     </div>
 
+  <form method="get" class="card card-body border-0 shadow-sm mb-3">
+    <div class="input-group">
+      <input type="search" name="q" value="{{ q }}" class="form-control"
+             placeholder="Cari nama, email, atau NIP pemberi/penerima tugas">
+      <div class="input-group-append">
+        <button class="btn btn-primary" type="submit"><i class="fas fa-search mr-1"></i>Cari</button>
+        {% if q %}<a class="btn btn-outline-secondary" href="{% url 'layanan_urls:pelimpahan_penerima_list' %}">Reset</a>{% endif %}
+      </div>
+    </div>
+  </form>
+
   {% if pelimpahan_list %}
     <table class="table table-striped">
       <thead>
@@ -103,7 +114,16 @@
       </tbody>
     </table>
   {% else %}
-    <p>{% if is_cuti_scope_admin %}Tidak ada pelimpahan tugas dalam cakupan Anda.{% else %}Tidak ada pelimpahan tugas untuk Anda.{% endif %}</p>
+    <p>{% if q %}Tidak ada pegawai yang cocok dengan pencarian “{{ q }}”.{% elif is_cuti_scope_admin %}Tidak ada pelimpahan tugas dalam cakupan Anda.{% else %}Tidak ada pelimpahan tugas untuk Anda.{% endif %}</p>
+  {% endif %}
+  {% if is_paginated %}
+    <nav aria-label="Halaman monitoring pelimpahan tugas">
+      <ul class="pagination justify-content-center mt-4">
+        {% if page_obj.has_previous %}<li class="page-item"><a class="page-link" href="?q={{ q|urlencode }}&page={{ page_obj.previous_page_number }}">Sebelumnya</a></li>{% endif %}
+        <li class="page-item disabled"><span class="page-link">Halaman {{ page_obj.number }} dari {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}<li class="page-item"><a class="page-link" href="?q={{ q|urlencode }}&page={{ page_obj.next_page_number }}">Berikutnya</a></li>{% endif %}
+      </ul>
+    </nav>
   {% endif %}
 </div>
 {% endblock %}
