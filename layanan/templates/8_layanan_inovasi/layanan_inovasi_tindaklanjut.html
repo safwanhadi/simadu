@@ -112,11 +112,10 @@
                 </div>
             </div>
         </div>
-        {% if request.user.is_inovasi_admin %}
+        {% if is_inovasi_scope_admin %}
         <div class="col-md-12 d-flex justify-content-start ml-3 mt-3">
             <a style="font-size: small;" href="{% url 'layanan_urls:layanan_inovasi_update_view' id=data_detail.id %}" class="btn btn-outline-info">Edit</a>
         </div>
         {% endif %}
     </div>
 {% endif %}
-                    

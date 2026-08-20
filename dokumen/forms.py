@@ -5,6 +5,38 @@ from dateutil.relativedelta import relativedelta
 from datetime import date, datetime, timedelta, timezone
 
 from layanan.services import CheckCuti
+from layanan.cuti_calendar import (
+    PolaKerjaTidakDitemukan,
+    get_pola_kerja_aktif,
+    hitung_tanggal_akhir_cuti_tahunan,
+)
+from layanan.access.sip import (
+    filter_users_for_sip_role,
+    is_sip_admin,
+    is_sip_structural_officer,
+)
+from layanan.access.promotion import (
+    filter_users_for_jabatan_role,
+    filter_users_for_pangkat_role,
+    is_jabatan_admin,
+    is_pangkat_admin,
+    is_promotion_structural_officer,
+)
+from layanan.access.berkala import (
+    filter_users_for_berkala_role,
+    is_berkala_admin,
+    is_berkala_structural_officer,
+)
+from layanan.access.inovasi import (
+    filter_users_for_inovasi_role,
+    is_inovasi_admin,
+    is_inovasi_structural_officer,
+)
+from layanan.access.documents import (
+    filter_document_users,
+    is_document_scope_admin,
+    is_document_scope_manager,
+)
 from myaccount.models import Users
 from jenissdm.models import JenisSDM
 from .models import (
@@ -52,6 +84,22 @@ bootstrap_col = 'form-control col-md-12'
 class SecureEmployeeModelForm(forms.ModelForm):
     """Cegah pegawai biasa memindahkan dokumen ke akun pegawai lain."""
 
+    can_select_other_employees = False
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = getattr(self, 'request', None)
+        actor = request.user if request is not None else None
+        if (
+            actor is not None
+            and getattr(actor, 'is_authenticated', False)
+            and not self.can_select_other_employees
+            and 'pegawai' in self.fields
+        ):
+            self.fields['pegawai'].queryset = filter_document_users(
+                Users.objects.filter(is_active=True), actor
+            )
+
     def clean(self):
         cleaned_data = super().clean()
         request = getattr(self, 'request', None)
@@ -59,11 +107,28 @@ class SecureEmployeeModelForm(forms.ModelForm):
         if (
             actor is not None
             and actor.is_authenticated
-            and not actor.is_dokumen_admin
+            and not self.can_select_other_employees
             and 'pegawai' in self.fields
         ):
             employee_field = self._meta.model._meta.get_field('pegawai')
-            if employee_field.many_to_many:
+            selected = cleaned_data.get('pegawai')
+            if is_document_scope_manager(actor):
+                selected_users = (
+                    selected
+                    if employee_field.many_to_many
+                    else Users.objects.filter(pk=getattr(selected, 'pk', None))
+                )
+                allowed_ids = set(
+                    filter_document_users(
+                        Users.objects.filter(is_active=True), actor
+                    ).values_list('pk', flat=True)
+                )
+                if any(user.pk not in allowed_ids for user in selected_users):
+                    self.add_error(
+                        'pegawai',
+                        'Pegawai berada di luar assignment scope Anda.',
+                    )
+            elif employee_field.many_to_many:
                 cleaned_data['pegawai'] = Users.objects.filter(pk=actor.pk)
             else:
                 cleaned_data['pegawai'] = actor
@@ -86,7 +151,7 @@ class RiwayatPendidikanForm(SecureEmployeeModelForm):
         self.fields['no_ijazah'].label = "Nomor Ijazah"
         self.fields['is_verifikasi'].label = "Apakah ijazah sudah terverifikasi?"
         self.fields['file_verifikasi'].label = "Upload File Hasil Verifikasi Ijazah (jika sudah terverifikasi)"
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request and not is_document_scope_manager(self.request.user):
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
             self.fields.pop('is_verifikasi', None)
@@ -128,7 +193,7 @@ class RiwayatPengangkatanForm(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop("request", None)
         super(RiwayatPengangkatanForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request and not is_document_scope_manager(self.request.user):
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
         self.fields['tgl_srt_putusan'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
@@ -159,7 +224,7 @@ class RiwayatBekerjaForm(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatBekerjaForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request and not is_document_scope_manager(self.request.user):
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
         self.fields['tgl_sk'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
@@ -188,7 +253,7 @@ class RiwayatPenempatanForm(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatPenempatanForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request and not is_document_scope_manager(self.request.user):
             self.fields['pegawai'].widget.attrs['hidden'] = 'hidden'
             self.fields['dokumen'].widget.attrs['hidden'] = 'hidden'
             self.fields['pegawai'].label = ''
@@ -239,7 +304,7 @@ class RiwayatPenempatanLainnyaForm(SecureEmployeeModelForm):
             self.pegawai = self.request.user
         self.document_user = self.pegawai
         super(RiwayatPenempatanLainnyaForm, self).__init__(*args, **kwargs)
-        if self.pegawai and not self.pegawai.is_dokumen_admin:
+        if self.pegawai and not is_document_scope_manager(self.pegawai):
             self.fields['pegawai'].widget.attrs['hidden'] = 'hidden'
             self.fields['dokumen'].widget.attrs['hidden'] = 'hidden'
             self.fields['pegawai'].label = ''
@@ -261,6 +326,8 @@ class UrutkanRiwayatPenempatanLainnyaForm(SecureEmployeeModelForm):
 urutkan_dokumen_penempatan_lainnya = inlineformset_factory(DokumenSDM, RiwayatPenempatan, UrutkanRiwayatPenempatanLainnyaForm, extra=0, can_delete=False)
 
 class RiwayatProfesiForm(SecureEmployeeModelForm):
+    can_select_other_employees = True
+
     class Meta:
         model = RiwayatProfesi
         fields = (
@@ -271,7 +338,15 @@ class RiwayatProfesiForm(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatProfesiForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request:
+            actor = self.request.user
+            self.fields['pegawai'].queryset = filter_users_for_sip_role(
+                Users.objects.filter(is_active=True), actor
+            )
+        if self.request and not (
+            is_sip_admin(self.request.user)
+            or is_sip_structural_officer(self.request.user)
+        ):
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['dokumen'].widget = forms.HiddenInput()
         self.fields['tgl_str'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
@@ -355,7 +430,7 @@ class RiwayatPanggolForm(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop("request", None)
         super(RiwayatPanggolForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request and not is_document_scope_manager(self.request.user):
             self.fields['pegawai'].widget.attrs['hidden'] = 'hidden'
             self.fields['dokumen'].widget.attrs['hidden'] = 'hidden'
             self.fields['pegawai'].label = ''
@@ -399,7 +474,7 @@ class UjiKompetensiForm(SecureEmployeeModelForm):
         self.request=kwargs.pop("request", None)
         super(UjiKompetensiForm, self).__init__(*args, **kwargs)
         self.fields['masa_berlaku'].required = False
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request and not is_document_scope_manager(self.request.user):
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['pegawai'].required = False
 
@@ -414,7 +489,7 @@ class KompetensiForm(SecureEmployeeModelForm):
         super(KompetensiForm, self).__init__(*args, **kwargs)
         self.fields['tgl_sert_komp'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['berlaku_sd'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
-        if not self.request.user.is_dokumen_admin:
+        if not is_document_scope_manager(self.request.user):
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['dokumen'].widget = forms.HiddenInput()
 
@@ -488,13 +563,42 @@ class RiwayatGajiBerkalaForm(SecureEmployeeModelForm):
         self.request=kwargs.pop("request", None)
         self.action = kwargs.pop("action", None)
         super(RiwayatGajiBerkalaForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request:
+            allowed_users = filter_document_users(
+                Users.objects.filter(is_active=True), self.request.user
+            )
+            self.fields['pegawai'].queryset = allowed_users
+            self.fields['pangkat'].queryset = RiwayatPanggol.objects.filter(
+                pegawai__in=allowed_users
+            )
+            self.fields['tempat_kerja'].queryset = RiwayatPenempatan.objects.filter(
+                pegawai__in=allowed_users
+            )
+        if self.request and not is_document_scope_manager(self.request.user):
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['dokumen'].widget = forms.HiddenInput()
             self.fields['pangkat'] = forms.ModelChoiceField(queryset=RiwayatPanggol.objects.filter(pegawai=self.request.user))
             self.fields['tempat_kerja'] = forms.ModelChoiceField(queryset=RiwayatPenempatan.objects.filter(pegawai=self.request.user))
         self.fields['tgl_srt_gaji'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['tmt_gaji'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
+
+    def clean(self):
+        cleaned_data = super().clean()
+        pegawai = cleaned_data.get('pegawai')
+        pangkat = cleaned_data.get('pangkat')
+        tempat_kerja = cleaned_data.get('tempat_kerja')
+        if pegawai and pangkat and pangkat.pegawai_id != pegawai.pk:
+            self.add_error('pangkat', 'Pangkat harus milik pegawai yang dipilih.')
+        if (
+            pegawai
+            and tempat_kerja
+            and tempat_kerja.pegawai_id != pegawai.pk
+        ):
+            self.add_error(
+                'tempat_kerja',
+                'Penempatan harus milik pegawai yang dipilih.',
+            )
+        return cleaned_data
 
 
 class UrutkanRiwayatGajiBerkalaForm(SecureEmployeeModelForm):
@@ -533,7 +637,7 @@ class RiwayatKinerjaForm(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatKinerjaForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request and not is_document_scope_manager(self.request.user):
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['pegawai'].required = False
 
@@ -562,7 +666,7 @@ class RiwayatPAKForm(SecureEmployeeModelForm):
         self.request = kwargs.pop('request', None)
         super().__init__(*args, **kwargs)
         self.fields['tgl_srt'].required = True
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request and not is_document_scope_manager(self.request.user):
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['pegawai'].required = False
 
@@ -589,7 +693,7 @@ class RiwayatOrganisasiForm(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatOrganisasiForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request and not is_document_scope_manager(self.request.user):
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
         self.fields['tgl_gabung'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
@@ -611,6 +715,7 @@ urutkan_dokumen_organisasi = inlineformset_factory(DokumenSDM, RiwayatOrganisasi
 
 
 class FormUsulanRiwayatDiklat(SecureEmployeeModelForm):
+    can_select_other_employees = True
     pegawai = forms.ModelMultipleChoiceField(
         queryset=Users.objects.filter(is_active=True), 
         widget=forms.SelectMultiple(attrs={'class': 'pegawai'}),
@@ -623,6 +728,20 @@ class FormUsulanRiwayatDiklat(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(FormUsulanRiwayatDiklat, self).__init__(*args, **kwargs)
+        if self.request:
+            from layanan.access.diklat import (
+                filter_users_for_diklat_admin,
+                is_diklat_admin,
+            )
+            if is_diklat_admin(self.request.user):
+                self.fields['pegawai'].queryset = filter_users_for_diklat_admin(
+                    Users.objects.filter(is_active=True),
+                    self.request.user,
+                )
+            else:
+                self.fields['pegawai'].queryset = Users.objects.filter(
+                    pk=self.request.user.pk,
+                )
         self.fields['jenis_diklat'].help_text = 'jenis diklat: Seminar/Workshop/Pelatihan/Pertemuan Ilmiah/FGD, dll.'
         self.fields['tgl_mulai'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
         self.fields['tgl_selesai'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
@@ -635,6 +754,7 @@ class FormUsulanRiwayatDiklat(SecureEmployeeModelForm):
             
             
 class FormPenugasanDiklat(SecureEmployeeModelForm):
+    can_select_other_employees = True
     pegawai = forms.ModelMultipleChoiceField(
         queryset=Users.objects.filter(is_active=True), 
         widget=forms.SelectMultiple(attrs={'class': 'select2'})
@@ -646,16 +766,15 @@ class FormPenugasanDiklat(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         request = kwargs.pop('request', None)
         super(FormPenugasanDiklat, self).__init__(*args, **kwargs)
-        if request.user.is_dokumen_admin:
-            self.fields['pegawai'].queryset = Users.objects.filter(riwayat_penempatan__status=True
-            ).distinct()
-        elif request is not None and request.user.is_staff:
-            penempatan_admin = request.user.riwayat_penempatan.filter(status=True).last()
-            penempatan = penempatan_admin.penempatan if hasattr(penempatan_admin, 'penempatan') else None
-            self.fields['pegawai'].queryset = Users.objects.filter(
-                riwayat_penempatan__penempatan_level3__sub_bidang=penempatan, riwayat_penempatan__status=True
-            ).distinct()|Users.objects.filter(
-                riwayat_penempatan__penempatan_level2__bidang=penempatan, riwayat_penempatan__status=True
+        if request is not None:
+            from layanan.access.diklat import (
+                filter_users_for_diklat_admin,
+                filter_users_for_diklat_supervisor,
+            )
+            base = Users.objects.filter(is_active=True)
+            self.fields['pegawai'].queryset = (
+                filter_users_for_diklat_admin(base, request.user)
+                | filter_users_for_diklat_supervisor(base, request.user)
             ).distinct()
         self.fields['jenis_diklat'].help_text = 'jenis diklat: Seminar/Workshop/Pelatihan/Pertemuan Ilmiah/FGD, dll.'
         self.fields['tgl_mulai'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
@@ -664,6 +783,7 @@ class FormPenugasanDiklat(SecureEmployeeModelForm):
 
 
 class FormAlihanRiwayatDiklat(SecureEmployeeModelForm):
+    can_select_other_employees = True
     pegawai = forms.ModelMultipleChoiceField(queryset=Users.objects.filter(is_active=True), widget=forms.SelectMultiple(attrs={'class': 'select2'}))
     class Meta:
         model = RiwayatDiklat
@@ -672,15 +792,16 @@ class FormAlihanRiwayatDiklat(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         request = kwargs.pop('request', None)
         super(FormAlihanRiwayatDiklat, self).__init__(*args, **kwargs)
-        if request is not None and request.user.is_staff and not request.user.is_dokumen_admin:
-            penempatan_admin = request.user.riwayat_penempatan.filter(status=True).last()
-            self.fields['pegawai'].queryset = Users.objects.filter(
-                riwayat_penempatan__penempatan_level3__sub_bidang=penempatan_admin.penempatan, riwayat_penempatan__status=True
-            ).distinct()|Users.objects.filter(
-                riwayat_penempatan__penempatan_level2__bidang=penempatan_admin.penempatan, riwayat_penempatan__status=True
+        if request is not None:
+            from layanan.access.diklat import (
+                filter_users_for_diklat_admin,
+                filter_users_for_diklat_supervisor,
+            )
+            base = Users.objects.filter(is_active=True)
+            self.fields['pegawai'].queryset = (
+                filter_users_for_diklat_admin(base, request.user)
+                | filter_users_for_diklat_supervisor(base, request.user)
             ).distinct()
-        elif request is not None and request.user.is_dokumen_admin:
-            self.fields['pegawai'].queryset = Users.objects.filter(is_active=True)
         else:
             self.fields['pegawai'].queryset = Users.objects.none()
         self.fields['dokumen'].widget=forms.HiddenInput()
@@ -754,6 +875,7 @@ class FormRiwayatDiklatLaporan(SecureEmployeeModelForm):
 
 
 class RiwayatDiklatForm(SecureEmployeeModelForm):
+    can_select_other_employees = True
     class Meta:
         model = RiwayatDiklat
         fields = "__all__"
@@ -770,9 +892,22 @@ class RiwayatDiklatForm(SecureEmployeeModelForm):
         self.fields['dokumen'].required = False
         self.fields['dokumen'].widget = forms.HiddenInput()
 
-        if self.request and not self.request.user.is_dokumen_admin:
-            self.fields['pegawai'].widget = forms.MultipleHiddenInput()
-            self.fields['pegawai'].initial = [self.request.user.pk]
+        if self.request:
+            from layanan.access.diklat import (
+                filter_users_for_diklat_role,
+                is_diklat_admin,
+                is_diklat_structural_officer,
+            )
+            self.fields['pegawai'].queryset = filter_users_for_diklat_role(
+                Users.objects.filter(is_active=True),
+                self.request.user,
+            )
+            if not (
+                is_diklat_admin(self.request.user)
+                or is_diklat_structural_officer(self.request.user)
+            ):
+                self.fields['pegawai'].widget = forms.MultipleHiddenInput()
+                self.fields['pegawai'].initial = [self.request.user.pk]
             self.fields['no_urut_dokumen'].widget = forms.HiddenInput()
 
     def save(self, commit=True):
@@ -856,6 +991,7 @@ class FormRiwayatDiklatProses(SecureEmployeeModelForm):
 
 
 class RiwayatCutiForm(SecureEmployeeModelForm):
+    can_select_other_employees = True
     class Meta:
         model = RiwayatCuti
         fields = ('pegawai', 'dokumen', 'jenis_cuti', 'tgl_mulai_cuti', 'tgl_akhir_cuti', 'lama_cuti', 'domisili_saat_cuti', 
@@ -864,8 +1000,22 @@ class RiwayatCutiForm(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatCutiForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_dokumen_admin:
-            self.fields['pegawai'].widget.attrs['hidden'] = 'hidden'
+        if self.request:
+            from layanan.access.cuti import (
+                filter_users_for_leave_role,
+                is_leave_admin,
+                is_leave_structural_officer,
+            )
+            self.fields['pegawai'].queryset = filter_users_for_leave_role(
+                Users.objects.filter(is_active=True),
+                self.request.user,
+            )
+        if self.request and not (
+            is_leave_admin(self.request.user)
+            or is_leave_structural_officer(self.request.user)
+        ):
+            self.fields['pegawai'].widget = forms.HiddenInput()
+            self.fields['pegawai'].initial = self.request.user.pk
             self.fields['dokumen'].widget.attrs['hidden'] = 'hidden'
             self.fields['pegawai'].label = ''
             self.fields['dokumen'].label = ''
@@ -1019,10 +1169,28 @@ class RiwayatPengajuanCutiForm(SecureEmployeeModelForm):
 
         if tgl_mulai and lama:
             tanggal_akhir_hasil_hitung = tgl_mulai + timedelta(days=lama - 1)
+            if jenis_cuti == CheckCuti.CUTI_TAHUNAN:
+                target_pegawai = self.target_pegawai or self.request.user
+                try:
+                    pola_kerja = get_pola_kerja_aktif(target_pegawai, tgl_mulai)
+                except PolaKerjaTidakDitemukan:
+                    self.add_error(
+                        'tgl_mulai_cuti',
+                        'Pola kerja pegawai belum ditentukan pada tanggal mulai cuti. '
+                        'Hubungi pengelola jadwal.',
+                    )
+                    pola_kerja = None
+                if pola_kerja is not None:
+                    tanggal_akhir_hasil_hitung = hitung_tanggal_akhir_cuti_tahunan(
+                        tgl_mulai,
+                        lama,
+                        pola_kerja.pola_kerja,
+                    )
             if tgl_akhir and tgl_akhir != tanggal_akhir_hasil_hitung:
                 self.add_error(
                     "tgl_akhir_cuti",
-                    "Tanggal akhir harus sesuai dengan tanggal mulai dan jumlah hari cuti.",
+                    "Tanggal akhir harus sesuai dengan tanggal mulai, jumlah hari cuti, "
+                    "hari libur, dan pola kerja pegawai.",
                 )
             elif not tgl_akhir:
                 cleaned['tgl_akhir_cuti'] = tanggal_akhir_hasil_hitung
@@ -1067,7 +1235,7 @@ class RiwayatHukumanForm(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatHukumanForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request and not is_document_scope_manager(self.request.user):
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
         self.fields['tgl_srt_kep'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
@@ -1095,7 +1263,7 @@ class RiwayatPenghargaanForm(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(RiwayatPenghargaanForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request and not is_document_scope_manager(self.request.user):
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
             self.fields['pegawai'].label = ''
@@ -1184,6 +1352,7 @@ class RiwayatKeluargaAnakForm(SecureEmployeeModelForm):
         
 
 class RiwayatInovasiFullForm(SecureEmployeeModelForm):
+    can_select_other_employees = True
     class Meta:
         model = RiwayatInovasi
         fields = '__all__'
@@ -1191,12 +1360,20 @@ class RiwayatInovasiFullForm(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop("request", None)
         super(RiwayatInovasiFullForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request:
+            self.fields['pegawai'].queryset = filter_users_for_inovasi_role(
+                Users.objects.filter(is_active=True), self.request.user
+            )
+        if self.request and not (
+            is_inovasi_admin(self.request.user)
+            or is_inovasi_structural_officer(self.request.user)
+        ):
             self.fields['dokumen'].widget = forms.HiddenInput()
             self.fields['pegawai'].widget = forms.HiddenInput()
 
 
 class RiwayatInovasiForm(SecureEmployeeModelForm):
+    can_select_other_employees = True
     class Meta:
         model = RiwayatInovasi
         fields = ('pegawai', 'dokumen', 'bidang', 'judul', 'desk', 'makalah',)
@@ -1204,12 +1381,20 @@ class RiwayatInovasiForm(SecureEmployeeModelForm):
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop("request", None)
         super(RiwayatInovasiForm, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_dokumen_admin:
+        if self.request:
+            self.fields['pegawai'].queryset = filter_users_for_inovasi_role(
+                Users.objects.filter(is_active=True), self.request.user
+            )
+        if self.request and not (
+            is_inovasi_admin(self.request.user)
+            or is_inovasi_structural_officer(self.request.user)
+        ):
             self.fields['pegawai'].widget = forms.HiddenInput()
             self.fields['dokumen'].widget = forms.HiddenInput()
 
 
 class RiwayatInovasiTLForm(SecureEmployeeModelForm):
+    can_select_other_employees = True
     class Meta:
         model = RiwayatInovasi
         fields = ('pegawai', 'dokumen', 'bidang', 'judul')
@@ -1224,6 +1409,7 @@ class RiwayatInovasiTLForm(SecureEmployeeModelForm):
 
 
 class RiwayatInovasiSKForm(SecureEmployeeModelForm):
+    can_select_other_employees = True
     class Meta:
         model = RiwayatInovasi
         fields = ('pegawai', 'dokumen', 'bidang', 'judul', 'no_sk', 'tanggal', 'file_sk')
@@ -1265,7 +1451,7 @@ class RiwayatPenugasanForm(SecureEmployeeModelForm):
         super(RiwayatPenugasanForm, self).__init__(*args, **kwargs)
         for field, value in initial_values.items():
             self.fields[field].initial = value
-        if user and not user.is_dokumen_admin:
+        if user and not is_document_scope_manager(user):
             self.fields['pegawai'].widget=forms.HiddenInput()
             self.fields['dokumen'].widget=forms.HiddenInput()
             self.fields['jabatan'] = forms.ModelChoiceField(queryset=RiwayatJabatan.objects.filter(pegawai=user))

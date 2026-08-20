@@ -1,18 +1,24 @@
 from datetime import date
 
 from django import forms
+from django.contrib.auth.models import Group
 from django.contrib.auth.forms import AuthenticationForm, SetPasswordForm, UsernameField
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from django.contrib.auth.forms import UserCreationForm
 from django.forms import inlineformset_factory
 from django.db import transaction
-from .models import AccountRegistration, Users, ProfilSDM
+from .models import (
+    AccountRegistration, AdminScopeAssignment, ProfilSDM, Users,
+)
 from .roles import ADMIN_GROUPS
 from strukturorg.models import (
     Bidang, InstansiDaerah, PejabatStruktur, SatuanKerjaInduk, SubBidang,
     UnitInstalasi, UnitOrganisasi,
 )
+from oauth2_provider.models import Application
 
+bootstrap_col = 'form-control col-md-12'
+select2_col = f'{bootstrap_col} select2'
 
 class UpdateUser(forms.ModelForm):
     email = forms.EmailField()
@@ -52,6 +58,181 @@ class AccountAdminRolesForm(forms.Form):
     )
 
 
+class SSOApplicationForm(forms.ModelForm):
+    """Form aman untuk aplikasi OAuth; secret dikelola melalui aksi rotasi."""
+
+    class Meta:
+        model = Application
+        fields = (
+            'name', 'client_type', 'authorization_grant_type',
+            'redirect_uris', 'post_logout_redirect_uris', 'allowed_origins',
+            'skip_authorization',
+        )
+        widgets = {
+            'name': forms.TextInput(attrs={'class': 'form-control'}),
+            'client_type': forms.Select(attrs={'class': 'form-control'}),
+            'authorization_grant_type': forms.Select(attrs={'class': 'form-control'}),
+            'redirect_uris': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+            'post_logout_redirect_uris': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+            'allowed_origins': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
+            'skip_authorization': forms.CheckboxInput(attrs={'class': 'custom-control-input'}),
+        }
+        labels = {
+            'name': 'Nama aplikasi',
+            'client_type': 'Tipe client',
+            'authorization_grant_type': 'Jenis grant',
+            'redirect_uris': 'Redirect URI',
+            'post_logout_redirect_uris': 'Post logout redirect URI',
+            'allowed_origins': 'Origin yang diizinkan (CORS)',
+            'skip_authorization': 'Lewati halaman persetujuan pengguna',
+        }
+        help_texts = {
+            'redirect_uris': 'Pisahkan beberapa URI dengan spasi.',
+            'post_logout_redirect_uris': 'Opsional; pisahkan beberapa URI dengan spasi.',
+            'allowed_origins': 'Opsional; contoh: https://aplikasi.example.id',
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        grant = cleaned.get('authorization_grant_type')
+        if (
+            grant in (
+                Application.GRANT_AUTHORIZATION_CODE,
+                Application.GRANT_IMPLICIT,
+                Application.GRANT_OPENID_HYBRID,
+            )
+            and not cleaned.get('redirect_uris', '').strip()
+        ):
+            self.add_error('redirect_uris', 'Redirect URI wajib untuk jenis grant ini.')
+        return cleaned
+
+
+class AdminScopeAssignmentForm(forms.ModelForm):
+    """Kelola satu cakupan struktur untuk satu peran admin."""
+
+    class Meta:
+        model = AdminScopeAssignment
+        fields = (
+            'user',
+            'group',
+            'scope_type',
+            'instansi_daerah',
+            'satuan_kerja_induk',
+            'unit_organisasi',
+            'bidang',
+            'sub_bidang',
+            'unit_instalasi',
+            'valid_from',
+            'valid_until',
+            'is_active',
+        )
+        widgets = {
+            'user': forms.Select(attrs={
+                'class': 'form-control admin-scope-select2',
+                'data-placeholder': 'Cari nama, email, atau NIP',
+            }),
+            'group': forms.Select(attrs={
+                'class': 'form-control admin-scope-select2',
+                'data-placeholder': 'Pilih peran admin',
+            }),
+            'scope_type': forms.Select(attrs={'class': 'form-control'}),
+            'instansi_daerah': forms.Select(attrs={
+                'class': 'form-control admin-scope-select2',
+                'data-placeholder': 'Cari instansi daerah',
+            }),
+            'satuan_kerja_induk': forms.Select(attrs={
+                'class': 'form-control admin-scope-select2',
+                'data-placeholder': 'Cari satuan kerja induk',
+            }),
+            'unit_organisasi': forms.Select(attrs={
+                'class': 'form-control admin-scope-select2',
+                'data-placeholder': 'Cari unit organisasi',
+            }),
+            'bidang': forms.Select(attrs={
+                'class': 'form-control admin-scope-select2',
+                'data-placeholder': 'Cari bidang',
+            }),
+            'sub_bidang': forms.Select(attrs={
+                'class': 'form-control admin-scope-select2',
+                'data-placeholder': 'Cari sub bidang',
+            }),
+            'unit_instalasi': forms.Select(attrs={
+                'class': 'form-control admin-scope-select2',
+                'data-placeholder': 'Cari unit instalasi',
+            }),
+            'valid_from': forms.DateInput(attrs={
+                'class': 'form-control',
+                'type': 'date',
+            }),
+            'valid_until': forms.DateInput(attrs={
+                'class': 'form-control',
+                'type': 'date',
+            }),
+            'is_active': forms.CheckboxInput(attrs={
+                'class': 'custom-control-input',
+            }),
+        }
+        labels = {
+            'user': 'Pengguna',
+            'group': 'Peran admin',
+            'scope_type': 'Jenis cakupan',
+            'valid_from': 'Berlaku mulai',
+            'valid_until': 'Berlaku sampai',
+            'is_active': 'Assignment aktif',
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['user'].queryset = (
+            Users.objects.filter(is_active=True, is_superuser=False)
+            .select_related('profil_user')
+            .order_by('first_name', 'last_name', 'email')
+        )
+        self.fields['group'].queryset = Group.objects.filter(
+            name__in=ADMIN_GROUPS
+        ).order_by('name')
+        self.fields['user'].label_from_instance = self._user_label
+        for field_name in AdminScopeAssignment.TARGET_FIELDS:
+            self.fields[field_name].required = False
+            self.fields[field_name].empty_label = 'Pilih target struktur'
+
+    @staticmethod
+    def _user_label(user):
+        nip = getattr(getattr(user, 'profil_user', None), 'nip', '')
+        identity = user.full_name or user.email
+        return f'{identity} - {nip}' if nip else f'{identity} - {user.email}'
+
+    def clean(self):
+        cleaned_data = super().clean()
+        user = cleaned_data.get('user')
+        group = cleaned_data.get('group')
+        scope_type = cleaned_data.get('scope_type')
+
+        if user and group and not user.groups.filter(pk=group.pk).exists():
+            self.add_error(
+                'group',
+                'Pengguna belum memiliki peran admin ini. Berikan role terlebih dahulu.',
+            )
+
+        selected = [
+            field_name for field_name in AdminScopeAssignment.TARGET_FIELDS
+            if cleaned_data.get(field_name) is not None
+        ]
+        if scope_type == AdminScopeAssignment.GLOBAL:
+            if selected:
+                self.add_error(
+                    'scope_type',
+                    'Cakupan global tidak memerlukan target struktur.',
+                )
+        elif scope_type:
+            if selected != [scope_type]:
+                self.add_error(
+                    scope_type,
+                    'Pilih tepat satu target yang sesuai dengan jenis cakupan.',
+                )
+        return cleaned_data
+
+
 class StructuralOfficerUserChoiceField(forms.ModelChoiceField):
     def label_from_instance(self, obj):
         nip = getattr(getattr(obj, 'profil_user', None), 'nip', None)
@@ -78,19 +259,28 @@ class StructuralOfficerForm(forms.Form):
     pejabat = StructuralOfficerUserChoiceField(
         label='Nama pejabat',
         queryset=Users.objects.none(),
-        widget=forms.Select(attrs={'class': 'form-control'}),
+        widget=forms.Select(attrs={
+            'class': 'form-control select2',
+            'data-placeholder': 'Pilih nama pejabat',
+        }),
     )
     struktur = forms.ChoiceField(
         label='Lokasi struktur',
         choices=(),
-        widget=forms.Select(attrs={'class': 'form-control'}),
+        widget=forms.Select(attrs={
+            'class': 'form-control select2',
+            'data-placeholder': 'Pilih lokasi struktur',
+        }),
         help_text='Pilih satu unit tempat pegawai tersebut menjabat.',
     )
     jenis_penugasan = forms.ChoiceField(
         label='Jenis penugasan',
         choices=PejabatStruktur.JENIS_PENUGASAN,
         initial=PejabatStruktur.DEFINITIF,
-        widget=forms.Select(attrs={'class': 'form-control'}),
+        widget=forms.Select(attrs={
+            'class': 'form-control select2',
+            'data-placeholder': 'Pilih jenis penugasan',
+        }),
     )
     nama_jabatan = forms.CharField(
         label='Nama jabatan',
@@ -355,6 +545,17 @@ AGAMA = (
 )
 
 class ProfilForm(forms.ModelForm):
+    first_name = forms.CharField(
+        label='Nama depan',
+        max_length=30,
+        required=True,
+    )
+    last_name = forms.CharField(
+        label='Nama belakang',
+        max_length=150,
+        required=False,
+        help_text='Boleh dikosongkan jika nama pegawai hanya terdiri dari satu kata.',
+    )
     agama = forms.ChoiceField(choices=AGAMA, required=False)
     class Meta:
         model = ProfilSDM
@@ -365,11 +566,37 @@ class ProfilForm(forms.ModelForm):
         bootstrap_col = 'form-control col-12'
         user = kwargs.pop('user', None)
         super(ProfilForm, self).__init__(*args, **kwargs)
-        field = self.fields['user']
-        if user is not None and not user.is_superuser:
-            field.initial = user
-            field.widget = field.hidden_widget()
+        self.account = user or getattr(self.instance, 'user', None)
+        if self.account is not None:
+            self.fields['first_name'].initial = self.account.first_name
+            self.fields['last_name'].initial = self.account.last_name
+        self.fields.pop('user', None)
+        self.order_fields([
+            'first_name',
+            'last_name',
+            *(
+                field_name for field_name in self.fields
+                if field_name not in {'first_name', 'last_name'}
+            ),
+        ])
         self.fields['tgl_lahir'].widget = forms.TextInput(attrs={'type':'date', 'class':bootstrap_col})
+
+    def clean_first_name(self):
+        return self.cleaned_data['first_name'].strip()
+
+    def clean_last_name(self):
+        return self.cleaned_data['last_name'].strip()
+
+    def save(self, commit=True):
+        if not self.instance.user_id and self.account is not None:
+            self.instance.user = self.account
+        profil = super().save(commit=commit)
+        account = profil.user
+        account.first_name = self.cleaned_data['first_name']
+        account.last_name = self.cleaned_data['last_name']
+        if commit:
+            account.save(update_fields=['first_name', 'last_name'])
+        return profil
 
 
 class UsersForm(forms.ModelForm):

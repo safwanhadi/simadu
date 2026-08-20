@@ -692,6 +692,11 @@ class RiwayatCuti(models.Model):
     tgl_mulai_cuti = models.DateField(null=True, blank=True)
     tgl_akhir_cuti = models.DateField(null=True, blank=True)
     lama_cuti = models.SmallIntegerField(null=True, default=0)   
+    menggunakan_pola_shift = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text='Snapshot pola kerja ketika cuti diajukan; kosong untuk data lama.',
+    )
     domisili_saat_cuti = models.CharField(max_length=250, blank=True)
     tahun_cuti = models.SmallIntegerField(null=True)
     no_surat = models.CharField(max_length=50, blank=True)

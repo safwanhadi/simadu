@@ -31,9 +31,9 @@
                     </div>
                     {% if not update_form %}
                     <div>
-                        {% if request.user.is_dokumen_admin and not nip %}
+                        {% if can_manage_berkala_role and not nip %}
                         <a href="{% url 'riwayat_urls:riwayat_berkala_urutkan' pk=dok.id %}" class="btn btn-outline-info">Urutkan Dokumen</a>
-                        {% elif request.user.is_dokumen_admin and nip %}
+                        {% elif can_manage_berkala_role and nip %}
                         <a href="{% url 'riwayat_urls:riwayat_berkala_urutkan' pk=dok.id %}?nip={{nip}}" class="btn btn-outline-info">Urutkan Dokumen</a>
                         {% endif %}
                         <input type="button" class="btn btn-outline-success" id="add_data" value="Tambah Data">
@@ -52,7 +52,7 @@
                     </div>
                 </div>
                 <div class="row" id="list_data" style="display: {{data_view}};">
-                    {% if status_berkala and next_berkala and not request.user.is_dokumen_admin%}
+                    {% if status_berkala and next_berkala and not can_manage_berkala_role %}
                     <div class="col-md-12 border border-success border-block rounded p-2 m-2" style="background-color: rgb(164, 233, 176);">
                         <span>Kenaikan berkala anda selanjutnya pada bulan <b>{{next_berkala.month|month_name}} - {{next_berkala.year}}</b> silahkan segera ajukan permohonan atau ajukan 3 bulan sebelum ditetapkan</span>
                     </div>
@@ -60,7 +60,7 @@
                     <div class="col-md-12">
                         {% if nip %}
                             {% include '6_riwayat_berkala/riwayat_berkala_perorang.html' %}
-                        {% elif request.user.is_dokumen_admin  %}
+                            {% elif can_manage_berkala_role %}
                             {% include '6_riwayat_berkala/riwayat_berkala.html' %}
                         {% endif %}
                     </div>

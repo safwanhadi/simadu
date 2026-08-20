@@ -1,0 +1,137 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row">
+    <div class="col-sm-6 col-lg-3">
+        <div class="small-box bg-success">
+            <div class="inner"><h3>{{ active_count }}</h3><p>Assignment Aktif</p></div>
+            <div class="icon"><i class="fas fa-user-shield"></i></div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="small-box bg-info">
+            <div class="inner"><h3>{{ global_count }}</h3><p>Scope Global Aktif</p></div>
+            <div class="icon"><i class="fas fa-globe"></i></div>
+        </div>
+    </div>
+</div>
+
+<div class="card card-solid">
+    <div class="card-header">
+        <h3 class="card-title"><i class="fas fa-map-marked-alt mr-1"></i> Cakupan Peran Admin</h3>
+        <div class="card-tools">
+            <a href="{% url 'myaccount_urls:account_management_list' %}" class="btn btn-sm btn-secondary">
+                <i class="fas fa-arrow-left"></i> Pengelolaan Akun
+            </a>
+            <a href="{% url 'myaccount_urls:admin_scope_create' %}" class="btn btn-sm btn-primary">
+                <i class="fas fa-plus"></i> Tambah Cakupan
+            </a>
+        </div>
+    </div>
+    <div class="card-body">
+        <form method="get" class="mb-3">
+            <div class="form-row">
+                <div class="col-md-5 mb-2">
+                    <label class="sr-only" for="scopeSearch">Pencarian</label>
+                    <input id="scopeSearch" type="search" name="q" value="{{ q }}" class="form-control" placeholder="Cari pengguna, NIP, role, atau unit">
+                </div>
+                <div class="col-md-3 mb-2">
+                    <label class="sr-only" for="scopeRole">Peran admin</label>
+                    <select id="scopeRole" name="role" class="form-control">
+                        <option value="">Semua peran admin</option>
+                        {% for admin_role in admin_roles %}
+                        <option value="{{ admin_role }}" {% if role == admin_role %}selected{% endif %}>{{ admin_role }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2 mb-2">
+                    <label class="sr-only" for="scopeStatus">Status</label>
+                    <select id="scopeStatus" name="status" class="form-control">
+                        <option value="active" {% if status == 'active' %}selected{% endif %}>Aktif</option>
+                        <option value="inactive" {% if status == 'inactive' %}selected{% endif %}>Nonaktif</option>
+                        <option value="all" {% if status == 'all' %}selected{% endif %}>Semua</option>
+                    </select>
+                </div>
+                <div class="col-md-2 mb-2">
+                    <button class="btn btn-primary" type="submit" title="Terapkan filter"><i class="fas fa-search"></i></button>
+                    <a href="{% url 'myaccount_urls:admin_scope_list' %}" class="btn btn-secondary" title="Reset filter"><i class="fas fa-undo"></i></a>
+                </div>
+            </div>
+        </form>
+
+        <div class="table-responsive">
+            <table class="table table-bordered table-hover table-sm">
+                <thead>
+                    <tr>
+                        <th>Pengguna</th>
+                        <th>Peran Admin</th>
+                        <th>Cakupan</th>
+                        <th>Masa Berlaku</th>
+                        <th>Status</th>
+                        <th class="text-center">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for assignment in scope_list %}
+                    <tr>
+                        <td>
+                            <strong>{{ assignment.user.full_name|default:assignment.user.email }}</strong><br>
+                            <small class="text-muted">{{ assignment.user.profil_user.nip|default:assignment.user.email }}</small>
+                        </td>
+                        <td>{{ assignment.group.name }}</td>
+                        <td>
+                            <span class="badge badge-info">{{ assignment.get_scope_type_display }}</span><br>
+                            <small class="text-muted">{{ assignment.scope_object|default:'Seluruh organisasi' }}</small>
+                        </td>
+                        <td>
+                            {{ assignment.valid_from|date:'d M Y' }}<br>
+                            <small class="text-muted">
+                                {% if assignment.valid_until %}s.d. {{ assignment.valid_until|date:'d M Y' }}{% else %}tanpa batas akhir{% endif %}
+                            </small>
+                        </td>
+                        <td>
+                            {% if not assignment.is_active %}
+                            <span class="badge badge-secondary">Nonaktif</span>
+                            {% elif assignment.valid_from > today %}
+                            <span class="badge badge-warning">Terjadwal</span>
+                            {% elif assignment.valid_until and assignment.valid_until < today %}
+                            <span class="badge badge-danger">Kedaluwarsa</span>
+                            {% else %}
+                            <span class="badge badge-success">Aktif</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center text-nowrap">
+                            <a href="{% url 'myaccount_urls:admin_scope_update' pk=assignment.pk %}" class="btn btn-sm btn-warning" title="Ubah cakupan">
+                                <i class="fas fa-edit"></i>
+                            </a>
+                            <form method="post" action="{% url 'myaccount_urls:admin_scope_delete' pk=assignment.pk %}" class="d-inline" onsubmit="return confirm('Hapus cakupan admin ini?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-danger" title="Hapus cakupan">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="6" class="text-center text-muted py-4">Cakupan admin tidak ditemukan.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if is_paginated %}
+        <nav aria-label="Navigasi cakupan admin">
+            <ul class="pagination justify-content-center mb-0">
+                {% if page_obj.has_previous %}
+                <li class="page-item"><a class="page-link" href="?q={{ q|urlencode }}&role={{ role|urlencode }}&status={{ status|urlencode }}&page={{ page_obj.previous_page_number }}">Sebelumnya</a></li>
+                {% endif %}
+                <li class="page-item disabled"><span class="page-link">Halaman {{ page_obj.number }} dari {{ page_obj.paginator.num_pages }}</span></li>
+                {% if page_obj.has_next %}
+                <li class="page-item"><a class="page-link" href="?q={{ q|urlencode }}&role={{ role|urlencode }}&status={{ status|urlencode }}&page={{ page_obj.next_page_number }}">Berikutnya</a></li>
+                {% endif %}
+            </ul>
+        </nav>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

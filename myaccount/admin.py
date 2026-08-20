@@ -1,5 +1,8 @@
 from django.contrib import admin
-from .models import AccountRegistration, ProfilSDM, Users, Gender, ProfilAdmin, TelegramAccount
+from .models import (
+    AccountRegistration, AdminScopeAssignment, Gender, ProfilAdmin, ProfilSDM,
+    TelegramAccount, Users,
+)
 from django import forms
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 # from.models import ExtendedUser
@@ -74,6 +77,24 @@ admin.site.register(Users, UserAdmin)
 admin.site.register(ProfilSDM, DetailProfilSDM)
 admin.site.register(Gender)
 admin.site.register(ProfilAdmin)
+
+
+@admin.register(AdminScopeAssignment)
+class AdminScopeAssignmentAdmin(admin.ModelAdmin):
+    list_display = (
+        'user', 'group', 'scope_type', 'scope_object_display', 'is_active',
+        'valid_from', 'valid_until',
+    )
+    list_filter = ('group', 'scope_type', 'is_active')
+    search_fields = (
+        'user__email', 'user__first_name', 'user__last_name', 'group__name',
+    )
+    autocomplete_fields = ('user',)
+    readonly_fields = ('scope_key', 'created_at', 'updated_at')
+
+    @admin.display(description='Target struktur')
+    def scope_object_display(self, obj):
+        return obj.scope_object or 'Seluruh organisasi'
 
 
 @admin.register(TelegramAccount)

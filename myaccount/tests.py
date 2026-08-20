@@ -239,6 +239,8 @@ class StructuralOfficerManagementTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Aktifkan Pejabat')
+        self.assertContains(response, 'form-control select2', count=3)
+        self.assertContains(response, "$('.select2').select2({")
 
     def test_user_biasa_ditolak(self):
         self.client.force_login(self.regular_user)

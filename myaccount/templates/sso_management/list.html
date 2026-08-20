@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block content %}
+{% if new_client_secret %}
+<div class="alert alert-warning">
+  <strong>Simpan client secret untuk {{ new_client_name }} sekarang.</strong> Nilai ini hanya ditampilkan sekali.
+  <div class="input-group mt-2"><input id="newClientSecret" class="form-control font-monospace" readonly value="{{ new_client_secret }}">
+    <div class="input-group-append"><button class="btn btn-outline-dark" type="button" onclick="navigator.clipboard.writeText(document.getElementById('newClientSecret').value)">Salin</button></div>
+  </div>
+</div>
+{% endif %}
+<div class="card card-primary card-outline">
+  <div class="card-header d-flex align-items-center">
+    <h3 class="card-title">Integrasi SSO dan Credential</h3>
+    <a href="{% url 'myaccount_urls:sso_application_create' %}" class="btn btn-primary btn-sm ml-auto"><i class="fas fa-plus mr-1"></i>Tambah aplikasi</a>
+  </div>
+  <div class="card-body">
+    <form class="form-inline mb-3"><input name="q" value="{{ q }}" class="form-control mr-2" placeholder="Nama atau client ID"><button class="btn btn-outline-primary">Cari</button></form>
+    <div class="table-responsive"><table class="table table-hover">
+      <thead><tr><th>Aplikasi</th><th>Client ID</th><th>Tipe / Grant</th><th>Redirect URI</th><th>Aksi</th></tr></thead>
+      <tbody>
+      {% for app in applications %}
+      <tr>
+        <td><strong>{{ app.name|default:"Tanpa nama" }}</strong></td>
+        <td><code>{{ app.client_id }}</code></td>
+        <td>{{ app.get_client_type_display }}<br><small>{{ app.get_authorization_grant_type_display }}</small></td>
+        <td><small>{{ app.redirect_uris|default:"-" }}</small></td>
+        <td class="text-nowrap">
+          <a class="btn btn-sm btn-outline-primary" href="{% url 'myaccount_urls:sso_application_update' app.pk %}">Ubah</a>
+          <form method="post" class="d-inline" action="{% url 'myaccount_urls:sso_application_rotate_secret' app.pk %}" onsubmit="return confirm('Rotasi secret? Credential lama akan langsung tidak berlaku.')">{% csrf_token %}<button class="btn btn-sm btn-outline-warning">Rotasi secret</button></form>
+          <form method="post" class="d-inline" action="{% url 'myaccount_urls:sso_application_delete' app.pk %}" onsubmit="return confirm('Hapus integrasi ini beserta token terkait?')">{% csrf_token %}<button class="btn btn-sm btn-outline-danger">Hapus</button></form>
+        </td>
+      </tr>
+      {% empty %}<tr><td colspan="5" class="text-center text-muted">Belum ada integrasi SSO.</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+</div>
+{% endblock %}

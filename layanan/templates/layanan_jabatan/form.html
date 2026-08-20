@@ -1,27 +1,34 @@
 {% extends 'base.html' %}
+{% load static %}
 {% load crispy_forms_tags %}
 
+{% block styles %}
+<link rel="stylesheet" href="{% static 'src/service-module.css' %}">
+{% endblock styles %}
+
 {% block content %}
+<div class="service-shell">
 <div class="row justify-content-center">
     <div class="col-lg-9">
-        <div class="card card-solid">
-            <div class="card-header"><h5 class="mb-0">{{ card_title }}</h5></div>
+        <div class="card service-card">
+            <div class="card-header"><h5 class="service-page-title"><i class="fas fa-user-tie text-primary mr-2"></i>{{ card_title }}</h5></div>
             <form method="post">
                 {% csrf_token %}
                 <div class="card-body">
-                    <div class="alert alert-info">
+                    <div class="alert alert-success service-form-note">
                         Pilih dokumen yang sudah tersedia pada menu Riwayat SDM. Pendidikan dan STR
                         dapat dikosongkan apabila tidak menjadi persyaratan jabatan yang diajukan.
                     </div>
                     {{ form|crispy }}
                 </div>
                 <div class="card-footer d-flex justify-content-between">
-                    <a href="{% url 'layanan_urls:layanan_jabatan_list' %}" class="btn btn-secondary">Kembali</a>
-                    <button type="submit" class="btn btn-success">Simpan dan Ajukan</button>
+                    <a href="{% url 'layanan_urls:layanan_jabatan_list' %}" class="btn btn-outline-secondary"><i class="fas fa-arrow-left mr-1"></i>Kembali</a>
+                    <button type="submit" class="btn btn-success"><i class="fas fa-paper-plane mr-1"></i>Simpan dan Ajukan</button>
                 </div>
             </form>
         </div>
     </div>
+</div>
 </div>
 {% endblock %}
 
@@ -46,11 +53,11 @@
         };
 
         const shortcuts = {
-            id_kinerja_dua_thn: "{% url 'riwayat_urls:riwayat_kinerja_create' %}?popup=1&field=id_kinerja_dua_thn",
-            id_kompetensi: "{% url 'riwayat_urls:riwayat_ujikom_create' %}?popup=1&field=id_kompetensi",
-            id_pendidikan: "{% url 'riwayat_urls:riwayat_pendidikan' %}",
-            id_str_profesi: "{% url 'riwayat_urls:riwayat_profesi' %}",
-            id_pak: "{% url 'riwayat_urls:riwayat_pak_create' %}?popup=1&field=id_pak"
+            id_kinerja_dua_thn: "{% url 'riwayat_urls:riwayat_kinerja_create' %}?popup=1&field=id_kinerja_dua_thn&return_to={{ request.get_full_path|urlencode }}",
+            id_kompetensi: "{% url 'riwayat_urls:riwayat_ujikom_create' %}?popup=1&field=id_kompetensi&return_to={{ request.get_full_path|urlencode }}",
+            id_pendidikan: "{% url 'riwayat_urls:riwayat_pendidikan' %}?return_to={{ request.get_full_path|urlencode }}",
+            id_str_profesi: "{% url 'riwayat_urls:riwayat_profesi' %}?return_to={{ request.get_full_path|urlencode }}",
+            id_pak: "{% url 'riwayat_urls:riwayat_pak_create' %}?popup=1&field=id_pak&return_to={{ request.get_full_path|urlencode }}"
         };
 
         $('.select2').select2({
@@ -59,6 +66,41 @@
             placeholder: 'Pilih data',
             allowClear: true
         });
+
+        const optionsUrlTemplate = "{% url 'layanan_urls:promotion_supporting_options' 'jabatan' 0 %}";
+        const supportingFields = [
+            'kinerja_dua_thn', 'kompetensi', 'pendidikan', 'str_profesi', 'pak'
+        ];
+
+        function refreshSupportingOptions() {
+            const employeeId = $('#id_pegawai').val();
+            if (!employeeId) return;
+            $.getJSON(optionsUrlTemplate.replace('/0/', '/' + employeeId + '/'))
+                .done(function (response) {
+                    supportingFields.forEach(function (fieldName) {
+                        const field = $('#id_' + fieldName);
+                        const selected = (field.val() || []);
+                        const selectedValues = Array.isArray(selected)
+                            ? selected.map(String) : [String(selected)];
+                        field.empty();
+                        if (!field.prop('multiple')) {
+                            field.append(new Option('---------', ''));
+                        }
+                        (response.fields[fieldName] || []).forEach(function (option) {
+                            field.append(new Option(
+                                option.text,
+                                option.id,
+                                false,
+                                selectedValues.includes(String(option.id))
+                            ));
+                        });
+                        field.trigger('change.select2');
+                    });
+                });
+        }
+
+        $('#id_pegawai').on('change', refreshSupportingOptions);
+        $(window).on('focus', refreshSupportingOptions);
 
         Object.entries(shortcuts).forEach(function ([fieldId, url]) {
             const field = $('#' + fieldId);

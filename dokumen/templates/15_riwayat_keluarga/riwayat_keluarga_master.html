@@ -50,7 +50,7 @@
                     <div class="col-md-12">        
                         {% if nip %}
                             {% include '15_riwayat_keluarga/riwayat_keluarga_perorang.html' %}
-                        {% elif request.user.is_dokumen_admin  %}
+                        {% elif can_manage_document_scope  %}
                             {% include '15_riwayat_keluarga/riwayat_keluarga.html' %}
                         {% endif %}
                     </div>

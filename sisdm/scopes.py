@@ -21,6 +21,8 @@ class Scopes:
     # OpenID Connect
     OPENID = 'openid'
     PROFILE = 'profile'
+    
+    SIMRS_INDIKATOR = 'simrs.indicators.read'
 
     @classmethod
     def as_choices(cls):
@@ -40,4 +42,5 @@ class Scopes:
             cls.WRITE_BOOKING: 'Menulis booking pemeriksaan',
             
             cls.READ_DASH: 'Membaca data untuk dashboard',
+            cls.SIMRS_INDIKATOR: 'Membaca indikator SIMRS',
         }

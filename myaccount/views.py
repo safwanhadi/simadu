@@ -32,9 +32,12 @@ from rest_framework.response import Response
 
 from .models import ProfilSDM
 
-from .models import AccountRegistration, ProfilSDM, Users
+from .models import (
+    AccountRegistration, AdminScopeAssignment, ProfilSDM, Users,
+)
 from .forms import (
     AccountAdminRolesForm,
+    AdminScopeAssignmentForm,
     AdminResetPasswordForm,
     EmployeeRegistrationForm,
     ProfilForm,
@@ -44,6 +47,9 @@ from .forms import (
 import logging
 from .roles import ADMIN_DOKUMEN, ADMIN_GROUPS
 from strukturorg.models import PejabatStruktur
+from oauth2_provider.generators import generate_client_secret
+from oauth2_provider.models import Application
+from .forms import SSOApplicationForm
 
 
 class AccountAdminRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
@@ -51,6 +57,112 @@ class AccountAdminRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
 
     def test_func(self):
         return self.request.user.is_akun_admin
+
+
+class SSOAdminRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
+    """Akses operasional OAuth tanpa menjadikan pengguna staf Django Admin."""
+
+    def test_func(self):
+        return self.request.user.is_sso_admin
+
+
+class SSOApplicationListView(SSOAdminRequiredMixin, ListView):
+    model = Application
+    template_name = 'sso_management/list.html'
+    context_object_name = 'applications'
+    paginate_by = 25
+
+    def get_queryset(self):
+        queryset = Application.objects.select_related('user').order_by('name', 'client_id')
+        query = self.request.GET.get('q', '').strip()
+        if query:
+            queryset = queryset.filter(
+                Q(name__icontains=query) | Q(client_id__icontains=query)
+            )
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'q': self.request.GET.get('q', '').strip(),
+            'sso_management': 'active',
+            'card_title': 'Integrasi SSO',
+            'title_page': 'Pengelolaan Integrasi SSO',
+            'new_client_secret': self.request.session.pop('new_client_secret', None),
+            'new_client_name': self.request.session.pop('new_client_name', None),
+        })
+        return context
+
+
+class SSOApplicationCreateView(SSOAdminRequiredMixin, CreateView):
+    model = Application
+    form_class = SSOApplicationForm
+    template_name = 'sso_management/form.html'
+    success_url = reverse_lazy('myaccount_urls:sso_application_list')
+
+    def form_valid(self, form):
+        plain_secret = generate_client_secret()
+        form.instance.user = self.request.user
+        form.instance.client_secret = plain_secret
+        response = super().form_valid(form)
+        self.request.session['new_client_secret'] = plain_secret
+        self.request.session['new_client_name'] = self.object.name or self.object.client_id
+        messages.success(self.request, 'Aplikasi SSO berhasil dibuat.')
+        return response
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'sso_management': 'active', 'card_title': 'Tambah Integrasi SSO',
+            'title_page': 'Tambah Integrasi SSO', 'is_update': False,
+        })
+        return context
+
+
+class SSOApplicationUpdateView(SSOAdminRequiredMixin, UpdateView):
+    model = Application
+    form_class = SSOApplicationForm
+    template_name = 'sso_management/form.html'
+    success_url = reverse_lazy('myaccount_urls:sso_application_list')
+
+    def form_valid(self, form):
+        messages.success(self.request, 'Konfigurasi aplikasi SSO berhasil diperbarui.')
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'sso_management': 'active', 'card_title': 'Ubah Integrasi SSO',
+            'title_page': 'Ubah Integrasi SSO', 'is_update': True,
+        })
+        return context
+
+
+class SSOApplicationRotateSecretView(SSOAdminRequiredMixin, View):
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        application = get_object_or_404(
+            Application.objects.select_for_update(), pk=kwargs['pk']
+        )
+        plain_secret = generate_client_secret()
+        application.client_secret = plain_secret
+        application.save(update_fields=['client_secret', 'updated'])
+        request.session['new_client_secret'] = plain_secret
+        request.session['new_client_name'] = application.name or application.client_id
+        messages.success(request, 'Client secret berhasil dirotasi. Secret lama tidak berlaku.')
+        return redirect('myaccount_urls:sso_application_list')
+
+
+class SSOApplicationDeleteView(SSOAdminRequiredMixin, View):
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        application = get_object_or_404(
+            Application.objects.select_for_update(), pk=kwargs['pk']
+        )
+        name = application.name or application.client_id
+        application.delete()
+        messages.success(request, f'Integrasi {name} berhasil dihapus.')
+        return redirect('myaccount_urls:sso_application_list')
 
 
 class AccountManagementListView(AccountAdminRequiredMixin, ListView):
@@ -219,6 +331,142 @@ class StructuralOfficerDeactivateView(AccountAdminRequiredMixin, View):
             f'{appointment.struktur_object} berhasil ditutup.',
         )
         return redirect('myaccount_urls:structural_officer_management')
+
+
+class AdminScopeAssignmentListView(AccountAdminRequiredMixin, ListView):
+    model = AdminScopeAssignment
+    template_name = 'account_management/admin_scope_list.html'
+    context_object_name = 'scope_list'
+    paginate_by = 25
+
+    def get_queryset(self):
+        queryset = (
+            AdminScopeAssignment.objects
+            .select_related(
+                'user',
+                'user__profil_user',
+                'group',
+                'instansi_daerah',
+                'satuan_kerja_induk',
+                'unit_organisasi',
+                'bidang',
+                'sub_bidang',
+                'unit_instalasi',
+            )
+        )
+        status = self.request.GET.get('status', 'active').strip()
+        if status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        elif status != 'all':
+            status = 'active'
+            queryset = queryset.filter(is_active=True)
+
+        role = self.request.GET.get('role', '').strip()
+        if role in ADMIN_GROUPS:
+            queryset = queryset.filter(group__name=role)
+        else:
+            role = ''
+
+        query = self.request.GET.get('q', '').strip()
+        if query:
+            queryset = queryset.filter(
+                Q(user__email__icontains=query)
+                | Q(user__first_name__icontains=query)
+                | Q(user__last_name__icontains=query)
+                | Q(user__profil_user__nip__icontains=query)
+                | Q(group__name__icontains=query)
+                | Q(instansi_daerah__instansi__icontains=query)
+                | Q(satuan_kerja_induk__satuan_kerja__icontains=query)
+                | Q(unit_organisasi__unor__icontains=query)
+                | Q(bidang__bidang__icontains=query)
+                | Q(sub_bidang__sub_bidang__icontains=query)
+                | Q(unit_instalasi__instalasi__icontains=query)
+            )
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'q': self.request.GET.get('q', '').strip(),
+            'status': self.request.GET.get('status', 'active').strip(),
+            'role': self.request.GET.get('role', '').strip(),
+            'admin_roles': ADMIN_GROUPS,
+            'active_count': AdminScopeAssignment.objects.filter(
+                is_active=True
+            ).count(),
+            'global_count': AdminScopeAssignment.objects.filter(
+                is_active=True,
+                scope_type=AdminScopeAssignment.GLOBAL,
+            ).count(),
+            'today': date.today(),
+            'account_management': 'active',
+            'card_title': 'Cakupan Admin',
+            'title_page': 'Pengelolaan Cakupan Admin',
+        })
+        return context
+
+
+class AdminScopeAssignmentFormMixin(AccountAdminRequiredMixin):
+    model = AdminScopeAssignment
+    form_class = AdminScopeAssignmentForm
+    template_name = 'account_management/admin_scope_form.html'
+
+    def get_success_url(self):
+        return reverse('myaccount_urls:admin_scope_list')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'is_update': self.object is not None,
+            'account_management': 'active',
+            'card_title': (
+                'Ubah Cakupan Admin' if self.object else 'Tambah Cakupan Admin'
+            ),
+            'title_page': (
+                'Ubah Cakupan Admin' if self.object else 'Tambah Cakupan Admin'
+            ),
+        })
+        return context
+
+
+class AdminScopeAssignmentCreateView(
+    AdminScopeAssignmentFormMixin,
+    CreateView,
+):
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(
+            self.request,
+            f'Cakupan {self.object.group.name} untuk {self.object.user.full_name} '
+            f'berhasil ditambahkan.',
+        )
+        return response
+
+
+class AdminScopeAssignmentUpdateView(
+    AdminScopeAssignmentFormMixin,
+    UpdateView,
+):
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(
+            self.request,
+            f'Cakupan {self.object.group.name} untuk {self.object.user.full_name} '
+            f'berhasil diperbarui.',
+        )
+        return response
+
+
+class AdminScopeAssignmentDeleteView(AccountAdminRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        assignment = get_object_or_404(
+            AdminScopeAssignment.objects.select_related('user', 'group'),
+            pk=kwargs['pk'],
+        )
+        description = f'{assignment.group.name} untuk {assignment.user.full_name}'
+        assignment.delete()
+        messages.success(request, f'Cakupan {description} berhasil dihapus.')
+        return redirect('myaccount_urls:admin_scope_list')
 
 
 class EmployeeRegistrationView(FormView):
@@ -586,7 +834,9 @@ class ProfilCreateView(SuccessMessageMixin, LoginRequiredMixin, CreateView):
     form_class = ProfilForm
     
     def get_success_url(self) -> str:
-        if self.request.user.is_superuser:
+        if self.request.user.is_akun_admin and not self.request.user.is_superuser:
+            url = reverse_lazy('myaccount_urls:account_management_list')
+        elif self.request.user.is_superuser:
             url = reverse_lazy('myaccount_urls:profil_view')
         else:
             url = reverse_lazy('myaccount_urls:profil_detail_view', kwargs={'pk':self.request.user.pk})
@@ -626,8 +876,18 @@ class ProfilUpdateView(SuccessMessageMixin, LoginRequiredMixin, UpdateView):
     template_name = 'profil_form.html'
     success_message = 'Data berhasil diupdate'
 
-    def get_success_url(self) -> str:
+    def get_queryset(self):
+        queryset = super().get_queryset().select_related('user')
         if self.request.user.is_superuser:
+            return queryset
+        if self.request.user.is_akun_admin:
+            return queryset.filter(user__is_superuser=False)
+        return queryset.filter(user=self.request.user)
+
+    def get_success_url(self) -> str:
+        if self.request.user.is_akun_admin and not self.request.user.is_superuser:
+            url = reverse_lazy('myaccount_urls:account_management_list')
+        elif self.request.user.is_superuser:
             url = reverse_lazy('myaccount_urls:profil_view')
         else:
             url = reverse_lazy('myaccount_urls:profil_detail_view', kwargs={'pk':self.request.user.pk})

@@ -116,7 +116,7 @@
     <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
     <div class="row mb-4">
-    {% if request.user.is_cuti_admin %}
+    {% if is_cuti_scope_admin %}
         <div class="col-12 mb-3">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
@@ -261,7 +261,7 @@
 </form>
 
 </div>
-{% if request.user.is_cuti_admin %}
+{% if is_cuti_scope_admin %}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const employeeSelect = document.getElementById('{{ form.pegawai.id_for_label }}');

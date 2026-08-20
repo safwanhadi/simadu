@@ -19,7 +19,7 @@ Urutkan Dokumen
             </div>
             <div class="card-body">
                 <div class="row" id="form_data">
-                    {% if not request.user.is_dokumen_admin %}
+                    {% if not can_manage_document_scope %}
                     <div class="col-md-12 mb-3">
                         <div class="row mb-2">
                             <div class="col-md-3">Nama</div>

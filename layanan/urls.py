@@ -15,6 +15,8 @@ from .views import (
     LayananCutiUpdateView,
     LayananCutiDeleteView,
     CutiPemutihanAdminView,
+    PolaKerjaPegawaiListCreateView,
+    PolaKerjaPegawaiUpdateView,
     AdminOverrideKlaimTundaForCutiView,
     PelimpahanTugasCreateView,
     PelimpahanTugasPenerimaListView,
@@ -59,6 +61,7 @@ from .views import (
     LayananNaikJabatanDetailView,
     LayananNaikJabatanProcessView,
     SuratUsulanJabatanView,
+    PromotionSupportingOptionsView,
 )
 
 
@@ -94,6 +97,16 @@ urlpatterns=[
         'layanan-cuti/pemutihan/',
         CutiPemutihanAdminView.as_view(),
         name='cuti_pemutihan_admin',
+    ),
+    path(
+        'layanan-cuti/pola-kerja/',
+        PolaKerjaPegawaiListCreateView.as_view(),
+        name='pola_kerja_pegawai',
+    ),
+    path(
+        'layanan-cuti/pola-kerja/<int:pk>/ubah/',
+        PolaKerjaPegawaiUpdateView.as_view(),
+        name='pola_kerja_pegawai_update',
     ),
     path('pelimpahan-tugas/<int:riwayat_pk>/create/', PelimpahanTugasCreateView.as_view(), name='pelimpahan_create'),
     path("layanan-cuti/<int:riwayat_id>/override-klaim-tunda/", AdminOverrideKlaimTundaForCutiView.as_view(),name="cuti_override_klaim_tunda"),
@@ -163,6 +176,11 @@ urlpatterns=[
         name="layanan_sip_upload_rekomendasi",
     ),
     path('yanpangkat/', LayananNaikPangkatListView.as_view(), name='layanan_pangkat_list'),
+    path(
+        'api/promosi/<str:service>/<int:employee_id>/dokumen/',
+        PromotionSupportingOptionsView.as_view(),
+        name='promotion_supporting_options',
+    ),
     path('yanpangkat/tambah/', LayananNaikPangkatCreateView.as_view(), name='layanan_pangkat_create'),
     path('yanpangkat/<int:pk>/', LayananNaikPangkatDetailView.as_view(), name='layanan_pangkat_detail'),
     path('yanpangkat/<int:pk>/ubah/', LayananNaikPangkatUpdateView.as_view(), name='layanan_pangkat_update'),

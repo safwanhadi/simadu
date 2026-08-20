@@ -41,12 +41,12 @@
                     <div>
                         <div>
                             {% if not sip %}
-                                <a href="{% url 'riwayat_urls:profession_sip_export_excel' %}{% if request.user.is_dokumen_admin and nip %}?nip={{ nip|urlencode }}{% endif %}"
+                                <a href="{% url 'riwayat_urls:profession_sip_export_excel' %}{% if nip %}?nip={{ nip|urlencode }}{% endif %}"
                                    class="btn btn-success">
                                     <i class="fas fa-file-excel mr-1"></i>Download Excel
                                 </a>
                             {% endif %}
-                            {% if str_obj and request.user.is_dokumen_admin %}
+                            {% if str_obj and can_manage_sip_role %}
                                 <a href="{% url 'riwayat_urls:riwayat_sip_urutkan' pk=str_obj.id %}" class="btn btn-outline-info">Urutkan Dokumen</a>
                             {% endif %}
                             {% if not update_form %}
@@ -69,7 +69,7 @@
                 <div class="row" id="list_data" style="display: {{data_view}};">
                     <div class="col-md-12">
                         {% if sip %}
-                            {% if request.user.is_dokumen_admin  %}
+                            {% if can_manage_sip_role %}
                                 {% include '13_riwayat_profesi/riwayat_sip.html' %}
                             {% else %}
                                 {% include '13_riwayat_profesi/riwayat_sip_perorang.html' %}
@@ -77,7 +77,7 @@
                         {% else %}
                             {% if nip %}
                                 {% include '13_riwayat_profesi/riwayat_profesi_perorang.html' %}
-                            {% elif request.user.is_dokumen_admin  %}
+                            {% elif can_manage_sip_role %}
                                 {% include '13_riwayat_profesi/riwayat_profesi.html' %}
                             {% endif %}
                         {% endif %}

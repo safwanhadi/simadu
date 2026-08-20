@@ -19,7 +19,6 @@ Urutkan Dokumen
             </div>
             <div class="card-body">
                 <div class="row" id="form_data">
-                    {% if not request.user.is_dokumen_admin %}
                     <div class="col-md-12 mb-3">
                         <div class="row mb-2">
                             <div class="col-md-3">Nama</div>
@@ -30,7 +29,6 @@ Urutkan Dokumen
                             <div class="col-md-9 font-weight-bold">:&nbsp; {{user.profil_user.nip}}</div>
                         </div>
                     </div>
-                    {% endif %}
                     <div class="col-md-12">
                         <form method="post" enctype="multipart/form-data">
                             {% csrf_token %}

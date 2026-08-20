@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-1"><i class="fas fa-business-time mr-2"></i>{{ title_page }}</h4>
+            <p class="text-muted mb-0">Kelola pola reguler atau shift sebagai dasar perhitungan cuti tahunan.</p>
+        </div>
+        <a href="{% url 'layanan_urls:layanan_cuti_listview' %}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left mr-1"></i>Kembali
+        </a>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-4 mb-3">
+            <div class="card card-primary card-outline shadow-sm">
+                <div class="card-header"><h3 class="card-title">Tambah Pola Kerja</h3></div>
+                <form method="post" novalidate>
+                    {% csrf_token %}
+                    <div class="card-body">
+                        {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+                        {% for field in form %}
+                        <div class="form-group">
+                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            {{ field }}
+                            {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="card-footer text-right">
+                        <button class="btn btn-primary" type="submit"><i class="fas fa-save mr-1"></i>Simpan</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="col-lg-8">
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <form method="get">
+                        <div class="input-group input-group-sm">
+                            <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Cari nama, NIP, atau email">
+                            <div class="input-group-append">
+                                <button class="btn btn-primary" type="submit"><i class="fas fa-search"></i></button>
+                                {% if q %}<a class="btn btn-secondary" href="{% url 'layanan_urls:pola_kerja_pegawai' %}">Reset</a>{% endif %}
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="card-body p-0 table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead><tr><th>Pegawai</th><th>Pola</th><th>Periode</th><th>Keterangan</th><th></th></tr></thead>
+                        <tbody>
+                        {% for item in pola_kerja_list %}
+                        <tr>
+                            <td><strong>{{ item.pegawai.full_name_2|default:item.pegawai.email }}</strong><br><small class="text-muted">{{ item.pegawai.profil_user.nip|default:item.pegawai.email }}</small></td>
+                            <td>{% if item.pola_kerja == 'shift' %}<span class="badge badge-warning">Shift</span>{% else %}<span class="badge badge-info">Reguler</span>{% endif %}</td>
+                            <td>{{ item.berlaku_mulai|date:'d M Y' }} – {% if item.berlaku_sampai %}{{ item.berlaku_sampai|date:'d M Y' }}{% else %}<span class="text-success">sekarang</span>{% endif %}</td>
+                            <td>{{ item.keterangan|default:'-' }}</td>
+                            <td><a class="btn btn-sm btn-outline-primary" href="{% url 'layanan_urls:pola_kerja_pegawai_update' item.pk %}" title="Ubah"><i class="fas fa-edit"></i></a></td>
+                        </tr>
+                        {% empty %}<tr><td colspan="5" class="text-center text-muted py-4">Belum ada data pola kerja.</td></tr>{% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% if is_paginated %}
+                <div class="card-footer d-flex flex-wrap justify-content-between align-items-center">
+                    <div class="small text-muted mb-2 mb-sm-0">
+                        Menampilkan <strong>{{ page_obj.start_index }}</strong>&ndash;<strong>{{ page_obj.end_index }}</strong>
+                        dari <strong>{{ paginator.count }}</strong> data
+                    </div>
+                    <nav aria-label="Navigasi halaman pola kerja pegawai">
+                        <ul class="pagination pagination-sm mb-0">
+                            <li class="page-item{% if not page_obj.has_previous %} disabled{% endif %}">
+                                {% if page_obj.has_previous %}
+                                <a class="page-link" href="?page=1{% if q %}&amp;q={{ q|urlencode }}{% endif %}" title="Halaman pertama"><i class="fas fa-angle-double-left"></i></a>
+                                {% else %}<span class="page-link"><i class="fas fa-angle-double-left"></i></span>{% endif %}
+                            </li>
+                            <li class="page-item{% if not page_obj.has_previous %} disabled{% endif %}">
+                                {% if page_obj.has_previous %}
+                                <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}" title="Sebelumnya"><i class="fas fa-angle-left"></i></a>
+                                {% else %}<span class="page-link"><i class="fas fa-angle-left"></i></span>{% endif %}
+                            </li>
+                            {% for num in paginator.page_range %}
+                                {% if num == page_obj.number %}
+                                <li class="page-item active" aria-current="page"><span class="page-link">{{ num }}</span></li>
+                                {% elif num >= page_obj.number|add:'-2' and num <= page_obj.number|add:'2' or num == 1 or num == paginator.num_pages %}
+                                <li class="page-item"><a class="page-link" href="?page={{ num }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}">{{ num }}</a></li>
+                                {% elif num == page_obj.number|add:'-3' or num == page_obj.number|add:'3' %}
+                                <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                                {% endif %}
+                            {% endfor %}
+                            <li class="page-item{% if not page_obj.has_next %} disabled{% endif %}">
+                                {% if page_obj.has_next %}
+                                <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}" title="Berikutnya"><i class="fas fa-angle-right"></i></a>
+                                {% else %}<span class="page-link"><i class="fas fa-angle-right"></i></span>{% endif %}
+                            </li>
+                            <li class="page-item{% if not page_obj.has_next %} disabled{% endif %}">
+                                {% if page_obj.has_next %}
+                                <a class="page-link" href="?page={{ paginator.num_pages }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}" title="Halaman terakhir"><i class="fas fa-angle-double-right"></i></a>
+                                {% else %}<span class="page-link"><i class="fas fa-angle-double-right"></i></span>{% endif %}
+                            </li>
+                        </ul>
+                    </nav>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+$(function () {
+    $('.select2').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Cari pegawai'});
+});
+</script>
+{% endblock script %}

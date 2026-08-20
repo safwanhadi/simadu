@@ -354,6 +354,11 @@ APP_VISUAL = {
         "bg_class": "bg-gradient-to-br from-amber-500 to-orange-600",
         "category": "Koperasi & Syariah",
     },
+    "datahub": {
+        "icon": "fas fa-chart-bar",
+        "bg_class": "bg-gradient-to-br from-purple-500 to-indigo-600",
+        "category": "Data & Analitik",
+    },
     # tambahkan aplikasi lain di sini
 }
 
@@ -399,6 +404,14 @@ SSO_CLIENTS = {
         "redirect_uri": "http://127.0.0.1:3000/api/auth/callback/django-oauth2",
         "login_url":None,
         "scopes": "read:koperasi",
+    },
+    "datahub": {
+        "label": "DATAHUB",
+        "type": "oauth_client",
+        "client_id": config("DATAHUB_CLIENT_ID", default=""),
+        "redirect_uri": "http://127.0.0.1:8000/accounts/callback/",
+        "login_url": None,
+        "scopes": "read:pegawai read:dash",
     },
     # tambah aplikasi lain tinggal copy ini
 }

@@ -8,7 +8,6 @@
         {% include '8_layanan_inovasi/progress_indikator.html' %}
     </div>
 </div>
-
 <div class="col-md-12">
     <div class="table table-responsive">
         <table class="table" id="data_table">
@@ -41,6 +40,7 @@
                         <i class="far fa-calendar-check" style="color: blue;"></i>
                         {% endif %}</td>
                         <td>
+                            {% if item.can_process %}
                             {% if item.status == 'usulan' %}
                             <a style="font-size: small;" href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=proses" class="btn btn-outline-danger">Proses</a>
                             {% elif item.status == 'proses' %}
@@ -50,11 +50,13 @@
                             {% else %}
                             <a style="font-size: small;" href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=detail" class="btn btn-outline-primary">Detail</a>
                             {% endif %}
+                            {% else %}
+                            <a style="font-size: small;" href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=detail" class="btn btn-outline-primary">Detail</a>
+                            {% endif %}
                         </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
-    </div>        
+    </div>
 </div>
-                    

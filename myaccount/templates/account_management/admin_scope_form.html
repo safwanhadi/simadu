@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card card-primary card-outline">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <i class="fas {% if is_update %}fa-edit{% else %}fa-plus{% endif %} mr-1"></i>
+                    {{ card_title }}
+                </h3>
+            </div>
+            <form method="post" novalidate>
+                {% csrf_token %}
+                <div class="card-body">
+                    {% if form.non_field_errors %}
+                    <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+                    {% endif %}
+
+                    <div class="form-row">
+                        <div class="form-group col-md-6">
+                            <label for="{{ form.user.id_for_label }}">{{ form.user.label }}</label>
+                            {{ form.user }}
+                            {% for error in form.user.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                        </div>
+                        <div class="form-group col-md-6">
+                            <label for="{{ form.group.id_for_label }}">{{ form.group.label }}</label>
+                            {{ form.group }}
+                            {% for error in form.group.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="{{ form.scope_type.id_for_label }}">{{ form.scope_type.label }}</label>
+                        {{ form.scope_type }}
+                        {% for error in form.scope_type.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    </div>
+
+                    <div id="scopeTargetFields">
+                        {% for field in form %}
+                            {% if field.name == 'instansi_daerah' or field.name == 'satuan_kerja_induk' or field.name == 'unit_organisasi' or field.name == 'bidang' or field.name == 'sub_bidang' or field.name == 'unit_instalasi' %}
+                            <div class="form-group scope-target" data-scope="{{ field.name }}">
+                                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                                {{ field }}
+                                {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group col-md-6">
+                            <label for="{{ form.valid_from.id_for_label }}">{{ form.valid_from.label }}</label>
+                            {{ form.valid_from }}
+                            {% for error in form.valid_from.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                        </div>
+                        <div class="form-group col-md-6">
+                            <label for="{{ form.valid_until.id_for_label }}">{{ form.valid_until.label }}</label>
+                            {{ form.valid_until }}
+                            <small class="form-text text-muted">Kosongkan jika tidak memiliki batas akhir.</small>
+                            {% for error in form.valid_until.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="custom-control custom-switch">
+                        {{ form.is_active }}
+                        <label class="custom-control-label" for="{{ form.is_active.id_for_label }}">{{ form.is_active.label }}</label>
+                        {% for error in form.is_active.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    </div>
+                </div>
+                <div class="card-footer d-flex justify-content-between">
+                    <a href="{% url 'myaccount_urls:admin_scope_list' %}" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left mr-1"></i>Kembali
+                    </a>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save mr-1"></i>Simpan Cakupan
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block script %}
+{{ block.super }}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const scopeType = document.getElementById('{{ form.scope_type.id_for_label }}');
+    const targetGroups = document.querySelectorAll('.scope-target');
+
+    $('.admin-scope-select2').each(function () {
+        const select = $(this);
+        select.select2({
+            width: '100%',
+            placeholder: select.data('placeholder') || 'Pilih data',
+            allowClear: true
+        });
+    });
+
+    function updateTargetField() {
+        const selectedScope = scopeType.value;
+        targetGroups.forEach(function (group) {
+            const visible = group.dataset.scope === selectedScope;
+            group.style.display = visible ? '' : 'none';
+            const input = group.querySelector('select');
+            input.disabled = !visible;
+            if (!visible) {
+                $(input).val(null).trigger('change');
+            }
+        });
+    }
+
+    scopeType.addEventListener('change', updateTargetField);
+    updateTargetField();
+});
+</script>
+{% endblock script %}

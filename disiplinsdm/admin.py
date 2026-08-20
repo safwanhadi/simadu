@@ -10,6 +10,7 @@ from .models import (
     JenisKegiatan, 
     DaftarKegiatanPegawai,
     HariLibur,
+    PolaKerjaPegawai,
     AturanToleransiKeterlambatan,
     MappingMesinAbsensi,
     LogKehadiran,
@@ -74,3 +75,11 @@ admin.site.register(KehadiranKegiatan, KehadiranKegiatanAdmin)
 admin.site.register(JenisKegiatan)
 admin.site.register(HariLibur)
 admin.site.register(ApprovedJadwalDinasSDM, ApprovedJadwalDinasSDMAdmin)
+
+
+@admin.register(PolaKerjaPegawai)
+class PolaKerjaPegawaiAdmin(admin.ModelAdmin):
+    list_display = ('pegawai', 'pola_kerja', 'berlaku_mulai', 'berlaku_sampai')
+    list_filter = ('pola_kerja',)
+    search_fields = ('pegawai__first_name', 'pegawai__last_name', 'pegawai__email')
+    autocomplete_fields = ('pegawai',)

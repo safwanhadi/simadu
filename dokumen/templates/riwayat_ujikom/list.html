@@ -14,7 +14,7 @@
                 <thead>
                     <tr>
                         <th>No</th>
-                        {% if request.user.is_dokumen_admin %}<th>Pegawai</th>{% endif %}
+                        {% if can_manage_document_scope %}<th>Pegawai</th>{% endif %}
                         <th>Kompetensi</th>
                         <th>Nomor Sertifikat</th>
                         <th>Tanggal Sertifikat</th>
@@ -27,7 +27,7 @@
                     {% for item in data %}
                     <tr>
                         <td>{{ forloop.counter }}</td>
-                        {% if request.user.is_dokumen_admin %}<td>{{ item.pegawai.full_name }}</td>{% endif %}
+                        {% if can_manage_document_scope %}<td>{{ item.pegawai.full_name }}</td>{% endif %}
                         <td>{{ item.kompetensi|default:'-' }}</td>
                         <td>{{ item.no_sert_ujikomp|default:'-' }}</td>
                         <td>{{ item.tgl_sert_ujikomp|date:'d-m-Y'|default:'-' }}</td>

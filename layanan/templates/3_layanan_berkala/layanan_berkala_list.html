@@ -49,7 +49,7 @@
                             <small class="text-muted">{{ item.days_until_due }} hari lagi</small>
                         </td>
                         <td class="text-center">
-                            {% if request.user.is_berkala_admin %}
+                            {% if item.can_process %}
                             <!-- Ganti '#' dengan URL yang sesuai untuk fungsionalitas -->
                              {% if item.berkala_status == 'final' and item.interval_category == "< 3 bulan" or item.berkala_status == 'final' and item.interval_category == 'Terlewat' %}
                                 <a class="btn btn-sm btn-warning" href="{% url 'layanan_urls:layanan_berkala_add_view' riwayat_id=item.berkala_pk %}" style="font-size: small;">

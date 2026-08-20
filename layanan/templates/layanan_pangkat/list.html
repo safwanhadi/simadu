@@ -1,20 +1,29 @@
 {% extends 'base.html' %}
+{% load static %}
+
+{% block styles %}
+<link rel="stylesheet" href="{% static 'src/service-module.css' %}">
+{% endblock styles %}
 
 {% block content %}
-<div class="card card-solid">
-    <div class="card-header d-flex align-items-center">
-        <h5 class="mb-0">{{ card_title }}</h5>
-        <a href="{% url 'layanan_urls:layanan_pangkat_create' %}" class="btn btn-success btn-sm ml-auto">
-            <i class="fas fa-plus"></i> Ajukan Kenaikan Pangkat
+<div class="service-shell">
+    <div class="service-page-header">
+        <div>
+            <h5 class="service-page-title"><i class="fas fa-level-up-alt text-primary mr-2"></i>{{ card_title }}</h5>
+            <p class="service-page-subtitle">Pantau pengajuan dan hasil kenaikan pangkat pegawai.</p>
+        </div>
+        <a href="{% url 'layanan_urls:layanan_pangkat_create' %}" class="btn btn-success">
+            <i class="fas fa-plus mr-1"></i>Ajukan Kenaikan Pangkat
         </a>
     </div>
-    <div class="card-body">
+    <div class="card service-card">
+      <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-bordered table-hover">
+            <table class="table table-hover service-table">
                 <thead>
                     <tr>
                         <th>No</th>
-                        {% if request.user.is_pangkat_admin %}<th>Pegawai</th>{% endif %}
+                        {% if can_manage_pangkat_role %}<th>Pegawai</th>{% endif %}
                         <th>SK Pangkat Terakhir</th>
                         <th>Status</th>
                         <th>Tanggal</th>
@@ -25,7 +34,7 @@
                     {% for item in usulan_list %}
                     <tr>
                         <td>{{ forloop.counter }}</td>
-                        {% if request.user.is_pangkat_admin %}<td>{{ item.pegawai.full_name }}</td>{% endif %}
+                        {% if can_manage_pangkat_role %}<td>{{ item.pegawai.full_name }}</td>{% endif %}
                         <td>{{ item.sk_kp_terakhir|default:'-' }}</td>
                         <td>
                             {% if item.status == 'selesai' %}
@@ -37,14 +46,12 @@
                             {% endif %}
                         </td>
                         <td>{{ item.created_at|date:'d-m-Y H:i' }}</td>
-                        <td>
-                            <a href="{% url 'layanan_urls:layanan_pangkat_detail' pk=item.pk %}" class="btn btn-info btn-sm">Detail</a>
-                            {% if request.user.is_pangkat_admin %}
-                                <a href="{% url 'layanan_urls:layanan_pangkat_process' pk=item.pk %}" class="btn btn-primary btn-sm">Proses</a>
-                            {% elif item.status == 'pengajuan' %}
-                                <a href="{% url 'layanan_urls:layanan_pangkat_update' pk=item.pk %}" class="btn btn-warning btn-sm">Ubah</a>
+                        <td><div class="service-actions">
+                            <a href="{% url 'layanan_urls:layanan_pangkat_detail' pk=item.pk %}" class="btn btn-outline-info btn-sm"><i class="fas fa-eye mr-1"></i>Detail</a>
+                            {% if item.pegawai_id == request.user.id and item.status == 'pengajuan' %}
+                                <a href="{% url 'layanan_urls:layanan_pangkat_update' pk=item.pk %}" class="btn btn-outline-warning btn-sm"><i class="fas fa-edit mr-1"></i>Ubah</a>
                             {% endif %}
-                        </td>
+                        </div></td>
                     </tr>
                     {% empty %}
                     <tr><td colspan="6" class="text-center text-muted">Belum ada usulan kenaikan pangkat.</td></tr>
@@ -52,6 +59,7 @@
                 </tbody>
             </table>
         </div>
+      </div>
     </div>
 </div>
 {% endblock %}

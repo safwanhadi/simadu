@@ -1,12 +1,12 @@
 import calendar
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from xml.sax.saxutils import escape
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Q, Subquery
 from django.http import Http404, HttpResponse
 from django.shortcuts import render
 from django.template.defaultfilters import slugify
@@ -23,11 +23,21 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from strukturorg.models import UnitInstalasi
+from strukturorg.models import PejabatStruktur, UnitInstalasi
 from dokumen.models import RiwayatPengangkatan, STATUSPEGAWAI
 from myaccount.models import Users
 
-from .models import AbsensiHarian, HariLibur, JenisSDMPerinstalasi
+from .access import (
+    filter_installations_for_discipline_admin,
+    filter_users_for_discipline_admin,
+    is_discipline_admin,
+)
+from .models import (
+    AbsensiHarian,
+    ApprovedJadwalDinasSDM,
+    HariLibur,
+    JenisSDMPerinstalasi,
+)
 
 
 NAMA_BULAN = {
@@ -63,6 +73,42 @@ STATUS_COLORS = {
 }
 
 
+SUMMARY_HEADERS = ('Hadir', 'TK', 'Izin', 'Dinas', 'Libur', '-', 'Terlambat', 'Cepat Pulang', 'Akumulasi')
+AUTOMATED_DOCUMENT_NOTICE = (
+    'Dokumen ini digenerate secara otomatis dari aplikasi SIMADU BERDANSA -- '
+    'Sistem informasi terpadu sumber daya manusia RS Mandalika Provinsi NTB'
+)
+
+
+def format_minutes(total_minutes):
+    """Format akumulasi menit sebagai jam:menit tanpa terpotong setelah 24 jam."""
+    total_minutes = max(0, int(round(total_minutes or 0)))
+    hours, minutes = divmod(total_minutes, 60)
+    return f'{hours:02d}:{minutes:02d}'
+
+
+def format_indonesian_date(value):
+    return f'{value.day} {NAMA_BULAN[value.month]} {value.year}'
+
+
+def as_local_naive(value, current_timezone=None):
+    """Samakan datetime DB aware/naive untuk kalkulasi jadwal lokal."""
+    if timezone.is_aware(value):
+        value = timezone.localtime(
+            value,
+            current_timezone or timezone.get_current_timezone(),
+        )
+        return value.replace(tzinfo=None)
+    return value
+
+
+def current_local_date():
+    current = timezone.now()
+    if timezone.is_aware(current):
+        return timezone.localtime(current).date()
+    return current.date()
+
+
 class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
     """Filter dan unduh matriks presensi bulanan untuk satu instalasi."""
 
@@ -75,19 +121,8 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
             'sub_bidang__bidang__unor'
         ).order_by('instalasi')
 
-        if user.is_disiplin_admin:
-            return queryset
-
-        profil = getattr(user, 'profil_admin', None)
-        if profil and profil.is_pejabat:
-            if profil.instalasi.exists():
-                return queryset.filter(pk__in=profil.instalasi.values('pk'))
-            if profil.sub_bidang.exists():
-                return queryset.filter(sub_bidang__in=profil.sub_bidang.all())
-            if profil.bidang.exists():
-                return queryset.filter(sub_bidang__bidang__in=profil.bidang.all())
-            if profil.unor.exists():
-                return queryset.filter(sub_bidang__bidang__unor__in=profil.unor.all())
+        if is_discipline_admin(user):
+            return filter_installations_for_discipline_admin(queryset, user)
 
         installation_ids = self.request.user.riwayat_penempatan.filter(
             status=True,
@@ -116,7 +151,7 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
             'selected_cakupan': self.request.GET.get('cakupan', 'instalasi'),
             'selected_status_pegawai': self.request.GET.get('status_pegawai', ''),
             'daftar_status_pegawai': STATUSPEGAWAI,
-            'can_filter_status': self.request.user.is_disiplin_admin,
+            'can_filter_status': is_discipline_admin(self.request.user),
             'selected_bulan': bulan,
             'selected_tahun': tahun,
             'error': error,
@@ -140,7 +175,7 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
 
         cakupan = request.GET.get('cakupan', 'instalasi')
         if cakupan == 'status':
-            if not request.user.is_disiplin_admin:
+            if not is_discipline_admin(request.user):
                 raise PermissionDenied('Filter status pegawai lintas instalasi hanya untuk admin disiplin.')
 
             status_pegawai = request.GET.get('status_pegawai', '')
@@ -193,7 +228,7 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
                 '-tgl_srt_putusan',
                 '-pk',
             ).values('status_pegawai')[:1]
-            return list(Users.objects.filter(
+            employees = Users.objects.filter(
                 is_active=True,
             ).exclude(
                 is_superuser=True,
@@ -207,6 +242,10 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
                 'first_name',
                 'last_name',
                 'pk',
+            )
+            return list(filter_users_for_discipline_admin(
+                employees,
+                self.request.user,
             ))
 
         instalasi = scope['instalasi']
@@ -239,13 +278,86 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
         employees = self.get_employees(scope, bulan, tahun)
         employee_ids = [employee.pk for employee in employees]
 
-        attendance_map = {
-            (pegawai_id, tanggal): (status_final or '').strip().upper()
-            for pegawai_id, tanggal, status_final in AbsensiHarian.objects.filter(
+        attendance_rows = list(AbsensiHarian.objects.filter(
                 pegawai_id__in=employee_ids,
                 tanggal__range=(awal_bulan, akhir_bulan),
-            ).values_list('pegawai_id', 'tanggal', 'status_final')
+            ).prefetch_related('logs'))
+        attendance_map = {
+            (attendance.pegawai_id, attendance.tanggal):
+                (attendance.status_final or '').strip().upper()
+            for attendance in attendance_rows
         }
+
+        schedule_map = {}
+        schedules = ApprovedJadwalDinasSDM.objects.filter(
+            pegawai__pegawai_id__in=employee_ids,
+            tanggal__range=(awal_bulan, akhir_bulan),
+            is_approved=True,
+        ).select_related('pegawai', 'kategori_jadwal').order_by('pk')
+        for schedule in schedules:
+            schedule_map[(schedule.pegawai.pegawai_id, schedule.tanggal)] = schedule
+
+        summaries = {
+            employee_id: {
+                'HADIR': 0, 'ALPA': 0, 'IZIN': 0, 'DINAS': 0,
+                'LIBUR': 0, 'BELUM': 0,
+                'late_minutes': 0, 'early_minutes': 0,
+            }
+            for employee_id in employee_ids
+        }
+        for employee_id in employee_ids:
+            for day in range(1, jumlah_hari + 1):
+                status = attendance_map.get(
+                    (employee_id, date(tahun, bulan, day)), ''
+                )
+                summaries[employee_id][status if status in STATUS_CODE else 'BELUM'] += 1
+
+        current_timezone = timezone.get_current_timezone()
+        for attendance in attendance_rows:
+            schedule = schedule_map.get((attendance.pegawai_id, attendance.tanggal))
+            category = getattr(schedule, 'kategori_jadwal', None)
+            if category is None:
+                continue
+
+            logs = list(attendance.logs.all())
+            arrival_logs = [log for log in logs if log.tipe == 'DATANG']
+            if not arrival_logs:
+                arrival_logs = [log for log in logs if log.tipe == 'APEL']
+            departure_logs = [log for log in logs if log.tipe == 'PULANG']
+
+            if arrival_logs and category.waktu_datang:
+                actual_arrival = as_local_naive(
+                    min(log.waktu for log in arrival_logs),
+                    current_timezone,
+                )
+                scheduled_arrival = datetime.combine(
+                    attendance.tanggal,
+                    category.waktu_datang,
+                )
+                summaries[attendance.pegawai_id]['late_minutes'] += max(
+                    0,
+                    (actual_arrival - scheduled_arrival).total_seconds() / 60,
+                )
+
+            if departure_logs and category.waktu_pulang:
+                actual_departure = as_local_naive(
+                    max(log.waktu for log in departure_logs),
+                    current_timezone,
+                )
+                departure_date = attendance.tanggal
+                if (
+                    category.waktu_datang
+                    and category.waktu_pulang <= category.waktu_datang
+                ):
+                    departure_date += timedelta(days=1)
+                scheduled_departure = datetime.combine(
+                    departure_date,
+                    category.waktu_pulang,
+                )
+                summaries[attendance.pegawai_id]['early_minutes'] += max(
+                    0,
+                    (scheduled_departure - actual_departure).total_seconds() / 60,
+                )
         holidays = set(HariLibur.objects.filter(
             tanggal__range=(awal_bulan, akhir_bulan)
         ).values_list('tanggal', flat=True))
@@ -265,10 +377,39 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
             employee_id: ', '.join(names)
             for employee_id, names in installations_by_employee.items()
         }
-        return jumlah_hari, employees, attendance_map, holidays, installation_labels
+        return (
+            jumlah_hari,
+            employees,
+            attendance_map,
+            holidays,
+            installation_labels,
+            summaries,
+        )
+
+    def get_signature_officer(self, scope):
+        """Ambil pejabat aktif Kepala Bagian Tata Usaha beserta gelarnya."""
+        candidates = PejabatStruktur.objects.filter(
+            is_active=True,
+            pejabat__is_active=True,
+        ).filter(
+            Q(nama_jabatan__icontains='tata usaha')
+            | Q(bidang__bidang__icontains='tata usaha')
+        ).select_related(
+            'pejabat',
+            'pejabat__profil_user',
+            'bidang',
+            'bidang__unor',
+        )
+
+        if scope['mode'] == 'instalasi':
+            unor_id = scope['instalasi'].sub_bidang.bidang.unor_id
+            scoped_officer = candidates.filter(bidang__unor_id=unor_id).first()
+            if scoped_officer:
+                return scoped_officer
+        return candidates.order_by('-tanggal_mulai', '-pk').first()
 
     def build_pdf(self, scope, bulan, tahun):
-        jumlah_hari, employees, attendance_map, holidays, installation_labels = self.get_report_data(
+        jumlah_hari, employees, attendance_map, holidays, installation_labels, summaries = self.get_report_data(
             scope,
             bulan,
             tahun,
@@ -310,6 +451,13 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
             leading=7,
             alignment=TA_LEFT,
         )
+        signature_style = ParagraphStyle(
+            'AttendancePDFSignature',
+            parent=styles['Normal'],
+            fontSize=8,
+            leading=11,
+            alignment=TA_CENTER,
+        )
         header_style = ParagraphStyle(
             'AttendancePDFHeader',
             parent=styles['Normal'],
@@ -341,6 +489,7 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
                 f'{day}<br/><font size="4">{weekday_labels[current_date.weekday()]}</font>',
                 header_style,
             ))
+        header.extend(Paragraph(label, header_style) for label in SUMMARY_HEADERS)
 
         table_data = [header]
         for number, employee in enumerate(employees, start=1):
@@ -360,6 +509,18 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
             for day in range(1, jumlah_hari + 1):
                 status = attendance_map.get((employee.pk, date(tahun, bulan, day)), '')
                 row.append(STATUS_CODE.get(status, '-'))
+            summary = summaries[employee.pk]
+            row.extend([
+                summary['HADIR'],
+                summary['ALPA'],
+                summary['IZIN'],
+                summary['DINAS'],
+                summary['LIBUR'],
+                summary['BELUM'],
+                format_minutes(summary['late_minutes']),
+                format_minutes(summary['early_minutes']),
+                format_minutes(summary['late_minutes'] + summary['early_minutes']),
+            ])
             table_data.append(row)
 
         if not employees:
@@ -367,18 +528,24 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
                 '',
                 Paragraph('Tidak ada data pegawai pada instalasi dan periode ini.', name_style),
                 '',
-            ] + ['-' for _ in range(jumlah_hari)])
+            ] + ['-' for _ in range(jumlah_hari + len(SUMMARY_HEADERS))])
 
         available_width = landscape(A4)[0] - document.leftMargin - document.rightMargin
         number_width = 7 * mm
         name_width = 39 * mm
         installation_width = 31 * mm
+        summary_widths = [6 * mm] * 6 + [11 * mm] * 3
         day_width = (
             available_width - number_width - name_width - installation_width
+            - sum(summary_widths)
         ) / jumlah_hari
         table = LongTable(
             table_data,
-            colWidths=[number_width, name_width, installation_width] + [day_width] * jumlah_hari,
+            colWidths=(
+                [number_width, name_width, installation_width]
+                + [day_width] * jumlah_hari
+                + summary_widths
+            ),
             repeatRows=1,
             hAlign='CENTER',
         )
@@ -446,19 +613,56 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ]))
         story.append(legend)
+        story.append(Spacer(1, 5 * mm))
+
+        officer = self.get_signature_officer(scope)
+        officer_name = (
+            officer.pejabat.full_name_2
+            if officer is not None
+            else 'Pejabat belum ditetapkan'
+        )
+        officer_title = (
+            officer.nama_jabatan
+            if officer is not None and officer.nama_jabatan
+            else 'Kepala Bagian Tata Usaha'
+        )
+        signature = Table(
+            [[
+                '',
+                Paragraph(
+                    f'Pujut, {format_indonesian_date(current_local_date())}'
+                    f'<br/>{escape(officer_title)},'
+                    f'<br/><br/><br/><br/><b><u>{escape(officer_name)}</u></b>',
+                    signature_style,
+                ),
+            ]],
+            colWidths=[available_width * 0.64, available_width * 0.36],
+            hAlign='RIGHT',
+        )
+        signature.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        story.append(signature)
 
         def add_page_number(canvas, doc):
             canvas.saveState()
             canvas.setFont('Helvetica', 6)
             canvas.setFillColor(colors.HexColor('#555555'))
+            canvas.drawCentredString(
+                landscape(A4)[0] / 2,
+                8.5 * mm,
+                AUTOMATED_DOCUMENT_NOTICE,
+            )
             canvas.drawString(
                 document.leftMargin,
-                6 * mm,
+                5.5 * mm,
                 f'Dicetak dari SIMADU pada {timezone.now().strftime("%d-%m-%Y %H:%M")}',
             )
             canvas.drawRightString(
                 landscape(A4)[0] - document.rightMargin,
-                6 * mm,
+                5.5 * mm,
                 f'Halaman {doc.page}',
             )
             canvas.restoreState()
@@ -474,7 +678,7 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
         return response
 
     def build_excel(self, scope, bulan, tahun):
-        jumlah_hari, employees, attendance_map, holidays, installation_labels = self.get_report_data(
+        jumlah_hari, employees, attendance_map, holidays, installation_labels, summaries = self.get_report_data(
             scope,
             bulan,
             tahun,
@@ -483,7 +687,7 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
         workbook = Workbook()
         worksheet = workbook.active
         worksheet.title = 'Presensi Bulanan'
-        last_column = 4 + jumlah_hari
+        last_column = 4 + jumlah_hari + len(SUMMARY_HEADERS)
         last_column_letter = get_column_letter(last_column)
 
         worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_column)
@@ -503,7 +707,11 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
         worksheet['A3'].alignment = Alignment(horizontal='center')
 
         header_row = 5
-        headers = ['No', 'Nama Pegawai', 'NIP', 'Instalasi'] + list(range(1, jumlah_hari + 1))
+        headers = (
+            ['No', 'Nama Pegawai', 'NIP', 'Instalasi']
+            + list(range(1, jumlah_hari + 1))
+            + list(SUMMARY_HEADERS)
+        )
         thin_border = Border(
             left=Side(style='thin', color='808080'),
             right=Side(style='thin', color='808080'),
@@ -528,7 +736,7 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
             cell.border = thin_border
             cell.fill = header_fill
 
-            if column >= 5:
+            if 5 <= column <= 4 + jumlah_hari:
                 current_date = date(tahun, bulan, column - 4)
                 if current_date.weekday() == 6 or current_date in holidays:
                     cell.fill = holiday_fill
@@ -551,6 +759,18 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
             for day in range(1, jumlah_hari + 1):
                 status = attendance_map.get((employee.pk, date(tahun, bulan, day)), '')
                 row_values.append(STATUS_CODE.get(status, '-'))
+            summary = summaries[employee.pk]
+            row_values.extend([
+                summary['HADIR'],
+                summary['ALPA'],
+                summary['IZIN'],
+                summary['DINAS'],
+                summary['LIBUR'],
+                summary['BELUM'],
+                format_minutes(summary['late_minutes']),
+                format_minutes(summary['early_minutes']),
+                format_minutes(summary['late_minutes'] + summary['early_minutes']),
+            ])
 
             for column, value in enumerate(row_values, start=1):
                 cell = worksheet.cell(row=row_number, column=column, value=value)
@@ -560,7 +780,7 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
                     horizontal='left' if column in {2, 3, 4} else 'center',
                     vertical='center',
                 )
-                if column >= 5:
+                if 5 <= column <= 4 + jumlah_hari:
                     cell.fill = status_fills.get(value, status_fills['-'])
                     if value == 'A':
                         cell.font = Font(name='Arial', size=9, bold=True, color='990000')
@@ -592,7 +812,8 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
             validation.prompt = 'H=Hadir, A=Alpa, I=Izin/Cuti, D=Dinas, L=Libur, -=Belum Dinilai'
             validation.promptTitle = 'Kode status presensi'
             worksheet.add_data_validation(validation)
-            validation.add(f'E{first_data_row}:{last_column_letter}{last_data_row}')
+            last_day_letter = get_column_letter(4 + jumlah_hari)
+            validation.add(f'E{first_data_row}:{last_day_letter}{last_data_row}')
 
         legend_row = last_data_row + 2
         worksheet.cell(row=legend_row, column=1, value='Legenda:').font = Font(
@@ -612,12 +833,69 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
             cell = worksheet.cell(row=legend_row, column=offset, value=legend_text)
             cell.font = Font(name='Arial', size=9)
 
+        officer = self.get_signature_officer(scope)
+        officer_name = (
+            officer.pejabat.full_name_2
+            if officer is not None
+            else 'Pejabat belum ditetapkan'
+        )
+        officer_title = (
+            officer.nama_jabatan
+            if officer is not None and officer.nama_jabatan
+            else 'Kepala Bagian Tata Usaha'
+        )
+        signature_start_row = legend_row + 3
+        signature_start_column = max(5, last_column - 4)
+        worksheet.merge_cells(
+            start_row=signature_start_row,
+            start_column=signature_start_column,
+            end_row=signature_start_row,
+            end_column=last_column,
+        )
+        worksheet.cell(
+            row=signature_start_row,
+            column=signature_start_column,
+            value=f'Pujut, {format_indonesian_date(current_local_date())}',
+        )
+        worksheet.merge_cells(
+            start_row=signature_start_row + 1,
+            start_column=signature_start_column,
+            end_row=signature_start_row + 1,
+            end_column=last_column,
+        )
+        worksheet.cell(
+            row=signature_start_row + 1,
+            column=signature_start_column,
+            value=f'{officer_title},',
+        )
+        worksheet.merge_cells(
+            start_row=signature_start_row + 6,
+            start_column=signature_start_column,
+            end_row=signature_start_row + 6,
+            end_column=last_column,
+        )
+        signature_name_cell = worksheet.cell(
+            row=signature_start_row + 6,
+            column=signature_start_column,
+            value=officer_name,
+        )
+        signature_name_cell.font = Font(name='Arial', size=10, bold=True, underline='single')
+        for row in (signature_start_row, signature_start_row + 1, signature_start_row + 6):
+            worksheet.cell(row=row, column=signature_start_column).alignment = Alignment(
+                horizontal='center',
+                vertical='center',
+            )
+
         worksheet.column_dimensions['A'].width = 6
         worksheet.column_dimensions['B'].width = 32
         worksheet.column_dimensions['C'].width = 22
         worksheet.column_dimensions['D'].width = 26
-        for column in range(5, last_column + 1):
+        for column in range(5, 5 + jumlah_hari):
             worksheet.column_dimensions[get_column_letter(column)].width = 5
+        for column in range(5 + jumlah_hari, last_column + 1):
+            worksheet.column_dimensions[get_column_letter(column)].width = (
+                13 if column > last_column - 3 else 9
+            )
 
         worksheet.freeze_panes = 'E6'
         worksheet.auto_filter.ref = f'A{header_row}:{last_column_letter}{last_data_row}'
@@ -627,7 +905,12 @@ class DownloadPresensiBulananPDFView(LoginRequiredMixin, View):
         worksheet.page_setup.fitToHeight = 0
         worksheet.sheet_properties.pageSetUpPr.fitToPage = True
         worksheet.print_title_rows = f'{header_row}:{header_row}'
-        worksheet.print_area = f'A1:{last_column_letter}{legend_row}'
+        worksheet.print_area = (
+            f'A1:{last_column_letter}{signature_start_row + 6}'
+        )
+        worksheet.oddFooter.center.text = AUTOMATED_DOCUMENT_NOTICE
+        worksheet.oddFooter.center.size = 8
+        worksheet.oddFooter.center.font = 'Arial'
 
         safe_scope = slugify(scope['slug']) or 'presensi'
         filename = f'presensi-{safe_scope}-{tahun}-{bulan:02d}.xlsx'

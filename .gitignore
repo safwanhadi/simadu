@@ -64,3 +64,8 @@ db.sqlite3
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+# Local Codex work reports sent separately to Lapkin
+.work-reports/
+AGENTS.md
+docs/work-report.schema.json
+docs/work-report.example.json

@@ -1,0 +1,128 @@
+.service-shell {
+    max-width: 1280px;
+    margin: 0 auto;
+}
+
+.service-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.service-page-title {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 600;
+}
+
+.service-page-subtitle {
+    margin: .25rem 0 0;
+    color: #6c757d;
+    font-size: .875rem;
+}
+
+.service-card {
+    border: 0;
+    border-radius: .5rem;
+    box-shadow: 0 .125rem .5rem rgba(0, 0, 0, .08);
+    overflow: hidden;
+}
+
+.service-card > .card-header {
+    min-height: 58px;
+    padding: .85rem 1.25rem;
+    background: #fff;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.service-card > .card-body {
+    padding: 1.25rem;
+}
+
+.service-card > .card-footer {
+    padding: .85rem 1.25rem;
+    background: #fff;
+    border-top: 1px solid #e9ecef;
+}
+
+.service-table {
+    margin-bottom: 0;
+}
+
+.service-table thead th {
+    border-top: 0;
+    background: #f8f9fa;
+    color: #495057;
+    font-size: .78rem;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+    vertical-align: middle;
+}
+
+.service-table td {
+    vertical-align: middle;
+}
+
+.service-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem;
+}
+
+.service-detail-section + .service-detail-section {
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid #e9ecef;
+}
+
+.service-detail-title {
+    margin-bottom: 1rem;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.service-detail-row,
+.service-detail-section > .row {
+    padding: .55rem 0;
+    border-bottom: 1px dashed #e9ecef;
+}
+
+.service-detail-row:last-child,
+.service-detail-section > .row:last-of-type {
+    border-bottom: 0;
+}
+
+.service-summary-label {
+    display: block;
+    margin-bottom: .2rem;
+    color: #6c757d;
+    font-size: .75rem;
+    font-weight: 600;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+}
+
+.service-form-note {
+    border: 0;
+    border-left: 4px solid #17a2b8;
+    border-radius: .25rem;
+    background: #eef8fa;
+}
+
+@media (max-width: 767.98px) {
+    .service-page-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .service-page-header .btn,
+    .service-page-header .service-actions {
+        width: 100%;
+    }
+
+    .service-page-header .service-actions .btn {
+        flex: 1;
+    }
+}

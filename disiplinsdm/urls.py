@@ -43,6 +43,11 @@ from .views import (
     DetailPresensiPegawaiView,
     DownloadRekapPresensiExcelView,
     RawPresensiDatabaseListView,
+    MappingMesinAbsensiListView,
+    MappingMesinAbsensiCreateView,
+    MappingMesinAbsensiUpdateView,
+    MappingMesinAbsensiDeleteView,
+    MappingPegawaiAutocompleteView,
 )
 
 urlpatterns = [
@@ -99,4 +104,9 @@ urlpatterns = [
     path('rekap-khadiran/<int:pk>/update/', UpdatePresensiPegawaiView.as_view(), name='update_kehadiran_pegawai'),
     path('rekap/download-excel/', DownloadRekapPresensiExcelView.as_view(), name='download_excel'),
     path('rekap/download-pdf/', DownloadPresensiBulananPDFView.as_view(), name='download_presensi_pdf'),
+    path('mapping-fingerprint/', MappingMesinAbsensiListView.as_view(), name='mapping_mesin_absensi_list'),
+    path('mapping-fingerprint/tambah/', MappingMesinAbsensiCreateView.as_view(), name='mapping_mesin_absensi_create'),
+    path('mapping-fingerprint/pegawai-autocomplete/', MappingPegawaiAutocompleteView.as_view(), name='mapping_pegawai_autocomplete'),
+    path('mapping-fingerprint/<int:pk>/ubah/', MappingMesinAbsensiUpdateView.as_view(), name='mapping_mesin_absensi_update'),
+    path('mapping-fingerprint/<int:pk>/hapus/', MappingMesinAbsensiDeleteView.as_view(), name='mapping_mesin_absensi_delete'),
 ]

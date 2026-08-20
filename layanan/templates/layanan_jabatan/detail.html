@@ -1,32 +1,47 @@
 {% extends 'base.html' %}
+{% load static %}
+
+{% block styles %}
+<link rel="stylesheet" href="{% static 'src/service-module.css' %}">
+{% endblock styles %}
 
 {% block content %}
-<div class="card card-solid">
+<div class="service-shell">
+<div class="card service-card">
     <div class="card-header d-flex align-items-center">
-        <h5 class="mb-0">{{ card_title }}</h5>
-        {% if request.user.is_jabatan_admin %}
-        <a href="{% url 'layanan_urls:layanan_jabatan_process' pk=usulan.pk %}" class="btn btn-primary btn-sm ml-auto">Proses Usulan</a>
+        <h5 class="service-page-title"><i class="fas fa-file-alt text-primary mr-2"></i>{{ card_title }}</h5>
+        {% if is_jabatan_scope_admin %}
+        <a href="{% url 'layanan_urls:layanan_jabatan_process' pk=usulan.pk %}" class="btn btn-primary btn-sm ml-auto"><i class="fas fa-cogs mr-1"></i>Proses Usulan</a>
         {% endif %}
     </div>
     <div class="card-body">
+        <div class="service-detail-section">
+        <h6 class="service-detail-title">Informasi Pengajuan</h6>
         <div class="row mb-2"><div class="col-md-3 font-weight-bold">Pegawai</div><div class="col-md-9">{{ usulan.pegawai.full_name }}</div></div>
         <div class="row mb-2"><div class="col-md-3 font-weight-bold">Periode</div><div class="col-md-9">{{ usulan.periode|date:'F Y'|default:'-' }}</div></div>
         <div class="row mb-2"><div class="col-md-3 font-weight-bold">Kategori Pengelolaan</div><div class="col-md-9">{{ usulan.get_kategori_pengelolaan_display }}</div></div>
         <div class="row mb-2"><div class="col-md-3 font-weight-bold">Jabatan Diusulkan</div><div class="col-md-9">{{ usulan.jabatan_diusulkan|default:'-' }}</div></div>
         <div class="row mb-2"><div class="col-md-3 font-weight-bold">Formasi</div><div class="col-md-9">{% if usulan.formasi_tersedia %}Tersedia{% else %}Belum tersedia{% endif %}</div></div>
-        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Status</div><div class="col-md-9">{{ usulan.get_status_display }}</div></div>
-        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Uji Kompetensi</div><div class="col-md-9">{{ usulan.kompetensi|default:'-' }}</div></div>
-        <div class="row mb-2"><div class="col-md-3 font-weight-bold">PAK Terakhir</div><div class="col-md-9">{{ usulan.pak|default:'-' }}</div></div>
-        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Pendidikan</div><div class="col-md-9">{{ usulan.pendidikan|default:'-' }}</div></div>
-        <div class="row mb-2"><div class="col-md-3 font-weight-bold">STR Profesi</div><div class="col-md-9">{{ usulan.str_profesi|default:'-' }}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Status</div><div class="col-md-9"><span class="badge badge-{% if usulan.status == 'selesai' %}success{% elif usulan.status == 'proses' %}warning{% else %}info{% endif %}">{{ usulan.get_status_display }}</span></div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">Uji Kompetensi</div><div class="col-md-9">{{ usulan.kompetensi|default:'-' }}{% if usulan.kompetensi.file_sert %} <a href="{{ usulan.kompetensi.file_sert.url }}" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm ml-2"><i class="fas fa-eye mr-1"></i>Lihat Sertifikat</a>{% endif %}</div></div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">PAK Terakhir</div><div class="col-md-9">{{ usulan.pak|default:'-' }}{% if usulan.pak.file %} <a href="{{ usulan.pak.file.url }}" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm ml-2"><i class="fas fa-eye mr-1"></i>Lihat Dokumen</a>{% endif %}</div></div>
+        <div class="row mb-2">
+            <div class="col-md-3 font-weight-bold">Pendidikan</div>
+            <div class="col-md-9">
+                {{ usulan.pendidikan|default:'-' }}
+                {% if usulan.pendidikan.file_ijazah %}<a href="{{ usulan.pendidikan.file_ijazah.url }}" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm ml-2"><i class="fas fa-eye mr-1"></i>Ijazah</a>{% endif %}
+            </div>
+        </div>
+        <div class="row mb-2"><div class="col-md-3 font-weight-bold">STR Profesi</div><div class="col-md-9">{{ usulan.str_profesi|default:'-' }}{% if usulan.str_profesi.file_str %} <a href="{{ usulan.str_profesi.file_str.url }}" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm ml-2"><i class="fas fa-eye mr-1"></i>Lihat STR</a>{% endif %}</div></div>
         <div class="row mb-2">
             <div class="col-md-3 font-weight-bold">Kinerja Dua Tahun</div>
-            <div class="col-md-9">{% for item in usulan.kinerja_dua_thn.all %}<div>{{ item }}</div>{% empty %}-{% endfor %}</div>
+            <div class="col-md-9">{% for item in usulan.kinerja_dua_thn.all %}<div class="mb-1">{{ item }}{% if item.file %} <a href="{{ item.file.url }}" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm ml-2"><i class="fas fa-eye mr-1"></i>Lihat Dokumen</a>{% endif %}</div>{% empty %}-{% endfor %}</div>
+        </div>
         </div>
 
         {% if hasil_jabatan %}
-        <hr>
-        <h5>Hasil Kenaikan Jabatan</h5>
+        <div class="service-detail-section">
+        <h6 class="service-detail-title"><i class="fas fa-check-circle text-success mr-1"></i>Hasil Kenaikan Jabatan</h6>
         <div class="row mb-2"><div class="col-md-3 font-weight-bold">Jenis Jabatan</div><div class="col-md-9">{{ hasil_jabatan.get_jns_jabatan_display }}</div></div>
         <div class="row mb-2"><div class="col-md-3 font-weight-bold">Nama Jabatan</div><div class="col-md-9">{{ hasil_jabatan.nama_jabatan }}{% if hasil_jabatan.detail_nama_jabatan %} - {{ hasil_jabatan.detail_nama_jabatan }}{% endif %}</div></div>
         <div class="row mb-2"><div class="col-md-3 font-weight-bold">Jenjang</div><div class="col-md-9">{{ hasil_jabatan.jenjang_jabatan|default:'-' }}</div></div>
@@ -35,13 +50,15 @@
         {% if hasil_jabatan.file %}
         <a href="{{ hasil_jabatan.file.url }}" class="btn btn-success btn-sm" target="_blank"><i class="fas fa-download"></i> Unduh SK</a>
         {% endif %}
+        </div>
         {% endif %}
     </div>
     <div class="card-footer">
-        <a href="{% url 'layanan_urls:layanan_jabatan_list' %}" class="btn btn-secondary">Kembali</a>
-        {% if not request.user.is_jabatan_admin and usulan.status == 'pengajuan' %}
+        <a href="{% url 'layanan_urls:layanan_jabatan_list' %}" class="btn btn-outline-secondary"><i class="fas fa-arrow-left mr-1"></i>Kembali</a>
+        {% if not is_jabatan_scope_admin and usulan.status == 'pengajuan' %}
         <a href="{% url 'layanan_urls:layanan_jabatan_update' pk=usulan.pk %}" class="btn btn-warning">Ubah Usulan</a>
         {% endif %}
     </div>
+</div>
 </div>
 {% endblock %}

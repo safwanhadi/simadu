@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from dokumen.models import KlaimCutiTunda, RiwayatCuti
-from myaccount.models import Users
+from myaccount.models import AdminScopeAssignment, Users
 from myaccount.roles import ADMIN_LAYANAN_CUTI
 
 from .forms import Verifikator2CutiForm, Verifikator3CutiForm
@@ -44,6 +44,11 @@ class CutiSecurityTests(TestCase):
         )
         group, _ = Group.objects.get_or_create(name=ADMIN_LAYANAN_CUTI)
         self.admin_cuti.groups.add(group)
+        AdminScopeAssignment.objects.create(
+            user=self.admin_cuti,
+            group=group,
+            scope_type=AdminScopeAssignment.GLOBAL,
+        )
         self.layanan_jenis = JenisLayanan.objects.create(
             nama='Cuti', url='cuti-test', status=True
         )
@@ -82,6 +87,124 @@ class CutiSecurityTests(TestCase):
 
         self.client.force_login(self.admin_cuti)
         self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_kepala_melihat_pelimpahan_yang_masih_menunggu_penerima(self):
+        pelimpahan = PelimpahanTugas.objects.create(
+            riwayat_cuti=self.riwayat,
+            pemberi_tugas=self.pemilik,
+            penerima_tugas=self.admin_cuti,
+            atasan_penyetuju=self.orang_lain,
+            deskripsi_tugas='Menjalankan tugas selama cuti',
+            tgl_mulai=self.riwayat.tgl_mulai_cuti,
+            tgl_selesai=self.riwayat.tgl_akhir_cuti,
+            status='menunggu_penerima',
+            butuh_persetujuan_atasan=True,
+        )
+        self.client.force_login(self.orang_lain)
+
+        response = self.client.get(
+            reverse('layanan_urls:pelimpahan_atasan_list')
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.pemilik.full_name)
+        self.assertContains(response, 'Menunggu persetujuan penerima tugas')
+        self.assertContains(response, 'Belum dapat diparaf')
+        self.assertNotContains(
+            response,
+            reverse(
+                'layanan_urls:pelimpahan_atasan_update',
+                kwargs={'pk': pelimpahan.pk},
+            ),
+        )
+
+    def test_tombol_paraf_kepala_muncul_setelah_penerima_setuju(self):
+        pelimpahan = PelimpahanTugas.objects.create(
+            riwayat_cuti=self.riwayat,
+            pemberi_tugas=self.pemilik,
+            penerima_tugas=self.admin_cuti,
+            atasan_penyetuju=self.orang_lain,
+            deskripsi_tugas='Menjalankan tugas selama cuti',
+            tgl_mulai=self.riwayat.tgl_mulai_cuti,
+            tgl_selesai=self.riwayat.tgl_akhir_cuti,
+            status='menunggu_atasan',
+            persetujuan_penerima='disetujui',
+            butuh_persetujuan_atasan=True,
+        )
+        self.client.force_login(self.orang_lain)
+
+        response = self.client.get(
+            reverse('layanan_urls:pelimpahan_atasan_list')
+        )
+
+        self.assertContains(response, 'Menunggu persetujuan Anda')
+        self.assertContains(
+            response,
+            reverse(
+                'layanan_urls:pelimpahan_atasan_update',
+                kwargs={'pk': pelimpahan.pk},
+            ),
+        )
+
+    def test_admin_cuti_dapat_monitor_tanpa_mengambil_keputusan_kepala(self):
+        pelimpahan = PelimpahanTugas.objects.create(
+            riwayat_cuti=self.riwayat,
+            pemberi_tugas=self.pemilik,
+            penerima_tugas=self.admin_cuti,
+            atasan_penyetuju=self.orang_lain,
+            deskripsi_tugas='Menjalankan tugas selama cuti',
+            tgl_mulai=self.riwayat.tgl_mulai_cuti,
+            tgl_selesai=self.riwayat.tgl_akhir_cuti,
+            status='menunggu_atasan',
+            persetujuan_penerima='disetujui',
+            butuh_persetujuan_atasan=True,
+        )
+        self.client.force_login(self.admin_cuti)
+
+        response = self.client.get(
+            reverse('layanan_urls:pelimpahan_atasan_list')
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.pemilik.full_name)
+        self.assertContains(response, self.orang_lain.full_name)
+        self.assertContains(response, 'Monitoring')
+        decision_url = reverse(
+            'layanan_urls:pelimpahan_atasan_update',
+            kwargs={'pk': pelimpahan.pk},
+        )
+        self.assertNotContains(response, decision_url)
+        self.assertEqual(self.client.get(decision_url).status_code, 404)
+
+    def test_admin_cuti_dapat_monitor_persetujuan_penerima_tanpa_mengambil_alih(self):
+        pelimpahan = PelimpahanTugas.objects.create(
+            riwayat_cuti=self.riwayat,
+            pemberi_tugas=self.pemilik,
+            penerima_tugas=self.orang_lain,
+            deskripsi_tugas='Menjalankan tugas selama cuti',
+            tgl_mulai=self.riwayat.tgl_mulai_cuti,
+            tgl_selesai=self.riwayat.tgl_akhir_cuti,
+            status='menunggu_penerima',
+            butuh_persetujuan_atasan=False,
+        )
+        self.client.force_login(self.admin_cuti)
+
+        response = self.client.get(
+            reverse('layanan_urls:pelimpahan_penerima_list')
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Monitoring Persetujuan Penerima Tugas')
+        self.assertContains(response, self.pemilik.full_name)
+        self.assertContains(response, self.orang_lain.full_name)
+        self.assertContains(response, 'Belum memberikan keputusan')
+        self.assertContains(response, 'Monitoring')
+        decision_url = reverse(
+            'layanan_urls:pelimpahan_penerima_update',
+            kwargs={'pk': pelimpahan.pk},
+        )
+        self.assertNotContains(response, decision_url)
+        self.assertEqual(self.client.get(decision_url).status_code, 404)
 
     def test_admin_dapat_memutihkan_pengajuan_dengan_log_audit(self):
         self.client.force_login(self.admin_cuti)
@@ -233,12 +356,36 @@ class CutiSecurityTests(TestCase):
         self.assertNotContains(hasil, 'Simpan Verifikasi')
         self.assertTrue(all(field.disabled for field in hasil.context['form'].fields.values()))
 
+    def test_pencarian_riwayat_cuti_saya_memfilter_data(self):
+        self.client.force_login(self.pemilik)
+        url = reverse('layanan_urls:layanan_cuti_listview')
+
+        ditemukan = self.client.get(url, {'q': 'Tahunan'})
+        tidak_ditemukan = self.client.get(url, {'q': 'kata-kunci-tidak-ada'})
+
+        self.assertEqual(ditemukan.status_code, 200)
+        self.assertQuerySetEqual(ditemukan.context['data'], [self.riwayat])
+        self.assertEqual(ditemukan.context['search_query'], 'Tahunan')
+        self.assertQuerySetEqual(tidak_ditemukan.context['data'], [])
+
+    def test_pencarian_riwayat_cuti_bawahan_memfilter_data_dalam_scope(self):
+        self.client.force_login(self.admin_cuti)
+        url = reverse('layanan_urls:layanan_cuti_bawahan_listview')
+
+        ditemukan = self.client.get(url, {'q': 'Pemilik'})
+        tidak_ditemukan = self.client.get(url, {'q': 'kata-kunci-tidak-ada'})
+
+        self.assertEqual(ditemukan.status_code, 200)
+        self.assertQuerySetEqual(ditemukan.context['data'], [self.riwayat])
+        self.assertEqual(ditemukan.context['search_query'], 'Pemilik')
+        self.assertQuerySetEqual(tidak_ditemukan.context['data'], [])
+
     def test_atasan_dalam_lingkup_bawahan_dapat_membuka_detail_dan_monitoring(self):
         VerifikasiCuti.objects.create(layanan_cuti=self.layanan)
         self.client.force_login(self.orang_lain)
 
         with patch(
-            'layanan.cuti_access.can_supervise_employee',
+            'layanan.access.cuti.can_supervise_employee',
             return_value=True,
         ):
             detail = self.client.get(

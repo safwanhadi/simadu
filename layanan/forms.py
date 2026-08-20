@@ -7,6 +7,25 @@ from django.db.models import Sum, F, Q
 from django.db.models.functions import Coalesce
 
 from dokumen.models import RiwayatPanggol, RiwayatPenempatan
+from .access.cuti import filter_users_for_leave_admin, is_leave_admin
+from .access.sip import (
+    filter_users_for_sip_role,
+    is_sip_admin,
+    is_sip_structural_officer,
+)
+from .access.berkala import (
+    filter_berkala_queryset,
+    filter_users_for_berkala_role,
+    is_berkala_admin,
+    is_berkala_structural_officer,
+)
+from .access.promotion import (
+    filter_users_for_jabatan_role,
+    filter_users_for_pangkat_role,
+    is_jabatan_admin,
+    is_pangkat_admin,
+    is_promotion_structural_officer,
+)
 from .models import (
     LayananCuti, 
     JenisLayanan, 
@@ -34,6 +53,7 @@ from dokumen.forms import (
     RiwayatPengajuanCutiForm,
 )
 from myaccount.models import Users
+from disiplinsdm.models import PolaKerjaPegawai
 from dokumen.models import (
     RiwayatCuti, 
     RiwayatGajiBerkala, 
@@ -59,6 +79,50 @@ bootstrap_col = 'form-control col-md-12'
 select2_col = f'{bootstrap_col} select2'
 
 
+class PolaKerjaPegawaiForm(forms.ModelForm):
+    class Meta:
+        model = PolaKerjaPegawai
+        fields = (
+            'pegawai', 'pola_kerja', 'berlaku_mulai',
+            'berlaku_sampai', 'keterangan',
+        )
+        widgets = {
+            'pegawai': forms.Select(attrs={
+                'class': select2_col,
+                'data-placeholder': 'Cari pegawai',
+            }),
+            'pola_kerja': forms.Select(attrs={'class': bootstrap_col}),
+            'berlaku_mulai': forms.DateInput(attrs={
+                'class': bootstrap_col,
+                'type': 'date',
+            }),
+            'berlaku_sampai': forms.DateInput(attrs={
+                'class': bootstrap_col,
+                'type': 'date',
+            }),
+            'keterangan': forms.TextInput(attrs={
+                'class': bootstrap_col,
+                'placeholder': 'Opsional',
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.request = kwargs.pop('request', None)
+        super().__init__(*args, **kwargs)
+        queryset = Users.objects.filter(is_active=True).exclude(
+            is_superuser=True
+        ).order_by('first_name', 'last_name', 'email')
+        if self.request:
+            queryset = filter_users_for_leave_admin(
+                queryset,
+                self.request.user,
+            )
+        self.fields['pegawai'].queryset = queryset
+
+        if self.instance and self.instance.pk:
+            self.fields['pegawai'].disabled = True
+
+
 class LayananNaikPangkatForm(forms.ModelForm):
     class Meta:
         model = LayananNaikPangkat
@@ -80,7 +144,19 @@ class LayananNaikPangkatForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
-        if user and not user.is_pangkat_admin:
+        allowed_users = Users.objects.none()
+        can_select_employee = False
+        if user:
+            allowed_users = filter_users_for_pangkat_role(
+                Users.objects.filter(is_active=True).exclude(is_superuser=True),
+                user,
+            )
+            self.fields['pegawai'].queryset = allowed_users
+            can_select_employee = bool(
+                is_pangkat_admin(user)
+                or is_promotion_structural_officer(user)
+            )
+        if user and not can_select_employee:
             queryset = Users.objects.filter(pk=user.pk)
             self.fields['pegawai'].queryset = queryset
             self.fields['pegawai'].initial = queryset.first()
@@ -100,27 +176,53 @@ class LayananNaikPangkatForm(forms.ModelForm):
                 self.fields[field_name].queryset = self.fields[field_name].queryset.none()
             return
 
+        selected_employee = self._selected_employee(user, allowed_users)
         self.fields['sk_kp_terakhir'].queryset = RiwayatPanggol.objects.filter(
-            pegawai=user
+            pegawai=selected_employee
         ).order_by('-tmt_gol', '-id')
         self.fields['kinerja_dua_thn'].queryset = RiwayatKinerja.objects.filter(
-            pegawai=user
+            pegawai=selected_employee
         ).order_by('-periode_kinerja_akhir', '-id')
         self.fields['sk_jabfung'].queryset = RiwayatJabatan.objects.filter(
-            pegawai=user
+            pegawai=selected_employee
         ).order_by('-tmt_jabatan', '-id')
         self.fields['pak'].queryset = RiwayatPAK.objects.filter(
-            pegawai=user
+            pegawai=selected_employee
         ).order_by('-tgl_srt', '-id')
         self.fields['pendidikan'].queryset = RiwayatPendidikan.objects.filter(
-            pegawai=user
+            pegawai=selected_employee
         ).order_by('-tgl_lulus', '-id')
         self.fields['pengangkatan'].queryset = RiwayatPengangkatan.objects.filter(
-            pegawai=user
+            pegawai=selected_employee
         ).order_by('-tgl_srt_putusan', '-id')
         self.fields['mutasi'].queryset = RiwayatBekerja.objects.filter(
-            pegawai=user
+            pegawai=selected_employee
         ).order_by('-tgl_mulai', '-id')
+
+    def _selected_employee(self, user, allowed_users):
+        employee_id = self.data.get('pegawai') if self.is_bound else None
+        if not employee_id and self.instance and self.instance.pk:
+            employee_id = self.instance.pegawai_id
+        if not employee_id and user and allowed_users.filter(pk=user.pk).exists():
+            employee_id = user.pk
+        return allowed_users.filter(pk=employee_id).first()
+
+    def clean(self):
+        cleaned_data = super().clean()
+        employee = cleaned_data.get('pegawai')
+        related_fields = (
+            'sk_kp_terakhir', 'sk_jabfung', 'pendidikan',
+            'pengangkatan', 'mutasi',
+        )
+        for field_name in related_fields:
+            value = cleaned_data.get(field_name)
+            if employee and value and value.pegawai_id != employee.pk:
+                self.add_error(field_name, 'Dokumen harus milik pegawai yang dipilih.')
+        for field_name in ('kinerja_dua_thn', 'pak'):
+            values = cleaned_data.get(field_name)
+            if employee and values and values.exclude(pegawai=employee).exists():
+                self.add_error(field_name, 'Semua dokumen harus milik pegawai yang dipilih.')
+        return cleaned_data
 
     def clean_kinerja_dua_thn(self):
         values = self.cleaned_data['kinerja_dua_thn']
@@ -194,7 +296,19 @@ class LayananNaikJabatanForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         if not self.is_bound and not self.instance.pk:
             self.initial['periode'] = date.today().replace(day=1)
-        if user and not user.is_jabatan_admin:
+        allowed_users = Users.objects.none()
+        can_select_employee = False
+        if user:
+            allowed_users = filter_users_for_jabatan_role(
+                Users.objects.filter(is_active=True).exclude(is_superuser=True),
+                user,
+            )
+            self.fields['pegawai'].queryset = allowed_users
+            can_select_employee = bool(
+                is_jabatan_admin(user)
+                or is_promotion_structural_officer(user)
+            )
+        if user and not can_select_employee:
             queryset = Users.objects.filter(pk=user.pk)
             self.fields['pegawai'].queryset = queryset
             self.fields['pegawai'].initial = queryset.first()
@@ -218,21 +332,49 @@ class LayananNaikJabatanForm(forms.ModelForm):
                 self.fields[field_name].queryset = self.fields[field_name].queryset.none()
             return
 
+        selected_employee = self._selected_employee(user, allowed_users)
         self.fields['kinerja_dua_thn'].queryset = RiwayatKinerja.objects.filter(
-            pegawai=user
+            pegawai=selected_employee
         ).order_by('-periode_kinerja_akhir', '-id')
         self.fields['kompetensi'].queryset = UjiKompetensi.objects.filter(
-            pegawai=user
+            pegawai=selected_employee
         ).order_by('-tgl_sert_ujikomp', '-id')
         self.fields['pendidikan'].queryset = RiwayatPendidikan.objects.filter(
-            pegawai=user
+            pegawai=selected_employee
         ).order_by('-tgl_lulus', '-id')
         self.fields['str_profesi'].queryset = RiwayatProfesi.objects.filter(
-            pegawai=user
+            pegawai=selected_employee
         ).order_by('-tgl_str', '-id')
         self.fields['pak'].queryset = RiwayatPAK.objects.filter(
-            pegawai=user
+            pegawai=selected_employee
         ).order_by('-tgl_srt', '-id')
+
+    def _selected_employee(self, user, allowed_users):
+        employee_id = self.data.get('pegawai') if self.is_bound else None
+        if not employee_id and self.instance and self.instance.pk:
+            employee_id = self.instance.pegawai_id
+        if not employee_id and user and allowed_users.filter(pk=user.pk).exists():
+            employee_id = user.pk
+        return allowed_users.filter(pk=employee_id).first()
+
+    def clean(self):
+        cleaned_data = super().clean()
+        employee = cleaned_data.get('pegawai')
+        for field_name in ('kompetensi', 'pendidikan', 'str_profesi', 'pak'):
+            value = cleaned_data.get(field_name)
+            if employee and value and value.pegawai_id != employee.pk:
+                self.add_error(field_name, 'Dokumen harus milik pegawai yang dipilih.')
+        performance = cleaned_data.get('kinerja_dua_thn')
+        if (
+            employee
+            and performance
+            and performance.exclude(pegawai=employee).exists()
+        ):
+            self.add_error(
+                'kinerja_dua_thn',
+                'Semua dokumen harus milik pegawai yang dipilih.',
+            )
+        return cleaned_data
 
     def clean_periode(self):
         return self.cleaned_data['periode'].replace(day=1)
@@ -304,7 +446,18 @@ class FormLayananBerkala(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request=kwargs.pop("request", None)
         super(FormLayananBerkala, self).__init__(*args, **kwargs)
-        if self.request and not self.request.user.is_berkala_admin:
+        if self.request:
+            allowed_users = filter_users_for_berkala_role(
+                Users.objects.filter(is_active=True), self.request.user
+            )
+            self.fields['pegawai'].queryset = allowed_users
+            self.fields['riwayat'].queryset = filter_berkala_queryset(
+                RiwayatGajiBerkala.objects.all(), self.request.user
+            )
+        if self.request and not (
+            is_berkala_admin(self.request.user)
+            or is_berkala_structural_officer(self.request.user)
+        ):
             queryset = Users.objects.filter(pk=self.request.user.pk)
             self.fields['pegawai'].queryset = queryset
             self.fields['pegawai'].initial = queryset.first()
@@ -313,6 +466,17 @@ class FormLayananBerkala(forms.ModelForm):
             self.fields['layanan'].widget=forms.HiddenInput()
             self.fields['status'].widget=forms.HiddenInput()
             self.fields['riwayat'].label = 'Riwayat Kenaikan Gaji Berkala Sebelumnya'
+
+    def clean(self):
+        cleaned_data = super().clean()
+        pegawai = cleaned_data.get('pegawai')
+        riwayat = cleaned_data.get('riwayat')
+        if pegawai and riwayat and riwayat.pegawai_id != pegawai.pk:
+            self.add_error(
+                'riwayat',
+                'Riwayat gaji harus milik pegawai yang dipilih.',
+            )
+        return cleaned_data
 
 
 class RiwayatGajiBerkalaForm(forms.ModelForm):
@@ -341,6 +505,24 @@ class RiwayatGajiBerkalaForm(forms.ModelForm):
             self.fields['tgl_srt_gaji'].empty_value = None
             self.fields['tgl_srt_gaji'].widget = forms.HiddenInput()
             self.fields['no_srt_gaji'].widget = forms.HiddenInput()
+
+    def clean(self):
+        cleaned_data = super().clean()
+        pegawai = cleaned_data.get('pegawai')
+        pangkat = cleaned_data.get('pangkat')
+        tempat_kerja = cleaned_data.get('tempat_kerja')
+        if pegawai and pangkat and pangkat.pegawai_id != pegawai.pk:
+            self.add_error('pangkat', 'Pangkat harus milik pegawai tersebut.')
+        if (
+            pegawai
+            and tempat_kerja
+            and tempat_kerja.pegawai_id != pegawai.pk
+        ):
+            self.add_error(
+                'tempat_kerja',
+                'Penempatan harus milik pegawai tersebut.',
+            )
+        return cleaned_data
             
             
 class LayananCutiForm(forms.ModelForm):
@@ -361,11 +543,12 @@ class LayananCutiForm(forms.ModelForm):
         self.fields['status'].widget = forms.HiddenInput()
         self.fields["tahun"].disabled = True
         self.fields['layanan'].widget = forms.HiddenInput()
-        if self.request and self.request.user.is_cuti_admin:
-            self.fields['pegawai'].queryset = (
+        if self.request and is_leave_admin(self.request.user):
+            self.fields['pegawai'].queryset = filter_users_for_leave_admin(
                 Users.objects.filter(is_active=True)
                 .exclude(is_superuser=True)
-                .order_by('first_name', 'last_name', 'email')
+                .order_by('first_name', 'last_name', 'email'),
+                self.request.user,
             )
         elif self.request and self.request.user.is_authenticated:
             self.fields['pegawai'].queryset = Users.objects.filter(
@@ -933,22 +1116,12 @@ class VerifikatorDiklatForm(forms.ModelForm):
 class Verifikator1DiklatForm(forms.ModelForm):
     class Meta:
         model = VerifikasiDiklat
-        fields = ('layanan_diklat', 'verifikator1', 'persetujuan1', 'catatan1', 'verifikator2', 'persetujuan2', 'catatan2',
-                  'verifikator3', 'persetujuan3', 'catatan3', 'tanggal')
+        fields = ('persetujuan1', 'catatan1')
 
     def __init__(self, *args, **kwargs):
         super(Verifikator1DiklatForm, self).__init__(*args, **kwargs)
-        self.fields['layanan_diklat'].widget = forms.HiddenInput()
-        self.fields['verifikator1'].widget = forms.HiddenInput()
         self.fields['persetujuan1'].label = 'Apakah anda menyetujui pengajuan diklat pegawai ini?'
         self.fields['catatan1'].label = 'Catatan persetujuan diklat'
-        self.fields['verifikator2'].widget = forms.HiddenInput()
-        self.fields['persetujuan2'].widget = forms.HiddenInput()
-        self.fields['catatan2'].widget = forms.HiddenInput()
-        self.fields['verifikator3'].widget = forms.HiddenInput()
-        self.fields['persetujuan3'].widget = forms.HiddenInput()
-        self.fields['catatan3'].widget = forms.HiddenInput()
-        self.fields['tanggal'].widget = forms.HiddenInput()
 
 verifikator1_inlineformset = inlineformset_factory(
     LayananUsulanDiklat, VerifikasiDiklat, Verifikator1DiklatForm, extra=1, can_delete=False
@@ -957,22 +1130,12 @@ verifikator1_inlineformset = inlineformset_factory(
 class Verifikator2DiklatForm(forms.ModelForm):
     class Meta:
         model = VerifikasiDiklat
-        fields = ('layanan_diklat', 'verifikator1', 'persetujuan1', 'catatan1', 'verifikator2', 'persetujuan2', 'catatan2',
-                  'verifikator3', 'persetujuan3', 'catatan3', 'tanggal')
+        fields = ('persetujuan2', 'catatan2')
 
     def __init__(self, *args, **kwargs):
         super(Verifikator2DiklatForm, self).__init__(*args, **kwargs)
-        self.fields['layanan_diklat'].widget = forms.HiddenInput()
-        self.fields['verifikator1'].widget = forms.HiddenInput()
-        self.fields['persetujuan1'].widget = forms.HiddenInput()
-        self.fields['catatan1'].widget = forms.HiddenInput()
-        self.fields['verifikator2'].widget = forms.HiddenInput()
         self.fields['persetujuan2'].label = 'Apakah anda menyetujui pengajuan diklat pegawai ini?'
         self.fields['catatan2'].label = 'Catatan persetujuan diklat'
-        self.fields['verifikator3'].widget = forms.HiddenInput()
-        self.fields['persetujuan3'].widget = forms.HiddenInput()
-        self.fields['catatan3'].widget = forms.HiddenInput()
-        self.fields['tanggal'].widget = forms.HiddenInput()
 
 verifikator2_inlineformset = inlineformset_factory(
     LayananUsulanDiklat, VerifikasiDiklat, Verifikator2DiklatForm, extra=1, can_delete=False
@@ -981,22 +1144,12 @@ verifikator2_inlineformset = inlineformset_factory(
 class Verifikator3DiklatForm(forms.ModelForm):
     class Meta:
         model = VerifikasiDiklat
-        fields = ('layanan_diklat', 'verifikator1', 'persetujuan1', 'catatan1', 'verifikator2', 'persetujuan2', 'catatan2',
-                  'verifikator3', 'persetujuan3', 'catatan3', 'tanggal')
+        fields = ('persetujuan3', 'catatan3')
     
     def __init__(self, *args, **kwargs):
         super(Verifikator3DiklatForm, self).__init__(*args, **kwargs)
-        self.fields['layanan_diklat'].widget = forms.HiddenInput()
-        self.fields['verifikator1'].widget = forms.HiddenInput()
-        self.fields['persetujuan1'].widget = forms.HiddenInput()
-        self.fields['catatan1'].widget = forms.HiddenInput()
-        self.fields['verifikator2'].widget = forms.HiddenInput()
-        self.fields['persetujuan2'].widget = forms.HiddenInput()
-        self.fields['catatan2'].widget = forms.HiddenInput()
-        self.fields['verifikator3'].widget = forms.HiddenInput()
         self.fields['persetujuan3'].label = 'Apakah anda menyetujui pengajuan diklat pegawai ini?'
         self.fields['catatan3'].label = 'Catatan persetujuan diklat'
-        self.fields['tanggal'].widget = forms.HiddenInput()
 
 verifikator3_inlineformset = inlineformset_factory(
     LayananUsulanDiklat, VerifikasiDiklat, Verifikator3DiklatForm, extra=1, can_delete=False
@@ -1103,7 +1256,15 @@ class LayananSIPForm(forms.ModelForm):
             self.fields['layanan'].widget=forms.HiddenInput()
 
         # self.fields['layanan'].widget = forms.HiddenInput()
-        if self.user and not self.user.is_sip_admin:
+        allowed_users = None
+        if self.user:
+            allowed_users = filter_users_for_sip_role(Users.objects.filter(is_active=True), self.user)
+            self.fields["pegawai"].queryset = allowed_users
+
+        can_select_employee = self.user and (
+            is_sip_admin(self.user) or is_sip_structural_officer(self.user)
+        )
+        if self.user and not can_select_employee:
             self.fields["pegawai"].widget = forms.HiddenInput()
             self.fields["pegawai"].initial = self.user.pk
 
@@ -1118,8 +1279,23 @@ class LayananSIPForm(forms.ModelForm):
             self.fields["str_profesi"].help_text = "Pilih STR profesi yang sudah diunggah sebelumnya di Riwayat Profesi"
 
         else:
-            self.fields["ijazah"].queryset = RiwayatPendidikan.objects.all()
-            self.fields["str_profesi"].queryset = RiwayatProfesi.objects.all()
+            self.fields["ijazah"].queryset = RiwayatPendidikan.objects.filter(
+                pegawai__in=allowed_users
+            )
+            self.fields["str_profesi"].queryset = RiwayatProfesi.objects.filter(
+                pegawai__in=allowed_users
+            )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        pegawai = cleaned_data.get("pegawai")
+        ijazah = cleaned_data.get("ijazah")
+        profesi = cleaned_data.get("str_profesi")
+        if pegawai and ijazah and ijazah.pegawai_id != pegawai.pk:
+            self.add_error("ijazah", "Ijazah harus milik pegawai yang dipilih.")
+        if pegawai and profesi and profesi.pegawai_id != pegawai.pk:
+            self.add_error("str_profesi", "STR harus milik pegawai yang dipilih.")
+        return cleaned_data
 
 
 class UploadPersyaratanSIPForm(forms.Form):
@@ -1205,10 +1381,12 @@ class UploadRekomendasiSIPForm(forms.ModelForm):
 
         # Pegawai membuat surat kecukupan SKP. Surat rekomendasi final
         # hanya boleh diunggah oleh admin.
-        if user and not user.is_sip_admin:
+        pegawai = getattr(self.instance, "pegawai", None)
+        admin_upload = bool(user and is_sip_admin(user, pegawai))
+        if user and not admin_upload:
             self.fields.pop("surat_rekomendasi_sip")
 
-        if user and user.is_sip_admin:
+        if admin_upload:
             self.fields.pop("kecukupan_skp")
             self.fields.pop("surat_permohonan_rekomendasi")
 

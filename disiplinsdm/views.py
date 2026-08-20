@@ -1,5 +1,5 @@
 from django.shortcuts import render, redirect, get_object_or_404
-from strukturorg.services import get_active_leader, get_active_leader_ids, is_active_leader
+from strukturorg.services import get_active_leader, is_active_leader
 from django.urls import reverse, reverse_lazy
 from django.db import transaction
 from django.views import View, generic
@@ -13,7 +13,7 @@ from django.contrib.staticfiles import finders
 from django.db.models.fields import TimeField
 # from django.db.models.functions import TruncMonth, ExtractMonth, TruncDate, TruncYear
 from django.utils.functional import cached_property
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import FileResponse, HttpResponse, HttpResponseRedirect
 from dateutil.relativedelta import relativedelta
 from dateutil.parser import parse
 from datetime import date, datetime, time, timedelta
@@ -41,6 +41,7 @@ import json
 import os
 
 from .services import KehadiranService, ApelPagiService, AttendanceOrchestrator, NewAttendanceOrchestrator
+from .pola_kerja import sinkronkan_pola_kerja_dari_jadwal
 
 from django.utils import timezone
 from .utils import get_mingguan_lengkap, hitung_total_jam, is_user_authorized_to_approve
@@ -48,6 +49,7 @@ from openpyxl import load_workbook
 import calendar
 import qrcode
 from io import BytesIO
+from tempfile import SpooledTemporaryFile
 import base64
 from PIL import Image
 from openpyxl.utils import get_column_letter
@@ -73,6 +75,19 @@ from .models import (
 from dokumen.models import RiwayatPenempatan, RiwayatJabatan
 from strukturorg.models import UnitInstalasi
 from myaccount.models import Users, ProfilSDM
+from .access import (
+    can_approve_discipline_installation,
+    can_approve_discipline_schedule,
+    can_delete_discipline_schedule,
+    can_manage_discipline_employee,
+    filter_installations_for_discipline_admin,
+    filter_installations_for_discipline_role,
+    filter_queryset_for_discipline_admin,
+    filter_users_for_discipline_admin,
+    filter_users_for_discipline_role,
+    is_discipline_structural_officer,
+    is_discipline_admin,
+)
 from .forms import (
     HariLiburForm,
     jadwal_formset, 
@@ -93,10 +108,161 @@ from .forms import (
     ProsesKehadiranForm,
     PenilaianKehadiranForm,
     LogAktivitasFormSet,
+    MappingMesinAbsensiForm,
     )
 
 # Create your views here.
 notfoundview = 'riwayat_urls:notfound_view'
+
+
+class MappingAdminRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
+    def test_func(self):
+        return self.request.user.is_akun_admin
+
+
+class MappingPegawaiAutocompleteView(MappingAdminRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        term = request.GET.get('term', '').strip()
+        queryset = Users.objects.filter(
+            is_active=True,
+            is_superuser=False,
+        ).select_related('profil_user')
+        if term:
+            queryset = queryset.filter(
+                Q(first_name__icontains=term)
+                | Q(last_name__icontains=term)
+                | Q(email__icontains=term)
+                | Q(profil_user__nip__icontains=term)
+            )
+        results = []
+        for employee in queryset.order_by('first_name', 'last_name')[:25]:
+            nip = getattr(getattr(employee, 'profil_user', None), 'nip', None)
+            label = employee.full_name
+            if nip:
+                label = f'{label} - NIP {nip}'
+            results.append({'id': employee.pk, 'text': label})
+        return JsonResponse({'results': results})
+
+
+class MappingMesinAbsensiListView(MappingAdminRequiredMixin, generic.ListView):
+    model = MappingMesinAbsensi
+    template_name = 'kehadirankegiatan/mapping_mesin_absensi_list.html'
+    context_object_name = 'mappings'
+    paginate_by = 25
+
+    def get_queryset(self):
+        queryset = MappingMesinAbsensi.objects.select_related(
+            'pegawai', 'pegawai__profil_user'
+        ).annotate(
+            fingerprint_count=Count('logkehadiran'),
+            fingerprint_last=Max('logkehadiran__datetime'),
+        ).order_by('pegawai__first_name', 'pegawai__last_name')
+        query = self.request.GET.get('q', '').strip()
+        if query:
+            queryset = queryset.filter(
+                Q(mesin_id__icontains=query)
+                | Q(pegawai__first_name__icontains=query)
+                | Q(pegawai__last_name__icontains=query)
+                | Q(pegawai__profil_user__nip__icontains=query)
+            )
+        status = self.request.GET.get('status', '').strip()
+        if status == 'terekam':
+            queryset = queryset.filter(fingerprint_count__gt=0)
+        elif status == 'belum':
+            queryset = queryset.filter(fingerprint_count=0)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        active_employees = Users.objects.filter(is_active=True, is_superuser=False)
+        query = self.request.GET.get('q', '').strip()
+        unmapped_employees = active_employees.exclude(
+            mappingmesinabsensi__isnull=False
+        ).select_related('profil_user').order_by('first_name', 'last_name')
+        if query:
+            unmapped_employees = unmapped_employees.filter(
+                Q(first_name__icontains=query)
+                | Q(last_name__icontains=query)
+                | Q(email__icontains=query)
+                | Q(profil_user__nip__icontains=query)
+            )
+        context.update({
+            'q': query,
+            'status': self.request.GET.get('status', '').strip(),
+            'total_employees': active_employees.count(),
+            'mapped_count': MappingMesinAbsensi.objects.filter(
+                pegawai__is_active=True, pegawai__is_superuser=False
+            ).count(),
+            'unmapped_count': active_employees.exclude(
+                mappingmesinabsensi__isnull=False
+            ).count(),
+            'recorded_count': MappingMesinAbsensi.objects.filter(
+                logkehadiran__isnull=False,
+                pegawai__is_active=True,
+                pegawai__is_superuser=False,
+            ).distinct().count(),
+            'unmapped_employees': unmapped_employees,
+            'mapping_management': 'active',
+            'title_page': 'Mapping Pegawai Fingerprint',
+        })
+        return context
+
+
+class MappingMesinAbsensiCreateView(MappingAdminRequiredMixin, generic.CreateView):
+    model = MappingMesinAbsensi
+    form_class = MappingMesinAbsensiForm
+    template_name = 'kehadirankegiatan/mapping_mesin_absensi_form.html'
+    success_url = reverse_lazy('disiplinsdm_urls:mapping_mesin_absensi_list')
+
+    def get_initial(self):
+        initial = super().get_initial()
+        employee_id = self.request.GET.get('pegawai', '').strip()
+        if employee_id.isdigit():
+            employee = Users.objects.filter(
+                pk=employee_id,
+                is_active=True,
+                is_superuser=False,
+            ).first()
+            if employee and not MappingMesinAbsensi.objects.filter(
+                pegawai=employee
+            ).exists():
+                initial['pegawai'] = employee.pk
+        return initial
+
+    def form_valid(self, form):
+        messages.success(self.request, 'Mapping pegawai fingerprint berhasil ditambahkan.')
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({'mapping_management': 'active', 'title_page': 'Tambah Mapping Fingerprint'})
+        return context
+
+
+class MappingMesinAbsensiUpdateView(MappingAdminRequiredMixin, generic.UpdateView):
+    model = MappingMesinAbsensi
+    form_class = MappingMesinAbsensiForm
+    template_name = 'kehadirankegiatan/mapping_mesin_absensi_form.html'
+    success_url = reverse_lazy('disiplinsdm_urls:mapping_mesin_absensi_list')
+
+    def form_valid(self, form):
+        messages.success(self.request, 'Mapping pegawai fingerprint berhasil diperbarui.')
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({'mapping_management': 'active', 'title_page': 'Ubah Mapping Fingerprint'})
+        return context
+
+
+class MappingMesinAbsensiDeleteView(MappingAdminRequiredMixin, generic.DeleteView):
+    model = MappingMesinAbsensi
+    success_url = reverse_lazy('disiplinsdm_urls:mapping_mesin_absensi_list')
+
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        messages.success(request, 'Mapping pegawai fingerprint berhasil dihapus.')
+        return response
 
 def get_nip(user):
     try:
@@ -200,26 +366,17 @@ class EvaluasiJadwal(LoginRequiredMixin, UserPassesTestMixin, generic.TemplateVi
     paginate_by = 20
 
     def test_func(self):
-        return self.request.user.is_staff or self.request.user.is_disiplin_admin
+        return is_discipline_admin(self.request.user)
 
     def handle_no_permission(self):
         messages.error(self.request, 'Anda tidak memiliki izin untuk melihat menu ini.')
         return redirect(reverse('disiplinsdm_urls:jadwal_list'))
 
     def get_instalasi_queryset(self):
-        user = self.request.user
-        qs = UnitInstalasi.objects.all()
-        if user.is_disiplin_admin:
-            return qs
-        profil = getattr(user, 'profil_admin', None)
-        if profil:
-            if profil.instalasi.exists():
-                return qs.filter(pk__in=profil.instalasi.values_list('pk', flat=True))
-            if profil.sub_bidang.exists():
-                return qs.filter(sub_bidang__in=profil.sub_bidang.values_list('pk', flat=True))
-            if profil.bidang.exists():
-                return qs.filter(sub_bidang__bidang__in=profil.bidang.values_list('pk', flat=True))
-        return qs.none()
+        return filter_installations_for_discipline_admin(
+            UnitInstalasi.objects.all(),
+            self.request.user,
+        )
 
     def get_inst_id(self, instalasi_qs):
         get = self.request.GET.get
@@ -407,12 +564,13 @@ class HariLiburDeleteView(LoginRequiredMixin, UserPassesTestMixin, generic.Delet
 
 def approve_instalasi_bulan(instalasi, bulan, tahun, user):
     with transaction.atomic():
-        # Ambil ID pegawai yang statusnya 'diajukan'
+        # Kepala Ruangan dapat langsung menetapkan draft tanpa menunggu
+        # persetujuan pejabat pada tingkat struktur di atasnya.
         initial_jadwal_ids = list(JenisSDMPerinstalasi.objects.filter(
             instalasi=instalasi,
             bulan=bulan,
             tahun=tahun,
-            status='diajukan'
+            status__in=['draft', 'ditolak', 'diajukan'],
         ).values_list('id', flat=True))
         
         # Ubah status jadi disetujui
@@ -496,6 +654,43 @@ def approve_instalasi_bulan(instalasi, bulan, tahun, user):
                 to_update,
                 fields=['kategori_jadwal_id', 'catatan', 'is_approved', 'approved_by', 'updated_at']
             )
+        for jadwal_sdm in JenisSDMPerinstalasi.objects.filter(
+            id__in=initial_jadwal_ids,
+        ):
+            sinkronkan_pola_kerja_dari_jadwal(jadwal_sdm)
+
+
+def approve_jadwal_pegawai(jadwal_sdm, user):
+    """Tetapkan satu jadwal pegawai dan aktifkan untuk evaluasi presensi."""
+    with transaction.atomic():
+        draft_rows = list(jadwal_sdm.jadwaldinassdm_set.filter(
+            tanggal__month=jadwal_sdm.bulan,
+            tanggal__year=jadwal_sdm.tahun,
+        ))
+        ApprovedJadwalDinasSDM.objects.filter(
+            pegawai=jadwal_sdm,
+            tanggal__month=jadwal_sdm.bulan,
+            tanggal__year=jadwal_sdm.tahun,
+        ).delete()
+        ApprovedJadwalDinasSDM.objects.bulk_create([
+            ApprovedJadwalDinasSDM(
+                pegawai=jadwal_sdm,
+                tanggal=row.tanggal,
+                kategori_jadwal=row.kategori_jadwal,
+                catatan=row.catatan,
+                is_approved=True,
+                approved_by=user,
+            )
+            for row in draft_rows
+        ])
+        jadwal_sdm.status = 'disetujui'
+        jadwal_sdm.alasan_penolakan = ''
+        jadwal_sdm.save(update_fields=[
+            'status',
+            'alasan_penolakan',
+            'updated_at',
+        ])
+        sinkronkan_pola_kerja_dari_jadwal(jadwal_sdm)
     
 
 def generate_qr_with_logo(data: str, logo_path: str, size=300) -> str:
@@ -678,7 +873,7 @@ class JadwalBulananListView(LoginRequiredMixin, generic.ListView):
                 status = 'Disetujui'
                 tanggal_persetujuan = approved_jadwal.updated_at
                 qr_image_persetujuan = self.generate_qr(
-                    f'disetujui oleh: {self.pimpinan}\n'
+                    f'ditetapkan oleh: {self.pimpinan_instalasi}\n'
                     f'tanggal: {tanggal_persetujuan}\n'
                     f'url: {self.get_absolute_url()}'
                 )
@@ -738,7 +933,7 @@ class JadwalBulananListView(LoginRequiredMixin, generic.ListView):
 
     @cached_property
     def pimpinan(self):
-        return get_active_leader(self.instalasi.sub_bidang) if self.instalasi and self.instalasi.sub_bidang else '-'
+        return self.pimpinan_instalasi
 
 
 class ApprovedJadwalBulananListView(LoginRequiredMixin, generic.ListView):
@@ -871,7 +1066,7 @@ class ApprovedJadwalBulananListView(LoginRequiredMixin, generic.ListView):
             if approved_jadwal:
                 tanggal_persetujuan = approved_jadwal.updated_at
                 qr_image_persetujuan = self.generate_qr(
-                    f'disetujui oleh: {self.pimpinan}\n'
+                    f'ditetapkan oleh: {self.pimpinan_instalasi}\n'
                     f'tanggal: {tanggal_persetujuan}\n'
                     f'url: {self.get_absolute_url()}'
                 )
@@ -928,7 +1123,7 @@ class ApprovedJadwalBulananListView(LoginRequiredMixin, generic.ListView):
 
     @cached_property
     def pimpinan(self):
-        return get_active_leader(self.instalasi.sub_bidang) if self.instalasi and self.instalasi.sub_bidang else '-'
+        return self.pimpinan_instalasi
 
 
 class PengajuanJadwalInstalasi(LoginRequiredMixin, UserPassesTestMixin, generic.View):
@@ -936,9 +1131,10 @@ class PengajuanJadwalInstalasi(LoginRequiredMixin, UserPassesTestMixin, generic.
         instalasi_id = self.kwargs['inst']
         user = self.request.user
         instalasi = UnitInstalasi.objects.filter(pk=instalasi_id).first()
-        if (user.is_staff or user.is_disiplin_admin) and is_active_leader(user, instalasi):
-            return True
-        return False
+        return bool(
+            getattr(user, 'is_active', False)
+            and is_active_leader(user, instalasi)
+        )
 
     def handle_no_permission(self):
         # Bisa redirect atau tampilkan pesan khusus
@@ -955,31 +1151,27 @@ class PengajuanJadwalInstalasi(LoginRequiredMixin, UserPassesTestMixin, generic.
             instalasi=UnitInstalasi.objects.get(pk=instalasi_id)
         except UnitInstalasi.DoesNotExist:
             instalasi = None
-        initial_jadwal = JenisSDMPerinstalasi.objects.filter(
-            instalasi=instalasi, 
-            bulan=bulan,
-            tahun=tahun,
-            status='draft'
-        ).update(status='diajukan')
-        messages.success(request, f'Jadwal instalasi {instalasi.instalasi} diajukan!')
+        with transaction.atomic():
+            approve_instalasi_bulan(instalasi, bulan, tahun, request.user)
+        messages.success(
+            request,
+            f'Jadwal instalasi {instalasi.instalasi} berhasil ditetapkan dan langsung aktif.',
+        )
         return redirect(reverse('disiplinsdm_urls:jadwal_pivot', kwargs={'inst':instalasi_id}))
     
         
 class ApprovalJadwalInstalasi(LoginRequiredMixin, UserPassesTestMixin, generic.View):
     def test_func(self):
-        user = self.request.user
-        profil = getattr(user, 'profil_admin', None)
-        if user.is_staff or user.is_disiplin_admin:
-            if profil and profil.instalasi.exists():
-                return True
-            if profil and profil.sub_bidang.exists():
-                return True
-            if profil and profil.bidang.exists():
-                return True
-            if profil and profil.unor.exists():
-                return True
-            return False
-        return False
+        instalasi = UnitInstalasi.objects.filter(
+            pk=self.kwargs.get('inst')
+        ).first()
+        return bool(
+            instalasi
+            and can_approve_discipline_installation(
+                self.request.user,
+                instalasi,
+            )
+        )
 
     def handle_no_permission(self):
         # Bisa redirect atau tampilkan pesan khusus
@@ -1314,12 +1506,22 @@ def export_jadwal_excel(request, inst, bulan, tahun):
     return response
     
 
-class AjukanJadwalView(LoginRequiredMixin, generic.UpdateView):
+class AjukanJadwalView(LoginRequiredMixin, UserPassesTestMixin, generic.UpdateView):
     login_url = reverse_lazy('myaccount_urls:login_view')
     redirect_field_name = 'next'
     model = JenisSDMPerinstalasi
     form_class = PengajuanJadwalForm
     template_name = 'jadwal_piket/jadwal_pengajuan_persetujuan.html'
+
+    def test_func(self):
+        return can_manage_discipline_employee(
+            self.request.user,
+            self.get_object().pegawai,
+        )
+
+    def handle_no_permission(self):
+        messages.error(self.request, 'Anda tidak memiliki izin untuk mengajukan jadwal ini.')
+        return redirect(reverse('disiplinsdm_urls:jadwal_list'))
     
     def get_success_url(self):
         query_params = self.request.GET.copy()
@@ -1389,6 +1591,10 @@ class AjukanJadwalView(LoginRequiredMixin, generic.UpdateView):
             'standar_min': obj.standar_min_efektif,
             'standar_max': obj.standar_max_efektif,
             'selisih': obj.selisih_jam_kerja,
+            'can_approve': can_approve_discipline_schedule(
+                self.request.user,
+                obj.pegawai,
+            ),
         })
         return context
     
@@ -1401,11 +1607,20 @@ class AjukanJadwalView(LoginRequiredMixin, generic.UpdateView):
 
         jadwal_sdm = self.object
 
-        with transaction.atomic():
-            # Update status
-            jadwal_sdm.status = 'diajukan'
-            jadwal_sdm.save()
-            messages.success(request, 'Pengajuan behasil dilakukan, informasikan ke atasan anda agar segera disetujui!')
+        if can_approve_discipline_schedule(request.user, jadwal_sdm.pegawai):
+            approve_jadwal_pegawai(jadwal_sdm, request.user)
+            messages.success(
+                request,
+                'Jadwal berhasil ditetapkan dan langsung aktif untuk evaluasi presensi.',
+            )
+        else:
+            with transaction.atomic():
+                jadwal_sdm.status = 'diajukan'
+                jadwal_sdm.save()
+            messages.success(
+                request,
+                'Jadwal diajukan kepada Kepala Ruangan untuk ditetapkan.',
+            )
         return redirect(self.get_success_url())
 
 
@@ -1430,12 +1645,10 @@ class SetujuiJadwalView(LoginRequiredMixin, UserPassesTestMixin, generic.UpdateV
         return reverse('disiplinsdm_urls:jadwal_auto_create', kwargs={'pk':pk})
 
     def test_func(self):
-        sub_bidang = self.request.user.pk in set(get_active_leader_ids(SubBidang))
-        if self.request.user.is_disiplin_admin:
-            return True
-        elif sub_bidang and (self.request.user.is_staff or self.request.user.is_disiplin_admin):
-            return True
-        return False
+        return can_approve_discipline_schedule(
+            self.request.user,
+            self.get_object().pegawai,
+        )
 
     def handle_no_permission(self):
         messages.error(self.request, "Anda tidak memiliki izin untuk menyetujui jadwal.")
@@ -1494,7 +1707,10 @@ class SetujuiJadwalView(LoginRequiredMixin, UserPassesTestMixin, generic.UpdateV
             'standar_min': obj.standar_min_efektif,
             'standar_max': obj.standar_max_efektif,
             'selisih': obj.selisih_jam_kerja,
-            'can_approve': self.request.user.is_staff or self.request.user.is_disiplin_admin,
+            'can_approve': can_approve_discipline_schedule(
+                self.request.user,
+                self.object.pegawai,
+            ),
         })
         return context
 
@@ -1592,6 +1808,8 @@ class SetujuiJadwalView(LoginRequiredMixin, UserPassesTestMixin, generic.UpdateV
                         to_update,
                         fields=['catatan', 'is_approved', 'approved_by', 'updated_at']
                     )
+
+                sinkronkan_pola_kerja_dari_jadwal(self.object)
 
             messages.success(request, f"Jadwal {self.object.pegawai.full_name} berhasil disetujui.")
             return redirect(self.get_success_url())
@@ -1696,94 +1914,30 @@ class JadwalListView(LoginRequiredMixin, generic.ListView):
 
 
     def get_active_instalasi(self):
+        allowed = self.get_instalasi_queryset()
         inst_param = self.request.GET.get('inst')
         if inst_param:
-            return UnitInstalasi.objects.filter(pk=inst_param).first()
+            return allowed.filter(pk=inst_param).first()
 
         user = self.request.user
-        profil = getattr(user, 'profil_admin', None)
-
-        if user.is_disiplin_admin:
-            return UnitInstalasi.objects.first()
-        elif profil:
-            if profil.instalasi.exists():
-                return profil.instalasi.first()
-            if profil.sub_bidang.exists():
-                sub_bidang_pks = profil.sub_bidang.values_list('pk', flat=True)
-                return UnitInstalasi.objects.filter(sub_bidang__in=sub_bidang_pks).first()
-            if profil.bidang.exists():
-                bidang_pks = profil.bidang.values_list('pk', flat=True)
-                return UnitInstalasi.objects.filter(sub_bidang__bidang__in=bidang_pks).first()
-            if profil.unor.exists():
-                unor_pks = profil.unor.values_list('pk', flat=True)
-                return UnitInstalasi.objects.filter(sub_bidang__bidang__unor__in=unor_pks).first()
-        else:
-            instalasi = user.riwayat_penempatan.filter(status=True).first()
-            if instalasi is not None:
-                instalasi = instalasi.penempatan_level4
-            else:
-                instalasi = None
-            return instalasi
+        if is_discipline_admin(user):
+            return allowed.first()
+        placement = user.riwayat_penempatan.filter(status=True).first()
+        return placement.penempatan_level4 if placement else None
         
 
     def get_user_queryset(self):
-        user = self.request.user
         users = Users.objects.exclude(is_superuser=True, is_active=False).prefetch_related('riwayat_penempatan')
-        profil = getattr(user, 'profil_admin', None)
-
-        if user.is_disiplin_admin:
-            return users
-        if not profil:
-            return users.none()
-
-        if profil.instalasi.exists():
-            return users.filter(riwayat_penempatan__penempatan_level4__in=profil.instalasi.values_list('pk', flat=True), riwayat_penempatan__status=True)
-        if profil.sub_bidang.exists():
-            return users.filter(riwayat_penempatan__penempatan_level3__in=profil.sub_bidang.values_list('pk', flat=True), riwayat_penempatan__status=True)
-        if profil.bidang.exists():
-            return users.filter(riwayat_penempatan__penempatan_level2__in=profil.bidang.values_list('pk', flat=True), riwayat_penempatan__status=True)
-        if profil.unor.exists():
-            return users.filter(riwayat_penempatan__penempatan_level1__in=profil.unor.values_list('pk', flat=True), riwayat_penempatan__status=True)
-        return users.none()
+        return filter_users_for_discipline_role(users, self.request.user)
     
     def get_instalasi_queryset(self):
-        user = self.request.user
         instalasi_list = UnitInstalasi.objects.all().prefetch_related(
             'sub_bidang', 'sub_bidang__bidang', 'sub_bidang__bidang__unor'
         )
-        profil = getattr(user, 'profil_admin', None)
-
-        if user.is_disiplin_admin:
-            return instalasi_list
-        if not profil:
-            return instalasi_list.none()
-
-        # Tambahkan .distinct() di setiap return yang menggunakan filter riwayatpenempatan
-        if profil.instalasi.exists():
-            return instalasi_list.filter(
-                pk__in=profil.instalasi.values_list('pk', flat=True), 
-                riwayatpenempatan__status=True
-            ).distinct() # <-- Mencegah duplikasi data akibat JOIN
-            
-        if profil.sub_bidang.exists():
-            return instalasi_list.filter(
-                sub_bidang__in=profil.sub_bidang.values_list('pk', flat=True), 
-                riwayatpenempatan__status=True
-            ).distinct()
-            
-        if profil.bidang.exists():
-            return instalasi_list.filter(
-                sub_bidang__bidang__in=profil.bidang.values_list('pk', flat=True), 
-                riwayatpenempatan__status=True
-            ).distinct()
-            
-        if profil.unor.exists():
-            return instalasi_list.filter(
-                sub_bidang__bidang__unor__in=profil.unor.values_list('pk', flat=True), 
-                riwayatpenempatan__status=True
-            ).distinct()
-            
-        return instalasi_list.none()
+        return filter_installations_for_discipline_role(
+            instalasi_list,
+            self.request.user,
+        )
     
     def get_queryset(self):
         params = self.get_filter_params()
@@ -1821,6 +1975,25 @@ class JadwalListView(LoginRequiredMixin, generic.ListView):
         context['instalasi_list'] = instalasi_list
         context['instalasi_param'] = instalasi.pk if instalasi else None
         context['users'] = self.get_user_queryset()
+
+        # Hak kelola jadwal terpisah dari hak administrasi kehadiran.
+        context['can_manage_schedule'] = bool(
+            is_discipline_admin(self.request.user)
+            or is_discipline_structural_officer(self.request.user)
+        )
+        for item in context['object_list']:
+            item.can_manage_schedule = can_manage_discipline_employee(
+                self.request.user,
+                item.pegawai,
+            )
+            item.can_approve_schedule = can_approve_discipline_schedule(
+                self.request.user,
+                item.pegawai,
+            )
+            item.can_delete_schedule = can_delete_discipline_schedule(
+                self.request.user,
+                item,
+            )
 
         selected_user = self.get_user(params['nip'])
         penempatan = self.get_penempatan_object(params['nip'])
@@ -1861,7 +2034,12 @@ class JadwalListView(LoginRequiredMixin, generic.ListView):
         return context
 
     def post(self, request, *args, **kwargs):
-        if not request.user.is_staff and not request.user.is_disiplin_admin:
+        employee_id = request.POST.get('pegawai')
+        employee = Users.objects.filter(pk=employee_id).first()
+        if not employee or not can_manage_discipline_employee(
+            request.user,
+            employee,
+        ):
             messages.warning(request, 'Maaf anda tidak berhak menambahkan jadwal pegawai!')
             return redirect(reverse('disiplinsdm_urls:jadwal_list'))
 
@@ -1909,19 +2087,10 @@ class JadwalDinasFormsetUpdateView(LoginRequiredMixin, UserPassesTestMixin, gene
         return reverse('disiplinsdm_urls:jadwal_auto_create', kwargs={'pk':pk})
     
     def test_func(self):
-        user = self.request.user
-        if user.is_staff or user.is_disiplin_admin:
-            profil = user.profil_admin if hasattr(user, 'profil_admin') else None
-            if profil and profil.instalasi.exists():
-                return True
-            if profil and profil.sub_bidang.exists():
-                return True
-            if profil and profil.bidang.exists():
-                return True
-            if profil and profil.unor.exists():
-                return True
-            return False
-        return False
+        return can_manage_discipline_employee(
+            self.request.user,
+            self.get_object().pegawai,
+        )
     
     def handle_no_permission(self):
         # Bisa redirect atau tampilkan pesan khusus
@@ -2280,7 +2449,10 @@ class SalinJadwalView(LoginRequiredMixin, UserPassesTestMixin, View):
 
     # ===== Permissions =====
     def test_func(self):
-        return self.request.user.is_staff or self.request.user.is_disiplin_admin
+        return bool(
+            is_discipline_admin(self.request.user)
+            or is_discipline_structural_officer(self.request.user)
+        )
 
     def handle_no_permission(self):
         messages.error(self.request, 'Anda tidak memiliki izin untuk menyalin data.')
@@ -2325,8 +2497,11 @@ class SalinJadwalView(LoginRequiredMixin, UserPassesTestMixin, View):
                 .prefetch_related('riwayat_penempatan'))
 
         users = base.none()
-        if login_user.is_disiplin_admin:
-            users = base
+        if (
+            is_discipline_admin(login_user)
+            or is_discipline_structural_officer(login_user)
+        ):
+            users = filter_users_for_discipline_role(base, login_user)
         elif login_user.is_staff and not login_user.is_disiplin_admin:
             pa = getattr(login_user, 'profil_admin', None)
             if not pa:
@@ -2387,6 +2562,25 @@ class SalinJadwalView(LoginRequiredMixin, UserPassesTestMixin, View):
     def post(self, request):
         form = SalinJadwalForm(request.POST)
         if not form.is_valid():
+            return redirect(self.get_failure_url())
+
+        allowed_users = self._users_queryset_for_login(request.user)
+        sumber = form.cleaned_data.get('sumber')
+        tujuan = form.cleaned_data.get('tujuan')
+        allowed_ids = set(
+            allowed_users.filter(pk__in=[
+                getattr(sumber, 'pk', None),
+                getattr(tujuan, 'pk', None),
+            ]).values_list('pk', flat=True)
+        )
+        if (
+            getattr(sumber, 'pk', None) not in allowed_ids
+            or getattr(tujuan, 'pk', None) not in allowed_ids
+        ):
+            messages.error(
+                request,
+                'Pegawai sumber atau tujuan berada di luar cakupan Anda.',
+            )
             return redirect(self.get_failure_url())
 
         sumber = form.cleaned_data['sumber']
@@ -2558,9 +2752,10 @@ class JadwalUpdateView(LoginRequiredMixin, UserPassesTestMixin, generic.UpdateVi
     template_name = 'kehadirankegiatan/form.html'
     
     def test_func(self):
-        if self.request.user.is_staff or self.request.user.is_disiplin_admin:
-            return True
-        return False
+        return can_manage_discipline_employee(
+            self.request.user,
+            self.get_object().pegawai,
+        )
 
     def handle_no_permission(self):
         # Bisa redirect atau tampilkan pesan khusus
@@ -2590,9 +2785,11 @@ class JadwalUpdateView(LoginRequiredMixin, UserPassesTestMixin, generic.UpdateVi
     
 class DeleteJadwalView(LoginRequiredMixin, UserPassesTestMixin, View):
     def test_func(self):
-        if self.request.user.is_staff or self.request.user.is_disiplin_admin:
-            return True
-        return False
+        obj = self.get_object(self.kwargs.get('id'))
+        return bool(
+            obj
+            and can_delete_discipline_schedule(self.request.user, obj)
+        )
     
     def get_success_url(self):
         query_params = self.request.GET.copy()
@@ -2630,13 +2827,32 @@ class DeleteJadwalView(LoginRequiredMixin, UserPassesTestMixin, View):
     def post(self, request, **kwargs):
         id_jadwal = kwargs.get('id')
         instance = self.get_object(id_jadwal)
+        if not instance or not can_delete_discipline_schedule(request.user, instance):
+            messages.error(request, 'Jadwal yang sudah diajukan/disetujui tidak dapat dihapus.')
+            return redirect(self.get_success_url())
         instance.delete()
         return redirect(self.get_success_url())
     
     
-class VerifikasiJadwalView(FormView):
+class VerifikasiJadwalView(LoginRequiredMixin, UserPassesTestMixin, FormView):
     template_name = 'jadwal_piket/verifikasi_jadwal.html'
     form_class = PersetujuanForm
+
+    def test_func(self):
+        pengajuan = JenisSDMPerinstalasi.objects.filter(
+            pk=self.kwargs.get('pk'),
+        ).select_related('pegawai').first()
+        return bool(
+            pengajuan
+            and can_approve_discipline_schedule(
+                self.request.user,
+                pengajuan.pegawai,
+            )
+        )
+
+    def handle_no_permission(self):
+        messages.error(self.request, 'Anda tidak memiliki izin untuk memverifikasi jadwal ini.')
+        return redirect(reverse('disiplinsdm_urls:jadwal_list'))
 
     def dispatch(self, request, *args, **kwargs):
         self.pengajuan = get_object_or_404(JenisSDMPerinstalasi, pk=self.kwargs['pk'], status='diajukan')
@@ -2736,6 +2952,7 @@ class VerifikasiJadwalView(FormView):
                             'approved_by':self.request.user,
                         }
                     )
+                sinkronkan_pola_kerja_dari_jadwal(self.pengajuan)
             return super().form_valid(form)
         
     def form_invalid(self, form):
@@ -2775,10 +2992,13 @@ class KehadiranSpesialisListView(LoginRequiredMixin, generic.ListView):
         }
         user = self.request.user
         # Jika user adalah superuser, filter berdasarkan instalasi jika ada
-        if user.is_disiplin_admin:
+        if is_discipline_admin(user):
             if instalasi:
                 base_filter['instalasi'] = instalasi
-            return DaftarKegiatanPegawai.objects.filter(**base_filter)
+            return filter_queryset_for_discipline_admin(
+                DaftarKegiatanPegawai.objects.filter(**base_filter),
+                user,
+            )
 
         elif user.is_staff:
             profil = user.profil_admin if hasattr(user, 'profil_admin') else None
@@ -2809,8 +3029,13 @@ class KehadiranSpesialisListView(LoginRequiredMixin, generic.ListView):
     def get_instalasi_list(self):
         instalasi = None
         user = self.request.user
-        if user.is_disiplin_admin:
-            instalasi = UnitInstalasi.objects.filter(jenissdmperinstalasi__isnull=False).order_by('instalasi').distinct()
+        if is_discipline_admin(user):
+            instalasi = filter_installations_for_discipline_admin(
+                UnitInstalasi.objects.filter(
+                    jenissdmperinstalasi__isnull=False
+                ),
+                user,
+            ).order_by('instalasi').distinct()
 
         elif user.is_staff:
             profil = user.profil_admin if hasattr(user, 'profil_admin') else None
@@ -3102,9 +3327,7 @@ class KehadiranCreateView(LoginRequiredMixin, UserPassesTestMixin, generic.Creat
     # success_url = reverse_lazy('disiplinsdm_urls:kehadiran_list')
     
     def test_func(self):
-        if self.request.user.is_disiplin_admin:
-            return True
-        return False
+        return is_discipline_admin(self.request.user)
 
     def handle_no_permission(self):
         # Bisa redirect atau tampilkan pesan khusus
@@ -3117,7 +3340,7 @@ class KehadiranCreateView(LoginRequiredMixin, UserPassesTestMixin, generic.Creat
         tgl = self.request.GET.get('tanggal')
         if tgl is not None:
             tanggal = get_date_from_string(tgl)
-        if self.request.user.is_disiplin_admin:
+        if is_discipline_admin(self.request.user):
             kwargs['request'] = self.request
             kwargs['tanggal'] = tanggal
         else:
@@ -3166,9 +3389,10 @@ class KehadiranUpdateView(LoginRequiredMixin, UserPassesTestMixin, generic.Updat
     redirect_field_name = 'next'
     
     def test_func(self):
-        if self.request.user.is_disiplin_admin:
-            return True
-        return False
+        return is_discipline_admin(
+            self.request.user,
+            employee=self.get_object().pegawai,
+        )
 
     def handle_no_permission(self):
         # Bisa redirect atau tampilkan pesan khusus
@@ -3181,7 +3405,7 @@ class KehadiranUpdateView(LoginRequiredMixin, UserPassesTestMixin, generic.Updat
         tgl = self.request.GET.get('tanggal')
         if tgl is not None:
             tanggal = get_date_from_string(tgl)
-        if self.request.user.is_disiplin_admin:
+        if is_discipline_admin(self.request.user):
             kwargs['request'] = self.request
             kwargs['tanggal'] = tanggal
         else:
@@ -3937,7 +4161,7 @@ class RawPresensiDatabaseListView(
     paginate_by = 100
 
     def test_func(self):
-        return self.request.user.is_disiplin_admin
+        return is_discipline_admin(self.request.user)
 
     @staticmethod
     def _excel_safe_text(value):
@@ -3947,6 +4171,7 @@ class RawPresensiDatabaseListView(
 
     def get(self, request, *args, **kwargs):
         if request.GET.get('export') == 'excel':
+            self._exporting = True
             return self.export_excel(self.get_queryset())
         return super().get(request, *args, **kwargs)
 
@@ -3964,9 +4189,10 @@ class RawPresensiDatabaseListView(
         if self.date_from > self.date_to:
             self.date_from, self.date_to = self.date_to, self.date_from
 
-        evaluated_log = LogAktivitasAbsen.objects.filter(
-            absensi_harian__pegawai_id=OuterRef('mapping__pegawai_id'),
-            waktu=OuterRef('datetime'),
+        self.datetime_from = datetime.combine(self.date_from, time.min)
+        self.datetime_until = datetime.combine(
+            self.date_to + timedelta(days=1),
+            time.min,
         )
         queryset = (
             LogKehadiran.objects
@@ -3975,17 +4201,30 @@ class RawPresensiDatabaseListView(
                 'mapping__pegawai',
                 'mapping__pegawai__profil_user',
             )
-            .annotate(is_evaluated=Exists(evaluated_log))
             .filter(
-                datetime__date__gte=self.date_from,
-                datetime__date__lte=self.date_to,
+                datetime__gte=self.datetime_from,
+                datetime__lt=self.datetime_until,
             )
+        )
+        queryset = filter_queryset_for_discipline_admin(
+            queryset,
+            self.request.user,
+            employee_path='mapping__pegawai',
         )
 
         self.keyword = self.request.GET.get('q', '').strip()
         self.device = self.request.GET.get('device', '').strip()
         self.direction = self.request.GET.get('direction', '').strip()
         self.evaluation = self.request.GET.get('evaluation', '').strip()
+
+        # Untuk export tanpa filter evaluasi, hindari correlated subquery per
+        # baris. Status akan diambil satu kali secara batch di export_excel().
+        if not getattr(self, '_exporting', False) or self.evaluation:
+            evaluated_log = LogAktivitasAbsen.objects.filter(
+                absensi_harian__pegawai_id=OuterRef('mapping__pegawai_id'),
+                waktu=OuterRef('datetime'),
+            )
+            queryset = queryset.annotate(is_evaluated=Exists(evaluated_log))
 
         if self.keyword:
             queryset = queryset.filter(
@@ -4007,18 +4246,16 @@ class RawPresensiDatabaseListView(
         return queryset.order_by('-datetime', '-pk')
 
     def export_excel(self, queryset):
-        workbook = openpyxl.Workbook()
-        worksheet = workbook.active
+        # write_only mencegah seluruh cell ribuan baris disimpan di RAM.
+        workbook = openpyxl.Workbook(write_only=True)
+        worksheet = workbook.create_sheet(title='Data Mentah Presensi')
         worksheet.title = 'Data Mentah Presensi'
         worksheet.freeze_panes = 'A5'
-
-        worksheet['A1'] = 'DATA MENTAH PRESENSI'
-        worksheet['A1'].font = Font(name='Arial', size=14, bold=True)
-        worksheet['A2'] = (
+        worksheet.append(['DATA MENTAH PRESENSI'])
+        worksheet.append([
             f'Periode {self.date_from:%d-%m-%Y} s.d. '
             f'{self.date_to:%d-%m-%Y}'
-        )
-        worksheet['A2'].font = Font(name='Arial', size=10, italic=True)
+        ])
         worksheet.append([])
 
         headers = [
@@ -4028,32 +4265,25 @@ class RawPresensiDatabaseListView(
         ]
         worksheet.append(headers)
         worksheet.auto_filter.ref = 'A4:J4'
-        header_fill = PatternFill(
-            start_color='1F4E78',
-            end_color='1F4E78',
-            fill_type='solid',
-        )
-        header_font = Font(name='Arial', size=10, bold=True, color='FFFFFF')
-        thin_border = Border(
-            left=Side(style='thin', color='D9D9D9'),
-            right=Side(style='thin', color='D9D9D9'),
-            top=Side(style='thin', color='D9D9D9'),
-            bottom=Side(style='thin', color='D9D9D9'),
-        )
-        for cell in worksheet[4]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(
-                horizontal='center',
-                vertical='center',
-                wrap_text=True,
-            )
 
-        for number, log in enumerate(queryset.iterator(), 1):
+        # Satu query batch untuk pasangan (pegawai, waktu) yang sudah diolah.
+        evaluated_keys = set(
+            LogAktivitasAbsen.objects.filter(
+                waktu__gte=self.datetime_from,
+                waktu__lt=self.datetime_until,
+            ).values_list('absensi_harian__pegawai_id', 'waktu')
+        )
+
+        for number, log in enumerate(queryset.iterator(chunk_size=2000), 1):
             profile = getattr(log.mapping.pegawai, 'profil_user', None)
             raw_datetime = log.datetime
             if timezone.is_aware(raw_datetime):
                 raw_datetime = timezone.make_naive(raw_datetime)
+            is_evaluated = (
+                getattr(log, 'is_evaluated', None)
+                if self.evaluation
+                else (log.mapping.pegawai_id, log.datetime) in evaluated_keys
+            )
             worksheet.append([
                 number,
                 log.pk,
@@ -4064,14 +4294,8 @@ class RawPresensiDatabaseListView(
                 raw_datetime,
                 self._excel_safe_text(log.direction),
                 self._excel_safe_text(log.devicename),
-                'Sudah diolah' if log.is_evaluated else 'Belum diolah',
+                'Sudah diolah' if is_evaluated else 'Belum diolah',
             ])
-            current_row = worksheet.max_row
-            worksheet.cell(current_row, 7).number_format = 'yyyy-mm-dd hh:mm:ss'
-            for cell in worksheet[current_row]:
-                cell.font = Font(name='Arial', size=10)
-                cell.border = thin_border
-                cell.alignment = Alignment(vertical='center')
 
         widths = {
             'A': 8, 'B': 13, 'C': 18, 'D': 28, 'E': 28,
@@ -4080,24 +4304,29 @@ class RawPresensiDatabaseListView(
         for column, width in widths.items():
             worksheet.column_dimensions[column].width = width
 
-        response = HttpResponse(
+        # Sampai 10 MB tetap di memori; selebihnya otomatis memakai disk temp.
+        output = SpooledTemporaryFile(max_size=10 * 1024 * 1024, mode='w+b')
+        workbook.save(output)
+        output.seek(0)
+        response = FileResponse(
+            output,
+            as_attachment=True,
+            filename=(
+                f'Data_Mentah_Presensi_'
+                f'{self.date_from:%Y%m%d}_{self.date_to:%Y%m%d}.xlsx'
+            ),
             content_type=(
                 'application/vnd.openxmlformats-officedocument.'
                 'spreadsheetml.sheet'
-            )
+            ),
         )
-        response['Content-Disposition'] = (
-            f'attachment; filename="Data_Mentah_Presensi_'
-            f'{self.date_from:%Y%m%d}_{self.date_to:%Y%m%d}.xlsx"'
-        )
-        workbook.save(response)
         return response
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         base_logs = LogKehadiran.objects.filter(
-            datetime__date__gte=self.date_from,
-            datetime__date__lte=self.date_to,
+            datetime__gte=self.datetime_from,
+            datetime__lt=self.datetime_until,
         )
         query_params = self.request.GET.copy()
         query_params.pop('page', None)
@@ -4143,6 +4372,19 @@ class RekapPresensiBulananView(LoginRequiredMixin, generic.ListView):
 
         # 1. Base Queryset dengan filter awal (Pegawai Aktif & Bukan Superuser)
         queryset = Users.objects.filter(is_active=True).exclude(is_superuser=True).select_related('profil_user')
+        if is_discipline_admin(user):
+            queryset = filter_users_for_discipline_admin(queryset, user)
+        else:
+            queryset = queryset.filter(pk=user.pk)
+
+        search_query = self.request.GET.get('q', '').strip()
+        if search_query:
+            queryset = queryset.filter(
+                Q(first_name__icontains=search_query)
+                | Q(last_name__icontains=search_query)
+                | Q(email__icontains=search_query)
+                | Q(profil_user__nip__icontains=search_query)
+            )
         
         # 2. Ambil parameter bulan & tahun dari request URL (GET)
         try:
@@ -4299,6 +4541,10 @@ class RekapPresensiBulananView(LoginRequiredMixin, generic.ListView):
         context['daftar_bulan'] = nama_bulan
         context['title_page'] = 'Rekap Presensi Bulanan'
         context['label_periode'] = f"{nama_bulan.get(bulan)} {tahun}"
+        context['search_query'] = self.request.GET.get('q', '').strip()
+        preserved_params = self.request.GET.copy()
+        preserved_params.pop('page', None)
+        context['preserved_filters'] = preserved_params.urlencode()
         
         context.update({
             'selected': 'disiplin',
@@ -4359,16 +4605,40 @@ class RekapPresensiBulananView(LoginRequiredMixin, generic.ListView):
         # Redirect kembali ke halaman rekap membawa parameter filter aktif agar halaman tidak blank
         current_month = timezone.now().month
         current_year = timezone.now().year
-        return redirect(
-            f"{request.path}?bulan={request.GET.get('bulan', current_month)}&tahun={request.GET.get('tahun', current_year)}"
-        )
+        redirect_params = request.GET.copy()
+        redirect_params['bulan'] = request.GET.get('bulan', current_month)
+        redirect_params['tahun'] = request.GET.get('tahun', current_year)
+        redirect_params['q'] = request.GET.get('q', '').strip()
+        redirect_params.pop('page', None)
+        return redirect(f'{request.path}?{redirect_params.urlencode()}')
 
 
-class DetailPresensiPegawaiView(LoginRequiredMixin, generic.DetailView):
+class DetailPresensiPegawaiView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    generic.DetailView,
+):
     login_url = reverse_lazy('myaccount_urls:login_view')
     model = Users
     template_name = 'kehadirankegiatan/detail_kehadiran_pegawai.html'
     context_object_name = 'pegawai'
+
+    def test_func(self):
+        employee = self.get_object()
+        return bool(
+            self.request.user.pk == employee.pk
+            or is_discipline_admin(
+                self.request.user,
+                employee=employee,
+            )
+        )
+
+    def handle_no_permission(self):
+        messages.error(
+            self.request,
+            'Anda tidak memiliki akses ke data presensi pegawai tersebut.',
+        )
+        return redirect(reverse('disiplinsdm_urls:rekap_kehadiran_bulanan'))
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -4430,7 +4700,11 @@ class DetailPresensiPegawaiView(LoginRequiredMixin, generic.DetailView):
                 elif status_raw == 'ALPA':
                     data_hari['status_final'] = 'MANGKIR'
                     data_hari['status_css'] = 'danger'
-                    data_hari['keterangan_tambahan'] = 'Teridentifikasi TK karena tidak ada log presensi sampai batas evaluasi dilakukan'
+                    data_hari['keterangan_tambahan'] = (
+                        absen_hari_ini.keterangan
+                        or 'Teridentifikasi TK karena tidak ada log presensi '
+                        'sampai batas evaluasi dilakukan.'
+                    )
                 elif status_raw == 'IZIN':
                     data_hari['status_final'] = 'IZIN / CUTI'
                     data_hari['status_css'] = 'info'
@@ -4504,7 +4778,10 @@ class UpdatePresensiPegawaiView(LoginRequiredMixin, UserPassesTestMixin,  generi
     fields = ('status_final', 'keterangan')
     
     def test_func(self):   
-        return self.request.user.is_disiplin_admin
+        return is_discipline_admin(
+            self.request.user,
+            employee=self.get_object().pegawai,
+        )
     
     def handle_no_permission(self):
         messages.error(
@@ -4576,8 +4853,11 @@ class DownloadRekapPresensiExcelView(LoginRequiredMixin, View):
         user = request.user
         profil = getattr(user, 'profil_admin', None)
         
-        if user.is_disiplin_admin:
-            queryset = queryset
+        if is_discipline_admin(user):
+            queryset = filter_queryset_for_discipline_admin(
+                queryset,
+                user,
+            )
         elif profil and profil.is_pejabat:
             if profil.instalasi.exists():
                 queryset = queryset.filter(instalasi__in=profil.instalasi.all())
@@ -4593,6 +4873,15 @@ class DownloadRekapPresensiExcelView(LoginRequiredMixin, View):
                 queryset = queryset.filter(instalasi_id=riwayat['penempatan_level4_id'])
             else:
                 queryset = queryset.none()
+
+        search_query = request.GET.get('q', '').strip()
+        if search_query:
+            queryset = queryset.filter(
+                Q(pegawai__first_name__icontains=search_query)
+                | Q(pegawai__last_name__icontains=search_query)
+                | Q(pegawai__email__icontains=search_query)
+                | Q(pegawai__profil_user__nip__icontains=search_query)
+            )
 
         # PERUBAHAN DI SINI: Tambahkan anotasi total_libur
         queryset = queryset.annotate(

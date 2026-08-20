@@ -1,10 +1,22 @@
 """Aturan akses terpusat untuk data dan dokumen cuti."""
 
+from django.db.models import Q
+
 from dokumen.models import RiwayatPenempatan
+from myaccount.admin_scopes import (
+    PLACEMENT_SCOPE_LOOKUPS,
+    active_admin_scopes,
+    filter_queryset_by_admin_scope,
+    filter_users_by_admin_scope,
+    has_admin_scope_for_employee,
+)
+from myaccount.roles import ADMIN_LAYANAN_CUTI
+from .base import RoleScopeAccess
+from strukturorg.models import PejabatStruktur
 from strukturorg.services import (
-    filter_structures_led_by,
     get_active_leader,
     get_active_title,
+    is_active_leader,
 )
 
 
@@ -74,7 +86,7 @@ def build_approval_chain(pegawai):
 
 def ensure_leave_verifier_snapshot(layanan_cuti):
     """Simpan pejabat aktif saat pengajuan dibuat, bukan saat diverifikasi."""
-    from .models import VerifikasiCuti
+    from ..models import VerifikasiCuti
 
     defaults = {
         f"verifikator{item['level']}": item['user']
@@ -100,7 +112,7 @@ def ensure_leave_verifier_snapshot(layanan_cuti):
 
 def ensure_diklat_verifier_snapshot(layanan_diklat, pegawai):
     """Bekukan pejabat verifikator diklat pada saat usulan dikirim."""
-    from .models import VerifikasiDiklat
+    from ..models import VerifikasiDiklat
 
     defaults = {
         f"verifikator{item['level']}": item['user']
@@ -138,6 +150,108 @@ def is_leave_approver(user, layanan_cuti):
     )
 
 
+def is_leave_admin(user, pegawai=None):
+    """Role Admin Cuti harus memiliki assignment yang mencakup pegawai."""
+    return _leave_access.is_admin(user, pegawai)
+
+
+def filter_queryset_for_leave_admin(queryset, user, *, employee_path='pegawai'):
+    return _leave_access.filter_queryset(
+        queryset,
+        user,
+        employee_path=employee_path,
+        include_self=False,
+        include_subordinates=False,
+    )
+
+
+def filter_users_for_leave_admin(queryset, user):
+    return _leave_access.filter_queryset(
+        queryset,
+        user,
+        employee_path='',
+        include_self=False,
+        include_subordinates=False,
+    )
+
+
+def filter_users_for_leave_supervisor(queryset, user):
+    return filter_queryset_for_leave_supervisor(
+        queryset,
+        user,
+        employee_path='',
+    )
+
+
+def _is_structural_officer(user):
+    if not getattr(user, 'is_authenticated', False):
+        return False
+    return PejabatStruktur.objects.filter(
+        pejabat=user,
+        pejabat__is_active=True,
+        is_active=True,
+    ).exists()
+
+
+def is_leave_structural_officer(user):
+    return _leave_access.is_structural_officer(user)
+
+
+def filter_users_for_leave_role(queryset, user, *, include_self=True):
+    return _leave_access.filter_users(
+        queryset, user, include_self=include_self
+    )
+
+
+def filter_cuti_history_queryset(queryset, user):
+    """Riwayat pribadi, assignment Admin Cuti, dan bawahan struktural."""
+    return _leave_access.filter_queryset(queryset, user)
+
+
+def can_manage_cuti_history(user, riwayat_cuti):
+    return _leave_access.can_access(user, riwayat_cuti)
+
+
+def _appointment_scope_filter(appointments, placement_path):
+    scope_query = Q()
+    for appointment in appointments:
+        for field_name in PejabatStruktur.TARGET_FIELDS:
+            target_id = appointment.get(f'{field_name}_id')
+            if target_id is None:
+                continue
+            for lookup in PLACEMENT_SCOPE_LOOKUPS.get(field_name, ()):
+                scope_query |= Q(**{f'{placement_path}__{lookup}': target_id})
+            break
+    return scope_query
+
+
+def filter_queryset_for_leave_supervisor(queryset, user, *, employee_path='pegawai'):
+    """Data bawahan berdasarkan penugasan struktural aktif, tanpa ProfilAdmin."""
+    if not getattr(user, 'is_active', False):
+        return queryset.none()
+    appointments = PejabatStruktur.objects.filter(
+        pejabat=user,
+        pejabat__is_active=True,
+        is_active=True,
+    ).values(*(f'{field_name}_id' for field_name in PejabatStruktur.TARGET_FIELDS))
+    placement_path = (
+        f'{employee_path}__riwayat_penempatan'
+        if employee_path else 'riwayat_penempatan'
+    )
+    scope_query = _appointment_scope_filter(appointments, placement_path)
+    if not scope_query:
+        return queryset.none()
+    scoped = queryset.filter(
+        scope_query,
+        **{f'{placement_path}__status': True},
+    )
+    if employee_path:
+        scoped = scoped.exclude(**{employee_path: user})
+    else:
+        scoped = scoped.exclude(pk=user.pk)
+    return scoped.distinct()
+
+
 def can_supervise_employee(user, pegawai):
     """Samakan akses detail dengan lingkup bawahan pada halaman daftar."""
     if (
@@ -147,63 +261,41 @@ def can_supervise_employee(user, pegawai):
     ):
         return False
 
-    profil_admin = getattr(user, 'profil_admin', None)
-    if profil_admin is None:
-        return False
     penempatan = get_active_placement(pegawai)
     if penempatan is None:
         return False
 
-    instalasi = filter_structures_led_by(profil_admin.instalasi.all(), user)
-    if (
-        penempatan.penempatan_level4_id
-        and instalasi.filter(pk=penempatan.penempatan_level4_id).exists()
-    ):
-        return True
-
-    sub_bidang = filter_structures_led_by(profil_admin.sub_bidang.all(), user)
-    sub_bidang_id = (
-        penempatan.penempatan_level3_id
-        or getattr(
-            getattr(penempatan, 'penempatan_level4', None),
-            'sub_bidang_id',
-            None,
-        )
+    structures = [
+        penempatan.penempatan_level4,
+        penempatan.penempatan_level3,
+        penempatan.penempatan_level2,
+        penempatan.penempatan_level1,
+    ]
+    if penempatan.penempatan_level4:
+        structures.extend([
+            penempatan.penempatan_level4.sub_bidang,
+            penempatan.penempatan_level4.sub_bidang.bidang,
+            penempatan.penempatan_level4.sub_bidang.bidang.unor,
+        ])
+    elif penempatan.penempatan_level3:
+        structures.extend([
+            penempatan.penempatan_level3.bidang,
+            penempatan.penempatan_level3.bidang.unor,
+        ])
+    elif penempatan.penempatan_level2:
+        structures.append(penempatan.penempatan_level2.unor)
+    return any(
+        structure is not None and is_active_leader(user, structure)
+        for structure in structures
     )
-    if sub_bidang_id and sub_bidang.filter(pk=sub_bidang_id).exists():
-        return True
 
-    bidang = filter_structures_led_by(profil_admin.bidang.all(), user)
-    bidang_id = penempatan.penempatan_level2_id
-    if not bidang_id:
-        sub_bidang_obj = (
-            getattr(penempatan, 'penempatan_level3', None)
-            or getattr(
-                getattr(penempatan, 'penempatan_level4', None),
-                'sub_bidang',
-                None,
-            )
-        )
-        bidang_id = getattr(sub_bidang_obj, 'bidang_id', None)
-    if bidang_id and bidang.filter(pk=bidang_id).exists():
-        return True
 
-    unor = filter_structures_led_by(profil_admin.unor.all(), user)
-    unor_id = penempatan.penempatan_level1_id
-    if not unor_id:
-        bidang_obj = getattr(penempatan, 'penempatan_level2', None)
-        if bidang_obj is None:
-            sub_bidang_obj = (
-                getattr(penempatan, 'penempatan_level3', None)
-                or getattr(
-                    getattr(penempatan, 'penempatan_level4', None),
-                    'sub_bidang',
-                    None,
-                )
-            )
-            bidang_obj = getattr(sub_bidang_obj, 'bidang', None)
-        unor_id = getattr(bidang_obj, 'unor_id', None)
-    return bool(unor_id and unor.filter(pk=unor_id).exists())
+_leave_access = RoleScopeAccess(
+    ADMIN_LAYANAN_CUTI,
+    filter_queryset_for_leave_supervisor,
+    can_supervise_employee,
+    _is_structural_officer,
+)
 
 
 def can_view_leave(user, layanan_cuti):
@@ -211,7 +303,7 @@ def can_view_leave(user, layanan_cuti):
         return False
     return bool(
         user.pk == layanan_cuti.pegawai_id
-        or user.is_cuti_admin
+        or is_leave_admin(user, layanan_cuti.pegawai)
         or is_leave_approver(user, layanan_cuti)
         or can_supervise_employee(user, layanan_cuti.pegawai)
     )
@@ -221,7 +313,7 @@ def can_view_delegation(user, pelimpahan):
     if not getattr(user, "is_authenticated", False) or not getattr(user, "is_active", False):
         return False
     return bool(
-        user.is_cuti_admin
+        is_leave_admin(user, pelimpahan.riwayat_cuti.pegawai)
         or user.pk in {
             pelimpahan.pemberi_tugas_id,
             pelimpahan.penerima_tugas_id,

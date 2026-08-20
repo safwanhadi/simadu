@@ -332,6 +332,14 @@
             </a>
           </li>
             {% endif %}
+            {% if request.user.is_sso_admin %}
+            <li class="nav-item">
+              <a href="{% url 'myaccount_urls:sso_application_list' %}" class="nav-link {% if sso_management == 'active' %} active {% endif %}">
+                <i class="nav-icon fas fa-key"></i>
+                <p>Integrasi SSO</p>
+              </a>
+            </li>
+            {% endif %}
             {% if request.user.is_akun_admin %}
             <li class="nav-item">
               <a href="{% url 'myaccount_urls:account_registration_review_list' %}" class="nav-link {% if account_registration_review == 'active' %} active {% endif %}">
@@ -343,6 +351,12 @@
               <a href="{% url 'myaccount_urls:account_management_list' %}" class="nav-link {% if account_management == 'active' %} active {% endif %}">
                 <i class="nav-icon fas fa-users-cog"></i>
                 <p>Pengelolaan Akun</p>
+              </a>
+            </li>
+            <li class="nav-item">
+              <a href="{% url 'disiplinsdm_urls:mapping_mesin_absensi_list' %}" class="nav-link {% if mapping_management == 'active' %} active {% endif %}">
+                <i class="nav-icon fas fa-fingerprint"></i>
+                <p>Mapping Fingerprint</p>
               </a>
             </li>
             {% endif %}
@@ -575,6 +589,38 @@
 </div>
 <!-- ./wrapper -->
 
+{% if show_hadist_modal and hadist %}
+<div class="modal fade" id="hadistSessionModal" tabindex="-1" role="dialog"
+     aria-labelledby="hadistSessionModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header bg-success">
+        <h5 class="modal-title" id="hadistSessionModalLabel">
+          <i class="fas fa-book-open mr-2"></i>Nasehat &amp; Hadist
+        </h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Tutup">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <blockquote class="blockquote mb-0">
+          <p class="mb-3">{{ hadist.hadist }}</p>
+          {% if hadist.author_perawi %}
+          <footer class="blockquote-footer">{{ hadist.author_perawi }}</footer>
+          {% endif %}
+        </blockquote>
+      </div>
+      <div class="modal-footer">
+        <form id="hadistSessionModalForm" class="d-none">
+          {% csrf_token %}
+        </form>
+        <button type="button" class="btn btn-success" data-dismiss="modal">Tutup</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- jQuery -->
 <script src="{% static 'plugins/jquery/jquery.min.js' %}"></script>
 <!-- jQuery UI 1.11.4 -->
@@ -629,6 +675,22 @@
       }
   }, 4000)
 </script>
+
+{% if show_hadist_modal and hadist %}
+<script>
+  $(function () {
+    var $hadistModal = $('#hadistSessionModal');
+    $hadistModal.one('shown.bs.modal', function () {
+      $.ajax({
+        url: "{% url 'dashboard_urls:tandai_hadist_modal_sudah_tampil' %}",
+        method: 'POST',
+        data: $('#hadistSessionModalForm').serialize()
+      });
+    });
+    $hadistModal.modal('show');
+  });
+</script>
+{% endif %}
 
 {% if server_side_document_pagination %}
 <style>

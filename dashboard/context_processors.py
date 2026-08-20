@@ -16,9 +16,21 @@ from layanan.models import (
     LayananUsulanInovasi,
     LayananUsulanDiklat,
 )
+from layanan.access.cuti import (
+    filter_queryset_for_leave_admin,
+    filter_queryset_for_leave_supervisor,
+    is_leave_admin,
+)
+from layanan.access.inovasi import (
+    filter_inovasi_queryset,
+    is_inovasi_admin,
+    is_inovasi_structural_officer,
+)
 from informasi.models import NasehatdanHadist
 from itertools import chain
 from django.db.models import Q
+
+from .hadist_modal import hadist_modal_session_key
 
 
 def _sip_notification_values(queryset):
@@ -84,13 +96,20 @@ def _diklat_notification_values(queryset):
     return notifications
 
 
-def _inovasi_notification_values(queryset):
+def _inovasi_notification_values(queryset, user=None):
     notifications = list(queryset.values(
-        'id', 'pegawai__first_name', 'pegawai__last_name',
+        'id', 'pegawai_id', 'pegawai__first_name', 'pegawai__last_name',
         'status', 'created_at',
     ).order_by('-created_at'))
     for notification in notifications:
         notification['layanan__url'] = 'yaninovasi'
+        notification['can_process'] = bool(
+            user is None
+            or is_inovasi_admin(
+                user,
+                Users.objects.filter(pk=notification['pegawai_id']).first(),
+            )
+        )
     return notifications
 
 
@@ -128,6 +147,7 @@ def notifikasi_layanan(request):
             'str_expiry_notifications': [],
             'expiry_notification_total': 0,
             'notification_total': 0,
+            'is_cuti_scope_admin': False,
         }
 
     sip_expiry_notifications = get_sip_expiry_notifications(request.user)
@@ -174,6 +194,7 @@ def notifikasi_layanan(request):
                 + len(sip_expiry_notifications)
                 + len(str_expiry_notifications)
             ),
+            'is_cuti_scope_admin': True,
         }
 
     # === Blok 3: Untuk User Biasa dan Admin Hirarki ===
@@ -286,9 +307,16 @@ def notifikasi_layanan(request):
                 riwayatdiklat__pegawai__riwayat_penempatan__status=True
             ).distinct()
 
-    # Admin modul menerima seluruh pengajuan melalui daftar notifikasi utama,
-    # sehingga hasil hierarki tidak perlu digabungkan lagi.
-    if request.user.is_cuti_admin:
+    pending_cuti = LayananCuti.objects.filter(
+        status__in=("pengajuan", "tindaklanjut"),
+    )
+    layanan_cuti_admin = filter_queryset_for_leave_supervisor(
+        pending_cuti,
+        request.user,
+    )
+
+    # Admin Cuti menerima pengajuan melalui daftar utama sesuai assignment.
+    if is_leave_admin(request.user):
         layanan_cuti_admin = LayananCuti.objects.none()
     if request.user.is_diklat_admin:
         layanan_diklat_admin = LayananUsulanDiklat.objects.none()
@@ -297,9 +325,12 @@ def notifikasi_layanan(request):
     layanan_diklat_admin = _diklat_notification_values(layanan_diklat_admin)
 
     # Query notifikasi untuk pegawai (pribadi)
-    if request.user.is_cuti_admin:
+    if is_leave_admin(request.user):
         layanan_cuti_pegawai = _cuti_notification_values(
-            LayananCuti.objects.filter(status__in=("pengajuan", "tindaklanjut"))
+            filter_queryset_for_leave_admin(
+                pending_cuti,
+                request.user,
+            )
         )
     else:
         layanan_cuti_pegawai = _cuti_notification_values(
@@ -331,9 +362,16 @@ def notifikasi_layanan(request):
                 is_read=False,
             )
         )
-    if request.user.is_inovasi_admin:
+    if (
+        request.user.is_inovasi_admin
+        or is_inovasi_structural_officer(request.user)
+    ):
         layanan_inovasi = _inovasi_notification_values(
-            LayananUsulanInovasi.objects.filter(status='usulan')
+            filter_inovasi_queryset(
+                LayananUsulanInovasi.objects.filter(status='usulan'),
+                request.user,
+            ),
+            request.user,
         )
     else:
         layanan_inovasi = _inovasi_notification_values(
@@ -396,19 +434,29 @@ def notifikasi_layanan(request):
             + len(sip_expiry_notifications)
             + len(str_expiry_notifications)
         ),
+        'is_cuti_scope_admin': is_leave_admin(request.user),
     }
     
 
 def runningtext(request):
     agama = None
     data = None
-    if request.user and hasattr(request.user, 'profil_user'):
+    show_hadist_modal = False
+    if request.user.is_authenticated and hasattr(request.user, 'profil_user'):
         agama = request.user.profil_user.agama
-    if agama == 'Islam':
+    eligible_for_hadist = (
+        request.user.is_authenticated
+        and (agama == 'Islam' or request.user.is_superuser)
+    )
+    if eligible_for_hadist:
         data = NasehatdanHadist.objects.order_by("?").first()
+        session_key = hadist_modal_session_key(request.user)
+        if data is not None and not request.session.get(session_key, False):
+            show_hadist_modal = True
     return {
-        'agama':agama,
-        'hadist':data
+        'agama': agama,
+        'hadist': data,
+        'show_hadist_modal': show_hadist_modal,
     }
     
     

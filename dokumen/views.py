@@ -24,6 +24,53 @@ from layanan.services import CheckCuti
 from layanan.models import (
     JenisLayanan
 )
+from layanan.access.diklat import (
+    filter_diklat_history_queryset,
+    filter_users_for_diklat_role,
+    is_diklat_admin,
+    is_diklat_structural_officer,
+)
+from layanan.access.cuti import (
+    can_manage_cuti_history,
+    filter_cuti_history_queryset,
+    filter_users_for_leave_role,
+    is_leave_admin,
+    is_leave_structural_officer,
+)
+from layanan.access.sip import (
+    can_manage_profession_history,
+    filter_profession_history_queryset,
+    filter_profession_sip_queryset,
+    filter_users_for_sip_role,
+    is_sip_admin,
+    is_sip_structural_officer,
+)
+from layanan.access.promotion import (
+    filter_jabatan_queryset,
+    filter_pangkat_queryset,
+    filter_users_for_jabatan_role,
+    filter_users_for_pangkat_role,
+    is_jabatan_admin,
+    is_pangkat_admin,
+    is_promotion_structural_officer,
+)
+from layanan.access.berkala import (
+    filter_berkala_queryset,
+    filter_users_for_berkala_role,
+    is_berkala_admin,
+    is_berkala_structural_officer,
+)
+from layanan.access.inovasi import (
+    filter_inovasi_queryset,
+    filter_users_for_inovasi_role,
+    is_inovasi_admin,
+    is_inovasi_structural_officer,
+)
+from layanan.access.documents import (
+    filter_document_queryset,
+    filter_document_users,
+    is_document_scope_manager,
+)
 from .models import (
     DokumenSDM,
     RiwayatPendidikan, 
@@ -56,7 +103,9 @@ from .access import (
     DocumentAdminRequiredMixin,
     DocumentObjectAccessMixin,
     get_accessible_document,
+    get_safe_return_url,
     get_selected_nip,
+    preserve_return_url,
     scope_document_queryset,
 )
 from .generic_views import (
@@ -524,8 +573,11 @@ def get_nip(user):
 
 
 def get_riwayat_menu_url(request, employee=None):
+    return_to = get_safe_return_url(request)
+    if return_to:
+        return return_to
     url = reverse('riwayat_urls:riwayat_view')
-    if request.user.is_dokumen_admin and employee is not None:
+    if is_document_scope_manager(request.user) and employee is not None:
         nip = get_nip(employee)
         if nip:
             return f'{url}?nip={nip}'
@@ -535,7 +587,17 @@ notfoundview = 'riwayat_urls:notfound_view'
 save_success_message = "Data berhasi disimpan!"
 form_not_valid_message = "Maaf pengisian form tidak valid"
 
-class UrutkanRiwayatPendidikanView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+
+class DocumentScopeContextMixin:
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['can_manage_document_scope'] = is_document_scope_manager(
+            self.request.user
+        )
+        return context
+
+
+class UrutkanRiwayatPendidikanView(DocumentScopeContextMixin, DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '1_riwayat_pendidikan/riwayat_pendidikan_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_pendidikan')
@@ -597,8 +659,60 @@ RiwayatPendidikanDeleteView = pendidikan_document.delete_view(
 )
 
 
-class PanggolRulesMixin:
+class PromotionHistoryScopeMixin:
+    scope_filter = None
+    user_filter = None
+    admin_check = None
+    role_context_name = None
+
+    def has_management_role(self):
+        return is_document_scope_manager(self.request.user)
+
+    def get_selected_employee(self):
+        selected_nip = get_selected_nip(self.request)
+        if selected_nip:
+            return filter_document_users(
+                Users.objects.filter(profil_user__nip=selected_nip),
+                self.request.user,
+            ).first()
+        return None if self.has_management_role() else self.request.user
+
+    def get_document_queryset(self):
+        queryset = self.model.objects.all()
+        if self.select_related:
+            queryset = queryset.select_related(*self.select_related)
+        queryset = filter_document_queryset(queryset, self.request.user)
+        selected_nip = get_selected_nip(self.request)
+        if selected_nip:
+            queryset = queryset.filter(pegawai__profil_user__nip=selected_nip)
+        return queryset.order_by(*self.order_by)
+
+    def get_accessible_object(self, **lookup):
+        return get_object_or_404(
+            filter_document_queryset(
+                self.model.objects.all(), self.request.user
+            ),
+            **lookup,
+        )
+
+    def get_queryset(self):
+        return filter_document_queryset(
+            self.model.objects.all(), self.request.user
+        )
+
+    def get_common_context(self, **extra):
+        context = super().get_common_context(**extra)
+        context[self.role_context_name] = self.has_management_role()
+        return context
+
+
+class PanggolRulesMixin(PromotionHistoryScopeMixin):
     """Aturan bisnis khusus pangkat/golongan di atas reusable CRUD view."""
+
+    scope_filter = staticmethod(filter_pangkat_queryset)
+    user_filter = staticmethod(filter_users_for_pangkat_role)
+    admin_check = staticmethod(is_pangkat_admin)
+    role_context_name = 'can_manage_pangkat_role'
 
     def get_latest_tmt_gol(self, nip):
         if not nip:
@@ -667,10 +781,12 @@ RiwayatPanggolView = panggol_document.manage_view(
 )
 
 RiwayatPanggolUpdateView = panggol_document.update_view(
-    'RiwayatPanggolUpdateView'
+    'RiwayatPanggolUpdateView',
+    mixins=(PanggolRulesMixin,),
 )
 RiwayatPanggolDeleteView = panggol_document.delete_view(
-    'RiwayatPanggolDeleteView'
+    'RiwayatPanggolDeleteView',
+    mixins=(PanggolRulesMixin,),
 )
 
 
@@ -679,7 +795,7 @@ class UrutkanRiwayatPanggolView(DocumentAdminRequiredMixin, SuccessMessageMixin,
     template_name = '2_riwayat_panggol/riwayat_panggol_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_panggol')
     success_message = 'Urutan data berhasil diupdate!'
-    
+
     def get_form_class(self):
         form = UrutkanDokumenSDMForm
         return form
@@ -690,9 +806,17 @@ class UrutkanRiwayatPanggolView(DocumentAdminRequiredMixin, SuccessMessageMixin,
         if nip:
             user = get_user_bynip(nip)
         if self.request.POST:
-            urutkan_dokumen_form = urutkan_dokumen_panggol(self.request.POST, instance=self.object)
+            urutkan_dokumen_form = urutkan_dokumen_panggol(
+                self.request.POST,
+                instance=self.object,
+                queryset=scope_document_queryset(
+                    self.object.riwayatpanggol_set.all(), self.request.user
+                ),
+            )
         else:
-            queryset = self.object.riwayatpanggol_set.all()
+            queryset = scope_document_queryset(
+                self.object.riwayatpanggol_set.all(), self.request.user
+            )
             if nip:
                 queryset = queryset.filter(pegawai__profil_user__nip=nip)
             urutkan_dokumen_form = urutkan_dokumen_panggol(
@@ -800,8 +924,13 @@ class RiwayatUjiKomView(LoginRequiredMixin, View):
             return redirect(reverse('riwayat_urls:riwayat_panggol'))
 
 
-class JabatanViewMixin:
+class JabatanViewMixin(PromotionHistoryScopeMixin):
     """Filter dan state tampilan khusus Riwayat Jabatan."""
+
+    scope_filter = staticmethod(filter_jabatan_queryset)
+    user_filter = staticmethod(filter_users_for_jabatan_role)
+    admin_check = staticmethod(is_jabatan_admin)
+    role_context_name = 'can_manage_jabatan_role'
 
     def get_jabatan_filter(self):
         return (self.request.GET.get('jabatan') or '').strip()
@@ -811,7 +940,7 @@ class JabatanViewMixin:
             pegawai__is_superuser=True,
         )
         if (
-            self.request.user.is_dokumen_admin
+            self.has_management_role()
             and not get_selected_nip(self.request)
             and self.get_jabatan_filter()
         ):
@@ -866,7 +995,7 @@ class UrutkanRiwayatJabatanView(DocumentAdminRequiredMixin, SuccessMessageMixin,
     template_name = '3_riwayat_jabatan/riwayat_jabatan_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_jabatan')
     success_message = 'Urutan data berhasil diupdate!'
-    
+
     def get_form_class(self):
         form = UrutkanDokumenSDMForm
         return form
@@ -877,9 +1006,17 @@ class UrutkanRiwayatJabatanView(DocumentAdminRequiredMixin, SuccessMessageMixin,
         if nip:
             user = get_user_bynip(nip)
         if self.request.POST:
-            urutkan_dokumen_form = urutkan_dokumen_jabatan(self.request.POST, instance=self.object)
+            urutkan_dokumen_form = urutkan_dokumen_jabatan(
+                self.request.POST,
+                instance=self.object,
+                queryset=scope_document_queryset(
+                    self.object.riwayatjabatan_set.all(), self.request.user
+                ),
+            )
         else:
-            queryset = self.object.riwayatjabatan_set.all()
+            queryset = scope_document_queryset(
+                self.object.riwayatjabatan_set.all(), self.request.user
+            )
             if nip:
                 queryset = queryset.filter(pegawai__profil_user__nip=nip)
             urutkan_dokumen_form = urutkan_dokumen_jabatan(
@@ -943,7 +1080,7 @@ RiwayatPengangkatanDeleteView = pengangkatan_document.delete_view(
 )
 
 
-class UrutkanRiwayatPengangkatanView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatPengangkatanView(DocumentScopeContextMixin, DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '4_riwayat_pengangkatan/riwayat_pengangkatan_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_pengangkatan')
@@ -1085,7 +1222,7 @@ RiwayatPenempatanInstansiBeforUpdateView = (
 )
 
 
-class UrutkanRiwayatPenempatanView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatPenempatanView(DocumentScopeContextMixin, DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '5_riwayat_penempatan/riwayat_penempatan_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_penempatan')
@@ -1143,6 +1280,40 @@ class UrutkanRiwayatPenempatanView(DocumentAdminRequiredMixin, SuccessMessageMix
 class BerkalaRulesMixin:
     """Indikator jatuh tempo kenaikan gaji berkala."""
 
+    def has_management_role(self):
+        return is_document_scope_manager(self.request.user)
+
+    def get_selected_employee(self):
+        selected_nip = get_selected_nip(self.request)
+        if selected_nip:
+            return filter_document_users(
+                Users.objects.filter(profil_user__nip=selected_nip),
+                self.request.user,
+            ).first()
+        return None if self.has_management_role() else self.request.user
+
+    def get_document_queryset(self):
+        queryset = filter_document_queryset(
+            self.model.objects.all(), self.request.user
+        )
+        selected_nip = get_selected_nip(self.request)
+        if selected_nip:
+            queryset = queryset.filter(pegawai__profil_user__nip=selected_nip)
+        return queryset.order_by(*self.order_by)
+
+    def get_accessible_object(self, **lookup):
+        return get_object_or_404(
+            filter_document_queryset(
+                self.model.objects.all(), self.request.user
+            ),
+            **lookup,
+        )
+
+    def get_queryset(self):
+        return filter_document_queryset(
+            self.model.objects.all(), self.request.user
+        )
+
     def get_latest_tmt_gaji(self, nip):
         if not nip:
             return None
@@ -1177,6 +1348,7 @@ class BerkalaRulesMixin:
         context.update({
             'status_berkala': self.check_status(nip),
             'next_berkala': self.next_berkala(nip),
+            'can_manage_berkala_role': self.has_management_role(),
         })
         return context
 
@@ -1222,9 +1394,17 @@ class UrutkanRiwayatGajiBerkalaView(DocumentAdminRequiredMixin, SuccessMessageMi
         if nip:
             user = get_user_bynip(nip)
         if self.request.POST:
-            urutkan_dokumen_form = urutkan_dokumen_berkala(self.request.POST, instance=self.object)
+            urutkan_dokumen_form = urutkan_dokumen_berkala(
+                self.request.POST,
+                instance=self.object,
+                queryset=scope_document_queryset(
+                    self.object.gaji_berkala.all(), self.request.user
+                ),
+            )
         else:
-            queryset = self.object.gaji_berkala.all()
+            queryset = scope_document_queryset(
+                self.object.gaji_berkala.all(), self.request.user
+            )
             if nip:
                 queryset = queryset.filter(pegawai__profil_user__nip=nip)
             urutkan_dokumen_form = urutkan_dokumen_berkala(
@@ -1319,7 +1499,7 @@ kinerja_document = EmployeeDocumentModule(
 )
 
 
-class UrutkanRiwayatKinerjaView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatKinerjaView(DocumentScopeContextMixin, DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '7_riwayat_kinerja/riwayat_kinerja_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_kinerja')
@@ -1396,7 +1576,7 @@ RiwayatPenghargaanDeleteView = penghargaan_document.delete_view(
 )
 
 
-class UrutkanRiwayatPenghargaanView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatPenghargaanView(DocumentScopeContextMixin, DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '8_riwayat_penghargaan/riwayat_penghargaan_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_penghargaan')
@@ -1467,7 +1647,7 @@ RiwayatHukumanDeleteView = hukuman_document.delete_view(
 )
 
 
-class UrutkanRiwayatHukumanView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatHukumanView(DocumentScopeContextMixin, DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '9_riwayat_hukuman/riwayat_hukuman_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_hukuman')
@@ -1526,22 +1706,34 @@ class RiwayatCutiView(LoginRequiredMixin, CheckCuti, View):
 
     def get(self, request, **kwargs):
         user = request.user
-        selected_nip = get_selected_nip(request)
-        data = RiwayatCuti.objects.all().order_by('no_urut_dokumen')
+        can_manage = bool(
+            is_leave_admin(user)
+            or is_leave_structural_officer(user)
+        )
+        requested_nip = (request.GET.get('nip') or '').strip() or None
+        target = None
+        if requested_nip and can_manage:
+            target = filter_users_for_leave_role(
+                Users.objects.filter(profil_user__nip=requested_nip),
+                user,
+                include_self=False,
+            ).first()
+            if target is None:
+                raise Http404('Pegawai tidak ditemukan atau di luar cakupan.')
+        elif not can_manage:
+            target = user
+
+        data = filter_cuti_history_queryset(
+            RiwayatCuti.objects.all(),
+            user,
+        ).order_by('no_urut_dokumen')
         dok = DokumenSDM.objects.filter(url='cuti').first()
         initial = {'dokumen':dok}
-        nip=None
-        if not request.user.is_dokumen_admin:
-            nip = get_nip(user)
-            initial = {'pegawai':user, 'dokumen':dok}
-            if nip:
-                data = RiwayatCuti.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-            else:
-                return redirect(reverse(notfoundview, kwargs={'bagian':'riwayat', 'selected':'cuti'}))
-        if selected_nip:
-            nip = selected_nip
-            data = RiwayatCuti.objects.filter(pegawai__profil_user__nip=nip).order_by('no_urut_dokumen')
-        pegawai_saldo = get_user_bynip(nip) if nip else None
+        if target:
+            initial['pegawai'] = target
+            data = data.filter(pegawai=target)
+        nip = getattr(getattr(target, 'profil_user', None), 'nip', None)
+        pegawai_saldo = target
         snapshot_saldo = (
             self.buat_snapshot_saldo_cuti(pegawai_saldo)
             if pegawai_saldo
@@ -1567,12 +1759,16 @@ class RiwayatCutiView(LoginRequiredMixin, CheckCuti, View):
             'riwayat':'active',
             'selected':'cuti'
         }
+        context['can_manage_cuti_role'] = can_manage
+        context['document_menu_url'] = reverse('riwayat_urls:riwayat_view')
         return render(request, '10_riwayat_cuti/riwayat_cuti_master.html', context)
     
     def post(self, request, **kwargs):
         form = RiwayatCutiForm(data=request.POST, files=request.FILES, request=request)
         if form.is_valid():
-            form.save()
+            instance = form.save(commit=False)
+            instance.dokumen = DokumenSDM.objects.filter(url='cuti').first()
+            instance.save()
             messages.success(request, save_success_message)
             return redirect(reverse('riwayat_urls:riwayat_cuti'))
         else:
@@ -1586,11 +1782,14 @@ class RiwayatCutiUpdateView(LoginRequiredMixin, View):
 
     def get_object(self, id, request=None):
         try:
-            data = get_accessible_document(RiwayatCuti, self.request.user, id=id)
-            return data
-        except RiwayatCuti.DoesNotExist:
-            messages.error(request, 'detail data yang akan diedit tidak ditemukan!')
-            return None
+            return filter_cuti_history_queryset(
+                RiwayatCuti.objects.all(),
+                self.request.user,
+            ).get(id=id)
+        except RiwayatCuti.DoesNotExist as exc:
+            raise Http404(
+                'Riwayat Cuti tidak ditemukan atau tidak dapat diakses.'
+            ) from exc
         
     def get(self, request, **kwargs):
         id = kwargs.get('id')
@@ -1616,7 +1815,10 @@ class RiwayatCutiUpdateView(LoginRequiredMixin, View):
         action = request.GET.get('delete')
         data_detail = self.get_object(id)
         instance = self.get_object(id)
-        if request.user.is_dokumen_admin and action == 'delete':
+        if (
+            action == 'delete'
+            and can_manage_cuti_history(request.user, data_detail)
+        ):
             data_detail.delete()
             return redirect(reverse('riwayat_urls:riwayat_cuti'))
         form = RiwayatCutiForm(data=request.POST, files=request.FILES, instance=instance, request=request)
@@ -1639,16 +1841,18 @@ class RiwayatPenggunaanCutiView(LoginRequiredMixin, CheckCuti, TemplateView):
         context = super().get_context_data(**kwargs)
         profil = getattr(self.request.user, 'profil_user', None)
         requested_nip = self.request.GET.get('nip')
-        is_admin = (
-            self.request.user.is_dokumen_admin
-            or self.request.user.is_cuti_admin
+        can_manage = bool(
+            is_leave_admin(self.request.user)
+            or is_leave_structural_officer(self.request.user)
         )
-        nip = (
-            requested_nip
-            if is_admin and requested_nip
-            else getattr(profil, 'nip', None)
-        )
-        pegawai = get_user_bynip(nip) if nip else None
+        if requested_nip and can_manage:
+            pegawai = filter_users_for_leave_role(
+                Users.objects.filter(profil_user__nip=requested_nip),
+                self.request.user,
+                include_self=False,
+            ).first()
+        else:
+            pegawai = self.request.user
         if pegawai is None:
             raise Http404('Pegawai tidak ditemukan.')
 
@@ -1697,28 +1901,61 @@ class RiwayatPenggunaanCutiView(LoginRequiredMixin, CheckCuti, TemplateView):
         )
         return context
 
-class UrutkanRiwayatCutiView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatCutiView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    SuccessMessageMixin,
+    UpdateView,
+):
     model = DokumenSDM
     template_name = '10_riwayat_cuti/riwayat_cuti_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_cuti')
     success_message = 'Urutan data berhasil diupdate!'
+
+    def get_target_employee(self):
+        nip = (self.request.GET.get('nip') or '').strip()
+        if not nip:
+            return None
+        return filter_users_for_leave_role(
+            Users.objects.filter(profil_user__nip=nip),
+            self.request.user,
+            include_self=False,
+        ).first()
+
+    def test_func(self):
+        return bool(
+            (
+                is_leave_admin(self.request.user)
+                or is_leave_structural_officer(self.request.user)
+            )
+            and self.get_target_employee() is not None
+        )
     
     def get_form_class(self):
         form = UrutkanDokumenSDMForm
         return form
 
     def get_context_data(self, **kwargs):
-        nip = get_selected_nip(self.request)
-        if self.request.POST:
-            urutkan_dokumen_form = urutkan_dokumen_cuti(self.request.POST, instance=self.object)
-        else:
-            if nip:
-                urutkan_dokumen_form = urutkan_dokumen_cuti(instance=self.object, queryset=self.object.riwayatcuti_set.filter(pegawai__profil_user__nip=nip))
-            else:    
-                urutkan_dokumen_form = urutkan_dokumen_cuti(instance=self.object, queryset=self.object.riwayatcuti_set.filter(pegawai=self.request.user))
+        employee = self.get_target_employee()
+        queryset = filter_cuti_history_queryset(
+            self.object.riwayatcuti_set.filter(pegawai=employee),
+            self.request.user,
+        )
+        urutkan_dokumen_form = urutkan_dokumen_cuti(
+            self.request.POST or None,
+            instance=self.object,
+            queryset=queryset,
+        )
         context = super(UrutkanRiwayatCutiView, self).get_context_data(**kwargs)
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
+            'user': employee,
+            'nip': getattr(
+                getattr(employee, 'profil_user', None),
+                'nip',
+                None,
+            ),
+            'document_menu_url': reverse('riwayat_urls:riwayat_cuti'),
             'page':'Home',
             'sub_page':'Riwayat',
             'title_page':'Cuti',
@@ -1727,14 +1964,21 @@ class UrutkanRiwayatCutiView(DocumentAdminRequiredMixin, SuccessMessageMixin, Up
         })
         return context
 
+    def get_success_url(self):
+        employee = self.get_target_employee()
+        nip = getattr(getattr(employee, 'profil_user', None), 'nip', None)
+        url = reverse('riwayat_urls:riwayat_cuti')
+        return f'{url}?nip={nip}' if nip else url
+
     def form_valid(self, form):
         context = self.get_context_data()
         urutkan_dokumen_form = context['urutkan_dokumen_form']
+        if not urutkan_dokumen_form.is_valid():
+            return self.form_invalid(form)
         with transaction.atomic():
             self.object = form.save()
-            if urutkan_dokumen_form.is_valid():
-                urutkan_dokumen_form.instance = self.objSect
-                urutkan_dokumen_form.save()
+            urutkan_dokumen_form.instance = self.object
+            urutkan_dokumen_form.save()
         return super().form_valid(form)
     
 
@@ -1753,7 +1997,10 @@ class RiwayatCutiMonitoringListView(
     paginate_by = 25
 
     def test_func(self):
-        return self.request.user.is_cuti_admin
+        return bool(
+            is_leave_admin(self.request.user)
+            or is_leave_structural_officer(self.request.user)
+        )
 
     def get_queryset(self):
         queryset = (
@@ -1778,6 +2025,11 @@ class RiwayatCutiMonitoringListView(
                 )
             )
             .order_by('first_name', 'last_name', 'id')
+        )
+        queryset = filter_users_for_leave_role(
+            queryset,
+            self.request.user,
+            include_self=False,
         )
 
         keyword = self.request.GET.get('q', '').strip()
@@ -1829,25 +2081,63 @@ class RiwayatCutiMonitoringListView(
         
 def get_diklat_employee_queryset(user):
     """Pegawai yang boleh dipantau pada modul Diklat."""
-    queryset = Users.objects.all()
-    if user.is_dokumen_admin:
-        return queryset
-    if not user.is_staff:
-        return queryset.filter(pk=user.pk)
-
-    active_placement = user.riwayat_penempatan.filter(status=True).last()
-    if active_placement is None:
-        return queryset.none()
-
-    placement = active_placement.penempatan
-    return queryset.filter(
-        Q(riwayat_penempatan__penempatan_level3__sub_bidang=placement)
-        | Q(riwayat_penempatan__penempatan_level2__bidang=placement)
-        | Q(riwayat_penempatan__penempatan_level1__unor=placement)
-    ).distinct()
+    return filter_users_for_diklat_role(
+        Users.objects.all(),
+        user,
+    )
 
 
 class DiklatSaveMixin:
+    def get_common_context(self, **extra):
+        context = super().get_common_context(**extra)
+        context['can_manage_diklat_role'] = bool(
+            is_diklat_admin(self.request.user)
+            or is_diklat_structural_officer(self.request.user)
+        )
+        return context
+
+    def get_document_queryset(self):
+        queryset = self.model.objects.all()
+        if self.order_by:
+            queryset = queryset.order_by(*self.order_by)
+        return filter_diklat_history_queryset(
+            queryset,
+            self.request.user,
+        )
+
+    def get_accessible_object(self, **lookup):
+        try:
+            return filter_diklat_history_queryset(
+                self.model.objects.all(),
+                self.request.user,
+            ).get(**lookup)
+        except self.model.DoesNotExist as exc:
+            raise Http404(
+                'Riwayat Diklat tidak ditemukan atau tidak dapat diakses.'
+            ) from exc
+
+    def get_queryset(self):
+        return filter_diklat_history_queryset(
+            self.model.objects.all(),
+            self.request.user,
+        )
+
+    def get_context(self, form):
+        employee = self.object.pegawai.first()
+        return self.get_common_context(
+            user=employee,
+            nip=self.get_employee_nip(employee),
+            form=form,
+            update_form=True,
+            form_view='block',
+            data_view='none',
+        )
+
+    def get_success_url(self, employee=None):
+        if employee is not None and not isinstance(employee, Users):
+            employee = employee.first()
+        return super().get_success_url(employee)
+
     def save_document(self, form):
         form.instance.dokumen = self.get_document_definition()
         return super().save_document(form)
@@ -1892,7 +2182,10 @@ class RiwayatDiklatListView(LoginRequiredMixin, ListView):
         ).distinct()
 
     def get_paginate_by(self, queryset):
-        if self.request.user.is_dokumen_admin and not get_selected_nip(self.request):
+        if (
+            is_diklat_admin(self.request.user)
+            or is_diklat_structural_officer(self.request.user)
+        ):
             return self.paginate_by
         return None
     
@@ -1906,9 +2199,12 @@ class RiwayatDiklatListView(LoginRequiredMixin, ListView):
         context['data_view']='block'
         context['riwayat']='active'
         context['selected']='diklat'
+        context['can_manage_diklat_role'] = bool(
+            is_diklat_admin(self.request.user)
+            or is_diklat_structural_officer(self.request.user)
+        )
         context['server_side_document_pagination'] = bool(
-            self.request.user.is_dokumen_admin
-            and not get_selected_nip(self.request)
+            context['can_manage_diklat_role']
         )
         return context
     
@@ -1934,6 +2230,10 @@ class RiwayatDiklatDetailView(LoginRequiredMixin, DetailView):
         context['data_view']='block'
         context['riwayat']='active'
         context['selected']='diklat'
+        context['can_manage_diklat_role'] = bool(
+            is_diklat_admin(self.request.user)
+            or is_diklat_structural_officer(self.request.user)
+        )
         return context
 
 
@@ -1963,6 +2263,10 @@ class RiwayatDiklatPegawaiView(LoginRequiredMixin, ListView):
             'riwayat':'active',
             'selected':'diklat'
         })
+        context['can_manage_diklat_role'] = bool(
+            is_diklat_admin(self.request.user)
+            or is_diklat_structural_officer(self.request.user)
+        )
         return context
 
 
@@ -1972,30 +2276,53 @@ RiwayatDiklatUpdateView = diklat_document.update_view(
 )
 
 
-class UrutkanRiwayatDiklatView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatDiklatView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    SuccessMessageMixin,
+    UpdateView,
+):
     model = DokumenSDM
     template_name = '11_riwayat_diklat/riwayat_diklat_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_diklat')
     success_message = 'Urutan data berhasil diupdate!'
+
+    def get_target_employee(self):
+        nip = (self.request.GET.get('nip') or '').strip()
+        if not nip:
+            return None
+        return filter_users_for_diklat_role(
+            Users.objects.filter(profil_user__nip=nip),
+            self.request.user,
+            include_self=False,
+        ).first()
+
+    def test_func(self):
+        return bool(
+            (
+                is_diklat_admin(self.request.user)
+                or is_diklat_structural_officer(self.request.user)
+            )
+            and self.get_target_employee() is not None
+        )
 
     def get_form_class(self):
         form = UrutkanDokumenSDMForm
         return form
 
     def get_context_data(self, **kwargs):
-        nip = get_selected_nip(self.request)
-        if self.request.POST:
-            urutkan_dokumen_form = urutkan_dokumen_diklat(self.request.POST, instance=self.object)
-        else:
-            queryset = self.object.riwayatdiklat_set.all()
-            if nip:
-                queryset = queryset.filter(pegawai__profil_user__nip=nip)
-            urutkan_dokumen_form = urutkan_dokumen_diklat(
-                instance=self.object,
-                queryset=queryset.distinct(),
-            )
+        user = self.get_target_employee()
+        nip = getattr(getattr(user, 'profil_user', None), 'nip', None)
+        queryset = filter_diklat_history_queryset(
+            self.object.riwayatdiklat_set.filter(pegawai=user),
+            self.request.user,
+        )
+        urutkan_dokumen_form = urutkan_dokumen_diklat(
+            self.request.POST or None,
+            instance=self.object,
+            queryset=queryset.distinct(),
+        )
         context = super(UrutkanRiwayatDiklatView, self).get_context_data(**kwargs)
-        user = get_user_bynip(nip) if nip else None
         context.update({
             'urutkan_dokumen_form':urutkan_dokumen_form,
             'user': user,
@@ -2053,7 +2380,7 @@ RiwayatKompetensiDeleteView = kompetensi_document.delete_view(
 )
 
 
-class UrutkanRiwayatKompetensiView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatKompetensiView(DocumentScopeContextMixin, DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '18_riwayat_kompetensi/riwayat_kompetensi_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_kompetensi')
@@ -2128,7 +2455,7 @@ RiwayatOrganisasiDeleteView = organisasi_document.delete_view(
 )
     
 
-class UrutkanRiwayatOrganisasiView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatOrganisasiView(DocumentScopeContextMixin, DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '12_riwayat_organisasi/riwayat_organisasi_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_organisasi')
@@ -2182,10 +2509,49 @@ class UrutkanRiwayatOrganisasiView(DocumentAdminRequiredMixin, SuccessMessageMix
 
 
 class ProfesiContextMixin:
+    def get_selected_employee(self):
+        selected_nip = get_selected_nip(self.request)
+        if selected_nip:
+            return filter_users_for_sip_role(
+                Users.objects.filter(profil_user__nip=selected_nip),
+                self.request.user,
+            ).first()
+        if not (
+            is_sip_admin(self.request.user)
+            or is_sip_structural_officer(self.request.user)
+        ):
+            return self.request.user
+        return None
+
+    def get_document_queryset(self):
+        queryset = self.model.objects.select_related(*self.select_related)
+        queryset = filter_profession_history_queryset(queryset, self.request.user)
+        selected_nip = get_selected_nip(self.request)
+        if selected_nip:
+            queryset = queryset.filter(pegawai__profil_user__nip=selected_nip)
+        return queryset.order_by(*self.order_by)
+
+    def get_accessible_object(self, **lookup):
+        return get_object_or_404(
+            filter_profession_history_queryset(
+                self.model.objects.all(), self.request.user
+            ),
+            **lookup,
+        )
+
+    def get_queryset(self):
+        return filter_profession_history_queryset(
+            self.model.objects.all(), self.request.user
+        )
+
     def get_common_context(self, **extra):
         context = super().get_common_context(**extra)
         context['data_str'] = context['data']
         context['str'] = True
+        context['can_manage_sip_role'] = bool(
+            is_sip_admin(self.request.user)
+            or is_sip_structural_officer(self.request.user)
+        )
         return context
 
 
@@ -2236,9 +2602,10 @@ class RiwayatSIPProfesiView(LoginRequiredMixin, View):
     redirect_field_name = 'next'
 
     def get_str_object(self, id):
-        return get_accessible_document(
-            RiwayatProfesi,
-            self.request.user,
+        return get_object_or_404(
+            filter_profession_history_queryset(
+                RiwayatProfesi.objects.all(), self.request.user
+            ),
             pk=id,
         )
         
@@ -2262,6 +2629,10 @@ class RiwayatSIPProfesiView(LoginRequiredMixin, View):
             'sip':True,
             'selected':'profesi'
         }
+        context['can_manage_sip_role'] = bool(
+            is_sip_admin(request.user)
+            or is_sip_structural_officer(request.user)
+        )
         return render(request, '13_riwayat_profesi/riwayat_profesi_master.html', context)
     
     def post(self, request, **kwargs):
@@ -2284,16 +2655,18 @@ class RiwayatSIPProfesiUpdateView(LoginRequiredMixin, View):
     redirect_field_name = 'next'
 
     def get_str_object(self, id):
-        return get_accessible_document(
-            RiwayatProfesi,
-            self.request.user,
+        return get_object_or_404(
+            filter_profession_history_queryset(
+                RiwayatProfesi.objects.all(), self.request.user
+            ),
             pk=id,
         )
 
     def get_object(self, id, id_str):
-        return get_accessible_document(
-            RiwayatSIPProfesi,
-            self.request.user,
+        return get_object_or_404(
+            filter_profession_sip_queryset(
+                RiwayatSIPProfesi.objects.all(), self.request.user
+            ),
             pk=id,
             riwayat_profesi_id=id_str,
         )
@@ -2317,6 +2690,10 @@ class RiwayatSIPProfesiUpdateView(LoginRequiredMixin, View):
             'sip':True,
             'selected':'profesi'
         }
+        context['can_manage_sip_role'] = bool(
+            is_sip_admin(request.user)
+            or is_sip_structural_officer(request.user)
+        )
         return render(request, '13_riwayat_profesi/riwayat_profesi_master.html', context)
     
     def post(self, request, **kwargs):
@@ -2365,10 +2742,15 @@ class RiwayatSIPProfesiUpdateView(LoginRequiredMixin, View):
             )
 
 
-class UrutkanRiwayatSIPProfesiView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatSIPProfesiView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
     model = RiwayatProfesi
     template_name = '13_riwayat_profesi/riwayat_sip_urutkan_dokumen.html'
     success_message = 'Urutan data berhasil diupdate!'
+
+    def get_queryset(self):
+        return filter_profession_history_queryset(
+            RiwayatProfesi.objects.all(), self.request.user
+        )
 
     def get_form_class(self):
         form = UrutkanRiwayatProfesiForm
@@ -2408,13 +2790,15 @@ class UrutkanRiwayatSIPProfesiView(DocumentAdminRequiredMixin, SuccessMessageMix
         return super().form_valid(form)
     
 
-class RiwayatSIPDeleteView(DocumentObjectAccessMixin, SuccessMessageMixin, DeleteView):
+class RiwayatSIPDeleteView(LoginRequiredMixin, SuccessMessageMixin, DeleteView):
     model = RiwayatSIPProfesi
     template_name = '13_riwayat_profesi/riwayat_profesi_master.html'
     success_message = "Data berhasil dihapus!"
 
     def get_queryset(self):
-        return super().get_queryset().filter(
+        return filter_profession_sip_queryset(
+            RiwayatSIPProfesi.objects.all(), self.request.user
+        ).filter(
             riwayat_profesi_id=self.kwargs['id_str'],
         )
 
@@ -2564,7 +2948,7 @@ class RiwayatBekerjaUpdateView(LoginRequiredMixin, View):
             return redirect(reverse('riwayat_urls:riwayat_bekerja'))
 
 
-class UrutkanRiwayatBekerjaView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatBekerjaView(DocumentScopeContextMixin, DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '14_riwayat_bekerja/riwayat_bekerja_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_bekerja')
@@ -2900,12 +3284,43 @@ class RiwayatOrangTuaDeleteView(DocumentObjectAccessMixin, SuccessMessageMixin, 
 
 
 class InovasiContextMixin:
+    def has_management_role(self):
+        return bool(
+            is_inovasi_admin(self.request.user)
+            or is_inovasi_structural_officer(self.request.user)
+        )
+
+    def get_selected_employee(self):
+        nip = get_selected_nip(self.request)
+        if nip:
+            return filter_users_for_inovasi_role(
+                Users.objects.filter(profil_user__nip=nip),
+                self.request.user,
+            ).first()
+        return None if self.has_management_role() else self.request.user
+
+    def get_document_queryset(self):
+        queryset = filter_inovasi_queryset(
+            self.model.objects.select_related(*self.select_related),
+            self.request.user,
+        )
+        nip = get_selected_nip(self.request)
+        if nip:
+            queryset = queryset.filter(pegawai__profil_user__nip=nip)
+        return queryset.order_by(*self.order_by)
+
+    def get_queryset(self):
+        return filter_inovasi_queryset(
+            self.model.objects.all(), self.request.user
+        )
+
     def get_common_context(self, **extra):
         context = super().get_common_context(**extra)
         context.update({
             'form': None,
             'form_view': 'none',
             'data_view': 'block',
+            'can_manage_inovasi_role': self.has_management_role(),
         })
         return context
 
@@ -2932,11 +3347,19 @@ RiwayatInovasiDeleteView = inovasi_document.delete_view(
 )
 
 
-class UrutkanRiwayatInovasiView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatInovasiView(LoginRequiredMixin, UserPassesTestMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '17_riwayat_inovasi/riwayat_inovasi_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_inovasi')
     success_message = 'Urutan data berhasil diupdate!'
+
+    def test_func(self):
+        nip = get_selected_nip(self.request)
+        if not nip:
+            return True
+        return filter_users_for_inovasi_role(
+            Users.objects.filter(profil_user__nip=nip), self.request.user
+        ).exists()
     
     def get_form_class(self):
         form = UrutkanDokumenSDMForm
@@ -2945,9 +3368,17 @@ class UrutkanRiwayatInovasiView(DocumentAdminRequiredMixin, SuccessMessageMixin,
     def get_context_data(self, **kwargs):
         nip = get_selected_nip(self.request)
         if self.request.POST:
-            urutkan_dokumen_form = urutkan_dokumen_inovasi(self.request.POST, instance=self.object)
+            urutkan_dokumen_form = urutkan_dokumen_inovasi(
+                self.request.POST,
+                instance=self.object,
+                queryset=filter_inovasi_queryset(
+                    self.object.riwayatinovasi_set.all(), self.request.user
+                ),
+            )
         else:
-            queryset = self.object.riwayatinovasi_set.all()
+            queryset = filter_inovasi_queryset(
+                self.object.riwayatinovasi_set.all(), self.request.user
+            )
             if nip:
                 queryset = queryset.filter(pegawai__profil_user__nip=nip)
             urutkan_dokumen_form = urutkan_dokumen_inovasi(
@@ -3044,7 +3475,7 @@ RiwayatPenugasanDeleteView = penugasan_document.delete_view(
 )
 
 
-class UrutkanRiwayatPenugasanView(DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
+class UrutkanRiwayatPenugasanView(DocumentScopeContextMixin, DocumentAdminRequiredMixin, SuccessMessageMixin, UpdateView):
     model = DokumenSDM
     template_name = '19_riwayat_penugasan/riwayat_penugasan_urutkan_dokumen.html'
     success_url = reverse_lazy('riwayat_urls:riwayat_penugasan')
@@ -3145,9 +3576,7 @@ class RiwayatUjiKompetensiListView(LoginRequiredMixin, ListView):
         queryset = UjiKompetensi.objects.select_related(
             'pegawai', 'kompetensi', 'kompetensi__jenis_sdm'
         ).order_by('-tgl_sert_ujikomp', '-id')
-        if self.request.user.is_dokumen_admin:
-            return queryset
-        return queryset.filter(pegawai=self.request.user)
+        return filter_document_queryset(queryset, self.request.user)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -3157,6 +3586,7 @@ class RiwayatUjiKompetensiListView(LoginRequiredMixin, ListView):
             'riwayat': 'active',
             'selected': 'ujikomp',
             'server_side_document_pagination': True,
+            'can_manage_document_scope': is_document_scope_manager(self.request.user),
         })
         return context
 
@@ -3173,12 +3603,12 @@ class RiwayatUjiKompetensiCreateView(LoginRequiredMixin, CreateView):
 
     def get_initial(self):
         initial = super().get_initial()
-        if not self.request.user.is_dokumen_admin:
+        if not is_document_scope_manager(self.request.user):
             initial['pegawai'] = self.request.user
         return initial
 
     def form_valid(self, form):
-        if not self.request.user.is_dokumen_admin:
+        if not is_document_scope_manager(self.request.user):
             form.instance.pegawai = self.request.user
         response = super().form_valid(form)
         if self.request.GET.get('popup') == '1':
@@ -3192,7 +3622,10 @@ class RiwayatUjiKompetensiCreateView(LoginRequiredMixin, CreateView):
         return response
 
     def get_success_url(self):
-        return reverse('riwayat_urls:riwayat_ujikom')
+        return preserve_return_url(
+            self.request,
+            reverse('riwayat_urls:riwayat_ujikom'),
+        )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -3201,6 +3634,8 @@ class RiwayatUjiKompetensiCreateView(LoginRequiredMixin, CreateView):
             'title_page': 'Riwayat Uji Kompetensi',
             'riwayat': 'active',
             'selected': 'ujikomp',
+            'document_menu_url': get_riwayat_menu_url(self.request),
+            'can_manage_document_scope': is_document_scope_manager(self.request.user),
         })
         return context
 
@@ -3211,10 +3646,9 @@ class RiwayatUjiKompetensiUpdateView(LoginRequiredMixin, UpdateView):
     template_name = 'riwayat_ujikom/form.html'
 
     def get_queryset(self):
-        queryset = UjiKompetensi.objects.all()
-        if self.request.user.is_dokumen_admin:
-            return queryset
-        return queryset.filter(pegawai=self.request.user)
+        return filter_document_queryset(
+            UjiKompetensi.objects.all(), self.request.user
+        )
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -3222,7 +3656,7 @@ class RiwayatUjiKompetensiUpdateView(LoginRequiredMixin, UpdateView):
         return kwargs
 
     def form_valid(self, form):
-        if not self.request.user.is_dokumen_admin:
+        if not is_document_scope_manager(self.request.user):
             form.instance.pegawai = self.request.user
 
         old_file = None
@@ -3241,7 +3675,10 @@ class RiwayatUjiKompetensiUpdateView(LoginRequiredMixin, UpdateView):
         return response
 
     def get_success_url(self):
-        return reverse('riwayat_urls:riwayat_ujikom')
+        return preserve_return_url(
+            self.request,
+            reverse('riwayat_urls:riwayat_ujikom'),
+        )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -3254,6 +3691,7 @@ class RiwayatUjiKompetensiUpdateView(LoginRequiredMixin, UpdateView):
                 self.request,
                 self.object.pegawai,
             ),
+            'can_manage_document_scope': is_document_scope_manager(self.request.user),
         })
         return context
 
@@ -3263,10 +3701,9 @@ class RiwayatUjiKompetensiDeleteView(LoginRequiredMixin, DeleteView):
     template_name = 'riwayat_ujikom/confirm_delete.html'
 
     def get_queryset(self):
-        queryset = UjiKompetensi.objects.all()
-        if self.request.user.is_dokumen_admin:
-            return queryset
-        return queryset.filter(pegawai=self.request.user)
+        return filter_document_queryset(
+            UjiKompetensi.objects.all(), self.request.user
+        )
 
     def form_valid(self, form):
         file_data = None
@@ -3296,9 +3733,7 @@ class RiwayatPAKListView(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         queryset = RiwayatPAK.objects.select_related('pegawai').order_by('-tgl_srt', '-id')
-        if self.request.user.is_dokumen_admin:
-            return queryset
-        return queryset.filter(pegawai=self.request.user)
+        return filter_document_queryset(queryset, self.request.user)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -3308,6 +3743,7 @@ class RiwayatPAKListView(LoginRequiredMixin, ListView):
             'riwayat': 'active',
             'selected': 'pak',
             'server_side_document_pagination': True,
+            'can_manage_document_scope': is_document_scope_manager(self.request.user),
         })
         return context
 
@@ -3324,12 +3760,12 @@ class RiwayatPAKCreateView(LoginRequiredMixin, CreateView):
 
     def get_initial(self):
         initial = super().get_initial()
-        if not self.request.user.is_dokumen_admin:
+        if not is_document_scope_manager(self.request.user):
             initial['pegawai'] = self.request.user
         return initial
 
     def form_valid(self, form):
-        if not self.request.user.is_dokumen_admin:
+        if not is_document_scope_manager(self.request.user):
             form.instance.pegawai = self.request.user
         form.instance.dokumen = DokumenSDM.objects.filter(url='pak').first()
         response = super().form_valid(form)
@@ -3344,7 +3780,10 @@ class RiwayatPAKCreateView(LoginRequiredMixin, CreateView):
         return response
 
     def get_success_url(self):
-        return reverse('riwayat_urls:riwayat_pak')
+        return preserve_return_url(
+            self.request,
+            reverse('riwayat_urls:riwayat_pak'),
+        )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -3353,6 +3792,8 @@ class RiwayatPAKCreateView(LoginRequiredMixin, CreateView):
             'title_page': 'Riwayat PAK',
             'riwayat': 'active',
             'selected': 'pak',
+            'document_menu_url': get_riwayat_menu_url(self.request),
+            'can_manage_document_scope': is_document_scope_manager(self.request.user),
         })
         return context
 
@@ -3363,10 +3804,9 @@ class RiwayatPAKUpdateView(LoginRequiredMixin, UpdateView):
     template_name = 'riwayat_pak/form.html'
 
     def get_queryset(self):
-        queryset = RiwayatPAK.objects.all()
-        if self.request.user.is_dokumen_admin:
-            return queryset
-        return queryset.filter(pegawai=self.request.user)
+        return filter_document_queryset(
+            RiwayatPAK.objects.all(), self.request.user
+        )
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -3374,7 +3814,7 @@ class RiwayatPAKUpdateView(LoginRequiredMixin, UpdateView):
         return kwargs
 
     def form_valid(self, form):
-        if not self.request.user.is_dokumen_admin:
+        if not is_document_scope_manager(self.request.user):
             form.instance.pegawai = self.request.user
         old_file = None
         if self.object.file and 'file' in self.request.FILES:
@@ -3390,7 +3830,10 @@ class RiwayatPAKUpdateView(LoginRequiredMixin, UpdateView):
         return response
 
     def get_success_url(self):
-        return reverse('riwayat_urls:riwayat_pak')
+        return preserve_return_url(
+            self.request,
+            reverse('riwayat_urls:riwayat_pak'),
+        )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -3403,6 +3846,7 @@ class RiwayatPAKUpdateView(LoginRequiredMixin, UpdateView):
                 self.request,
                 self.object.pegawai,
             ),
+            'can_manage_document_scope': is_document_scope_manager(self.request.user),
         })
         return context
 
@@ -3412,10 +3856,9 @@ class RiwayatPAKDeleteView(LoginRequiredMixin, DeleteView):
     template_name = 'riwayat_pak/confirm_delete.html'
 
     def get_queryset(self):
-        queryset = RiwayatPAK.objects.all()
-        if self.request.user.is_dokumen_admin:
-            return queryset
-        return queryset.filter(pegawai=self.request.user)
+        return filter_document_queryset(
+            RiwayatPAK.objects.all(), self.request.user
+        )
 
     def form_valid(self, form):
         file_data = None

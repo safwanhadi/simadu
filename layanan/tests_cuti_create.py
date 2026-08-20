@@ -7,11 +7,12 @@ from django.urls import reverse
 
 from dokumen.forms import RiwayatPengajuanCutiForm
 from dokumen.models import DokumenSDM, RiwayatCuti, RiwayatPengangkatan
-from myaccount.models import Users
+from disiplinsdm.models import HariLibur, PolaKerjaPegawai
+from myaccount.models import AdminScopeAssignment, Users
 from myaccount.roles import ADMIN_LAYANAN_CUTI
 
 from .forms import LayananCutiForm, pengajuan_cuti_formset
-from .models import JenisLayanan, LayananCuti
+from .models import JenisLayanan, LayananCuti, PelimpahanTugas
 from .services import CheckCuti
 
 
@@ -37,6 +38,17 @@ class LayananCutiCreateTests(TestCase):
         )
         group, _ = Group.objects.get_or_create(name=ADMIN_LAYANAN_CUTI)
         self.admin.groups.add(group)
+        AdminScopeAssignment.objects.create(
+            user=self.admin,
+            group=group,
+            scope_type=AdminScopeAssignment.GLOBAL,
+        )
+        self.superuser = Users.objects.create_superuser(
+            email='superuser-create-cuti@example.com',
+            password='rahasia',
+            first_name='Superuser',
+            last_name='Cuti',
+        )
 
         self.jenis_layanan, _ = JenisLayanan.objects.update_or_create(
             url='yancuti',
@@ -53,6 +65,11 @@ class LayananCutiCreateTests(TestCase):
                 status_pegawai='Kontrak',
                 no_srt_putusan=f'SK-{pegawai.pk}',
                 tgl_srt_putusan=date.today(),
+            )
+            PolaKerjaPegawai.objects.create(
+                pegawai=pegawai,
+                pola_kerja=PolaKerjaPegawai.REGULER,
+                berlaku_mulai=date.today().replace(month=1, day=1),
             )
 
     def request_for(self, user, path='/'):
@@ -75,6 +92,40 @@ class LayananCutiCreateTests(TestCase):
             Users.objects.filter(pk=self.pegawai.pk),
             transform=lambda user: user,
         )
+
+    def test_admin_cuti_dapat_melihat_dan_menambah_pola_kerja(self):
+        self.client.force_login(self.admin)
+        url = reverse('layanan_urls:pola_kerja_pegawai')
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Pola Kerja Pegawai')
+        self.assertContains(response, self.pegawai.email)
+        self.assertEqual(response.context['paginator'].per_page, 25)
+
+        PolaKerjaPegawai.objects.filter(pegawai=self.pegawai_lain).delete()
+        response = self.client.post(url, {
+            'pegawai': self.pegawai_lain.pk,
+            'pola_kerja': PolaKerjaPegawai.SHIFT,
+            'berlaku_mulai': date.today().isoformat(),
+            'berlaku_sampai': '',
+            'keterangan': 'Pola shift dari Admin Cuti',
+        })
+
+        self.assertRedirects(response, url)
+        self.assertTrue(PolaKerjaPegawai.objects.filter(
+            pegawai=self.pegawai_lain,
+            pola_kerja=PolaKerjaPegawai.SHIFT,
+        ).exists())
+
+    def test_pegawai_biasa_tidak_dapat_mengelola_pola_kerja(self):
+        self.client.force_login(self.pegawai)
+
+        response = self.client.get(
+            reverse('layanan_urls:pola_kerja_pegawai')
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_sumber_tunda_mengikuti_pegawai_target_admin(self):
         sumber_tunda = RiwayatCuti.objects.create(
@@ -197,6 +248,7 @@ class LayananCutiCreateTests(TestCase):
         )
         self.assertEqual(riwayat.status_cuti, 'Belum')
         self.assertEqual(riwayat.jenis_cuti, 'Cuti Tahunan')
+        self.assertFalse(riwayat.menggunakan_pola_shift)
         snapshot = riwayat.usulan.snapshot_saldo_cuti
         self.assertEqual(snapshot['versi'], 3)
         self.assertEqual(len(snapshot['rows']), 3)
@@ -208,3 +260,138 @@ class LayananCutiCreateTests(TestCase):
             snapshot['total_tersedia'],
             CheckCuti().cek_sisa_cuti(self.pegawai),
         )
+
+    def test_superuser_diarahkan_dan_dapat_mengisi_pelimpahan_pegawai(self):
+        self.client.force_login(self.superuser)
+        mulai = date.today() + timedelta(days=10)
+        selesai = mulai + timedelta(days=1)
+        prefix = pengajuan_cuti_formset.get_default_prefix()
+        response = self.client.post(
+            reverse('layanan_urls:layanan_cuti_create_view'),
+            {
+                'pegawai': self.pegawai.pk,
+                'layanan': self.jenis_layanan.pk,
+                'status': 'pengajuan',
+                'tahun': date.today().year,
+                f'{prefix}-TOTAL_FORMS': '1',
+                f'{prefix}-INITIAL_FORMS': '0',
+                f'{prefix}-MIN_NUM_FORMS': '1',
+                f'{prefix}-MAX_NUM_FORMS': '1',
+                f'{prefix}-0-jenis_cuti': 'Cuti Alasan Penting',
+                f'{prefix}-0-alasan_cuti': 'Keperluan keluarga',
+                f'{prefix}-0-tgl_mulai_cuti': mulai.isoformat(),
+                f'{prefix}-0-tgl_akhir_cuti': selesai.isoformat(),
+                f'{prefix}-0-lama_cuti': '2',
+                f'{prefix}-0-domisili_saat_cuti': 'Mataram',
+            },
+        )
+
+        riwayat = RiwayatCuti.objects.get(
+            pegawai=self.pegawai,
+            jenis_cuti='Cuti Alasan Penting',
+        )
+        pelimpahan_url = reverse(
+            'layanan_urls:pelimpahan_create',
+            kwargs={'riwayat_pk': riwayat.pk},
+        )
+        self.assertRedirects(
+            response,
+            pelimpahan_url,
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(self.client.get(pelimpahan_url).status_code, 200)
+
+        response = self.client.post(
+            pelimpahan_url,
+            {
+                'penerima_tugas': self.pegawai_lain.pk,
+                'deskripsi_tugas': 'Menangani tugas rutin selama cuti.',
+                'tgl_mulai': mulai.isoformat(),
+                'tgl_selesai': selesai.isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        pelimpahan = PelimpahanTugas.objects.get(riwayat_cuti=riwayat)
+        self.assertEqual(pelimpahan.pemberi_tugas, self.pegawai)
+        self.assertEqual(pelimpahan.penerima_tugas, self.pegawai_lain)
+
+    def test_cuti_tahunan_reguler_melewati_minggu_dan_hari_libur(self):
+        mulai = date.today() + timedelta(days=10)
+        while mulai.weekday() != 5:
+            mulai += timedelta(days=1)
+        HariLibur.objects.create(
+            tanggal=mulai + timedelta(days=2),
+            keterangan='Libur pengujian',
+        )
+        form = RiwayatPengajuanCutiForm(
+            data={
+                'jenis_cuti': 'Cuti Tahunan',
+                'alasan_cuti': 'Keperluan keluarga',
+                'tgl_mulai_cuti': mulai.isoformat(),
+                'lama_cuti': '3',
+                'domisili_saat_cuti': 'Mataram',
+            },
+            request=self.request_for(self.pegawai),
+            target_pegawai=self.pegawai,
+            tahun_pengajuan=date.today().year,
+            check_cuti=CheckCuti(),
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(
+            form.cleaned_data['tgl_akhir_cuti'],
+            mulai + timedelta(days=4),
+        )
+
+    def test_cuti_tahunan_shift_tetap_menghitung_hari_libur(self):
+        PolaKerjaPegawai.objects.filter(pegawai=self.pegawai).delete()
+        PolaKerjaPegawai.objects.create(
+            pegawai=self.pegawai,
+            pola_kerja=PolaKerjaPegawai.SHIFT,
+            berlaku_mulai=date.today().replace(month=1, day=1),
+        )
+        mulai = date.today() + timedelta(days=10)
+        HariLibur.objects.create(
+            tanggal=mulai + timedelta(days=1),
+            keterangan='Libur pengujian shift',
+        )
+        form = RiwayatPengajuanCutiForm(
+            data={
+                'jenis_cuti': 'Cuti Tahunan',
+                'alasan_cuti': 'Keperluan keluarga',
+                'tgl_mulai_cuti': mulai.isoformat(),
+                'lama_cuti': '3',
+                'domisili_saat_cuti': 'Mataram',
+            },
+            request=self.request_for(self.pegawai),
+            target_pegawai=self.pegawai,
+            tahun_pengajuan=date.today().year,
+            check_cuti=CheckCuti(),
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(
+            form.cleaned_data['tgl_akhir_cuti'],
+            mulai + timedelta(days=2),
+        )
+
+    def test_cuti_tahunan_baru_ditolak_tanpa_pola_kerja(self):
+        PolaKerjaPegawai.objects.filter(pegawai=self.pegawai).delete()
+        mulai = date.today() + timedelta(days=10)
+        form = RiwayatPengajuanCutiForm(
+            data={
+                'jenis_cuti': 'Cuti Tahunan',
+                'alasan_cuti': 'Keperluan keluarga',
+                'tgl_mulai_cuti': mulai.isoformat(),
+                'lama_cuti': '2',
+                'domisili_saat_cuti': 'Mataram',
+            },
+            request=self.request_for(self.pegawai),
+            target_pegawai=self.pegawai,
+            tahun_pengajuan=date.today().year,
+            check_cuti=CheckCuti(),
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn('Pola kerja pegawai belum ditentukan', str(form.errors))

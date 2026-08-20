@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+
+{% block title_page %}{{ title_page }}{% endblock title_page %}
+
+{% block styles %}
+<style>
+    .mapping-form-card { max-width: 900px; }
+    .mapping-form-card .select2-container { width: 100% !important; }
+    .mapping-help { min-height: 100%; }
+</style>
+{% endblock styles %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="card card-primary card-outline shadow-sm mapping-form-card">
+        <div class="card-header"><h3 class="card-title"><i class="fas fa-fingerprint mr-2"></i>{{ title_page }}</h3></div>
+        <form method="post">
+            {% csrf_token %}
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-lg-7">
+                {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+                {% for field in form.visible_fields %}
+                <div class="form-group">
+                    {{ field.label_tag }}
+                    {% if field.name == 'pegawai' %}
+                    {{ field }}
+                    <small class="form-text text-muted">Ketik minimal nama, NIP, atau email untuk menemukan pegawai.</small>
+                    {% else %}
+                    {{ field }}
+                    {% endif %}
+                    {% if field.help_text %}<small class="form-text text-muted">{{ field.help_text }}</small>{% endif %}
+                    {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                {% endfor %}
+                {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+                    </div>
+                    <div class="col-lg-5">
+                        <div class="alert alert-light border mapping-help">
+                            <h5><i class="fas fa-info-circle text-info mr-1"></i>Petunjuk Mapping</h5>
+                            <p class="mb-2">Masukkan ID pegawai persis seperti yang dikirim oleh perangkat fingerprint.</p>
+                            <ul class="pl-3 mb-0">
+                                <li>Gunakan pencarian pegawai untuk memilih akun SIMADU.</li>
+                                <li>Satu pegawai hanya boleh memiliki satu ID fingerprint.</li>
+                                <li>Satu ID fingerprint tidak boleh dipakai oleh pegawai lain.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer">
+                <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i>Simpan Mapping</button>
+                <a href="{% url 'disiplinsdm_urls:mapping_mesin_absensi_list' %}" class="btn btn-outline-secondary">Batal</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock content %}
+
+{% block script %}
+{{ block.super }}
+<script>
+$(function () {
+    var $employee = $('.select2-pegawai-mapping');
+    if (!$employee.length || typeof $.fn.select2 === 'undefined') {
+        return;
+    }
+
+    $employee.select2({
+        theme: 'bootstrap4',
+        width: '100%',
+        allowClear: true,
+        placeholder: $employee.data('placeholder'),
+        minimumInputLength: 2,
+        ajax: {
+            url: $employee.data('ajax-url'),
+            dataType: 'json',
+            delay: 250,
+            data: function (params) {
+                return {term: params.term || ''};
+            },
+            processResults: function (data) {
+                return {results: data.results || []};
+            },
+            cache: true
+        },
+        language: {
+            inputTooShort: function () { return 'Ketik minimal 2 karakter.'; },
+            searching: function () { return 'Mencari pegawai...'; },
+            noResults: function () { return 'Pegawai tidak ditemukan.'; }
+        }
+    });
+});
+</script>
+{% endblock script %}

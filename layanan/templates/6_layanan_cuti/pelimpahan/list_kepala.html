@@ -12,7 +12,7 @@
                 <i class="fas fa-edit me-1"></i> Riwayat Cuti Saya
             </a>
         </li>
-        {% if request.user.is_staff or request.user.is_cuti_admin %}
+        {% if request.user.is_staff or is_cuti_scope_admin %}
             <li class="nav-item">
                 <a class="nav-link {% if active_tab == 'bawahan' or not active_tab %}active{% endif %}"
                 href="{% url 'layanan_urls:layanan_cuti_bawahan_listview' %}">
@@ -57,6 +57,7 @@
                         <th>Periode Cuti</th>
                         <th class="text-center">Lama</th>
                         <th>Status Pelimpahan</th>
+                        <th>Pejabat Penyetuju</th>
                         <th class="text-center">Aksi</th>
                     </tr>
                 </thead>
@@ -94,6 +95,17 @@
                                 {% endif %}
                             </td>
 
+                            <td>
+                                {% if p.atasan_penyetuju %}
+                                    <strong>{{ p.atasan_penyetuju.full_name|default:p.atasan_penyetuju.email }}</strong>
+                                    {% if p.atasan_penyetuju == request.user %}
+                                        <br><span class="badge badge-primary">Anda</span>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="badge badge-danger">Belum ditentukan</span>
+                                {% endif %}
+                            </td>
+
                             <td class="text-center">
                                 <span class="badge bg-light text-dark border">
                                     {{ r.lama_cuti|default:0 }} hari
@@ -101,10 +113,18 @@
                             </td>
 
                             <td>
-                                {% if p.status == "menunggu_kepala" %}
+                                {% if p.status == "menunggu_penerima" %}
+                                    <span class="badge badge-info">
+                                        <i class="fas fa-user-clock mr-1"></i>
+                                        Menunggu persetujuan penerima tugas
+                                    </span>
+                                    <div class="small text-muted mt-1">
+                                        Paraf kepala tersedia setelah penerima menyetujui.
+                                    </div>
+                                {% elif p.status == "menunggu_atasan" %}
                                     <span class="badge bg-warning text-dark">
                                         <i class="fas fa-hourglass-half me-1"></i>
-                                        Menunggu persetujuan kepala
+                                        Menunggu persetujuan Anda
                                     </span>
                                 {% elif p.status == "disetujui" %}
                                     <span class="badge bg-success">
@@ -127,16 +147,27 @@
                                     <i class="fas fa-eye"></i>
                                 </a>
 
-                                <a href="{% url 'layanan_urls:pelimpahan_atasan_update' pk=p.pk %}"
-                                   class="btn btn-sm btn-primary">
-                                    <i class="fas fa-stamp me-1"></i> Setujui
-                                </a>
+                                {% if p.status == "menunggu_atasan" and p.atasan_penyetuju == request.user %}
+                                    <a href="{% url 'layanan_urls:pelimpahan_atasan_update' pk=p.pk %}"
+                                       class="btn btn-sm btn-primary">
+                                        <i class="fas fa-stamp me-1"></i> Beri Keputusan
+                                    </a>
+                                {% elif p.status == "menunggu_penerima" and p.atasan_penyetuju == request.user %}
+                                    <button type="button" class="btn btn-sm btn-secondary" disabled
+                                            title="Menunggu persetujuan penerima tugas">
+                                        <i class="fas fa-lock mr-1"></i>Belum dapat diparaf
+                                    </button>
+                                {% elif is_cuti_scope_admin %}
+                                    <span class="badge badge-light border">
+                                        <i class="fas fa-eye mr-1"></i>Monitoring
+                                    </span>
+                                {% endif %}
                             </td>
                         </tr>
                         {% endwith %}
                     {% empty %}
                         <tr>
-                            <td colspan="7" class="text-center text-muted py-4">
+                            <td colspan="8" class="text-center text-muted py-4">
                                 Tidak ada pelimpahan tugas yang menunggu persetujuan Anda.
                             </td>
                         </tr>

@@ -39,9 +39,26 @@ from .services import (
 )
 
 from django.http import HttpResponse
+from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_POST
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+
+from .hadist_modal import hadist_modal_session_key
+
+
+@login_required
+@require_POST
+def tandai_hadist_modal_sudah_tampil(request):
+    """
+    Tandai hanya setelah browser mengonfirmasi modal benar-benar ditampilkan.
+
+    Penandaan tidak dilakukan di context processor karena processor juga dapat
+    berjalan pada template perantara yang tidak memuat modal.
+    """
+    request.session[hadist_modal_session_key(request.user)] = True
+    return HttpResponse(status=204)
 
 
 def get_accessible_takah(user):

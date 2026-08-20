@@ -122,6 +122,9 @@
                                     <th>Masa Berlaku</th>
                                     <th>Status</th>
                                     {% elif data == 'str-expiry' %}
+                                    {% if credential_monitoring_all_users %}
+                                    <th>Pegawai</th>
+                                    {% endif %}
                                     <th>Profesi</th>
                                     <th>Nomor STR</th>
                                     <th>Masa Berlaku</th>
@@ -132,7 +135,7 @@
                                     <th>Tanggal Usulan</th>
                                     {% endif %}
                                     <th>Aksi</th>
-                                    {% if data == 'yancuti' and request.user.is_staff or data == 'yancuti' and request.user.is_cuti_admin %}
+                                    {% if data == 'yancuti' and request.user.is_staff or data == 'yancuti' and is_cuti_scope_admin %}
                                     <th>Persetujuan</th>
                                     {% endif %}
                                 </tr>
@@ -171,6 +174,16 @@
                                     {% for item in str_monitoring_records %}
                                         <tr>
                                             <td>{{ forloop.counter }}</td>
+                                            {% if credential_monitoring_all_users %}
+                                            <td>
+                                                {{ item.pegawai.full_name|default:'-' }}
+                                                {% if item.pegawai.profil_user.nip %}
+                                                <br><small class="text-muted">
+                                                    NIP {{ item.pegawai.profil_user.nip }}
+                                                </small>
+                                                {% endif %}
+                                            </td>
+                                            {% endif %}
                                             <td>{{ item.profesi|default:'-' }}</td>
                                             <td>{{ item.no_str|default:'-' }}</td>
                                             <td>{{ item.berlaku_sd_str|date:'d M Y' }}</td>
@@ -194,7 +207,7 @@
                                         </tr>
                                     {% empty %}
                                         <tr>
-                                            <td colspan="6" class="text-center text-muted py-4">
+                                            <td colspan="{% if credential_monitoring_all_users %}7{% else %}6{% endif %}" class="text-center text-muted py-4">
                                                 Tidak ada STR dengan status yang dipilih.
                                             </td>
                                         </tr>
@@ -213,7 +226,7 @@
                                             <td>Usulan Cuti</td>
                                             <td>{{item.created_at}}</td>
                                             <td>
-                                                {% if request.user.is_cuti_admin %}
+                                                {% if is_cuti_scope_admin %}
                                                     <a href="{% url 'layanan_urls:layanan_cuti_verifikasi' id=item.id %}" class="btn btn-info">Proses</a>
                                                 {% else %}
                                                 <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan=yancuti" method="post">
@@ -222,7 +235,7 @@
                                                 </form>
                                                 {% endif %}
                                             </td>
-                                            {% if request.user.is_cuti_admin %}
+                                            {% if is_cuti_scope_admin %}
                                             <td>
                                                 {% if item.verifikasicuti__persetujuan3 %}
                                                     <i class="fas fa-check-double" style="font-weight: bold; color:blue"></i>
@@ -322,7 +335,7 @@
                                             <td>Usulan Inovasi</td>
                                             <td>{{item.created_at}}</td>
                                             <td>
-                                                {% if request.user.is_inovasi_admin %}
+                                                {% if item.can_process %}
                                                     <a href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=proses" class="btn btn-info">Proses</a>
                                                 {% else %}
                                                 <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan=yaninovasi" method="post">
@@ -408,7 +421,7 @@
                                         </td>
                                         <td>{{item.created_at}}</td>
                                         <td>
-                                            {% if request.user.is_superuser or item.layanan__url == 'yanberkala' and request.user.is_berkala_admin or item.layanan__url == 'yancuti' and request.user.is_cuti_admin or item.layanan__url == 'yandiklat' and request.user.is_diklat_admin or item.layanan__url == 'yaninovasi' and request.user.is_inovasi_admin or item.layanan__url == 'yanpangkat' and request.user.is_pangkat_admin or item.layanan__url == 'yanjabatan' and request.user.is_jabatan_admin %}
+                                            {% if request.user.is_superuser or item.layanan__url == 'yanberkala' and request.user.is_berkala_admin or item.layanan__url == 'yancuti' and is_cuti_scope_admin or item.layanan__url == 'yandiklat' and request.user.is_diklat_admin or item.layanan__url == 'yaninovasi' and request.user.is_inovasi_admin or item.layanan__url == 'yanpangkat' and request.user.is_pangkat_admin or item.layanan__url == 'yanjabatan' and request.user.is_jabatan_admin %}
                                                 {% if item.layanan__url == 'yancuti' %}
                                                     <a href="{% url 'layanan_urls:layanan_cuti_verifikasi' id=item.id %}" class="btn btn-info">Proses</a>
                                                 {% elif item.layanan__url == 'yanberkala' %}
@@ -420,7 +433,11 @@
                                                 {% elif item.layanan__url == 'yandiklat' %}
                                                     <a href="{% url 'layanan_urls:layanan_diklat_update_view' pk=item.id %}?case=proses" class="btn btn-info">Proses</a>
                                                 {% elif item.layanan__url == 'yaninovasi' %}
+                                                    {% if item.can_process %}
                                                     <a href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=proses" class="btn btn-info">Proses</a>
+                                                    {% else %}
+                                                    <a href="{% url 'layanan_urls:layanan_inovasi_update_view' id=item.id %}?case=detail" class="btn btn-info">Detail</a>
+                                                    {% endif %}
                                                 {% elif item.layanan__url == 'yansip' %}
                                                     <form action="{% url 'layanan_urls:notifikasi_update_view' id=item.id %}?case=detail&layanan=yansip" method="post">
                                                         {% csrf_token %}

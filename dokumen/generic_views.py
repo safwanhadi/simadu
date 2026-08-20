@@ -12,8 +12,18 @@ from django.views import View
 from django.views.generic import DeleteView, ListView
 
 from myaccount.models import Users
+from layanan.access.documents import (
+    filter_document_queryset,
+    filter_document_users,
+    is_document_scope_manager,
+)
 
-from .access import DocumentObjectAccessMixin, get_accessible_document, get_selected_nip
+from .access import (
+    DocumentObjectAccessMixin,
+    get_accessible_document,
+    get_safe_return_url,
+    get_selected_nip,
+)
 from .models import DokumenSDM
 
 
@@ -60,16 +70,21 @@ class EmployeeDocumentModuleMixin:
     def get_selected_employee(self):
         selected_nip = get_selected_nip(self.request)
         if selected_nip:
-            return Users.objects.filter(profil_user__nip=selected_nip).first()
-        if not self.request.user.is_dokumen_admin:
-            return self.request.user
-        return None
+            return filter_document_users(
+                Users.objects.filter(profil_user__nip=selected_nip),
+                self.request.user,
+            ).first()
+        return (
+            None
+            if is_document_scope_manager(self.request.user)
+            else self.request.user
+        )
 
     def get_display_nip(self):
         selected_nip = get_selected_nip(self.request)
         if selected_nip:
             return selected_nip
-        if not self.request.user.is_dokumen_admin:
+        if not is_document_scope_manager(self.request.user):
             return self.get_employee_nip(self.request.user)
         return None
 
@@ -79,12 +94,11 @@ class EmployeeDocumentModuleMixin:
             queryset = queryset.select_related(*self.select_related)
         if self.order_by:
             queryset = queryset.order_by(*self.order_by)
+        queryset = filter_document_queryset(queryset, self.request.user)
         selected_nip = get_selected_nip(self.request)
-        if self.request.user.is_dokumen_admin:
-            if selected_nip:
-                queryset = queryset.filter(pegawai__profil_user__nip=selected_nip)
-            return queryset
-        return queryset.filter(pegawai=self.request.user)
+        if selected_nip:
+            queryset = queryset.filter(pegawai__profil_user__nip=selected_nip)
+        return queryset
 
     def get_common_context(self, **extra):
         employee = extra.get('user') or self.get_selected_employee()
@@ -103,6 +117,9 @@ class EmployeeDocumentModuleMixin:
             'riwayat': 'active',
             'selected': self.selected,
             'document_menu_url': self.get_document_menu_url(employee),
+            'can_manage_document_scope': is_document_scope_manager(
+                self.request.user
+            ),
         }
         if isinstance(employee, Users):
             context.update({
@@ -115,8 +132,11 @@ class EmployeeDocumentModuleMixin:
         return context
 
     def get_document_menu_url(self, employee=None):
+        return_to = get_safe_return_url(self.request)
+        if return_to:
+            return return_to
         url = reverse('riwayat_urls:riwayat_view')
-        if self.request.user.is_dokumen_admin and isinstance(employee, Users):
+        if is_document_scope_manager(self.request.user) and isinstance(employee, Users):
             nip = self.get_employee_nip(employee)
             if nip:
                 return f'{url}?{urlencode({"nip": nip})}'
@@ -125,7 +145,7 @@ class EmployeeDocumentModuleMixin:
     def paginate_admin_general_context(self, context):
         """Batasi list lintas pegawai; list satu pegawai tetap ditampilkan penuh."""
         if (
-            not self.request.user.is_dokumen_admin
+            not is_document_scope_manager(self.request.user)
             or get_selected_nip(self.request)
         ):
             return context
@@ -148,10 +168,13 @@ class EmployeeDocumentModuleMixin:
 
     def get_success_query_params(self, employee=None):
         params = {}
-        if self.request.user.is_dokumen_admin and employee is not None:
+        if is_document_scope_manager(self.request.user) and employee is not None:
             nip = self.get_employee_nip(employee)
             if nip:
                 params['nip'] = nip
+        return_to = get_safe_return_url(self.request)
+        if return_to:
+            params['return_to'] = return_to
         return params
 
     def get_success_url(self, employee=None):
@@ -192,7 +215,7 @@ class EmployeeDocumentManageView(
             raise ImproperlyConfigured('form_class wajib untuk manage view.')
         if (
             request.user.is_authenticated
-            and not request.user.is_dokumen_admin
+            and not is_document_scope_manager(request.user)
             and not self.get_employee_nip(request.user)
         ):
             return redirect(reverse(
@@ -293,7 +316,7 @@ class EmployeeDocumentListView(
         self.validate_configuration()
         if (
             request.user.is_authenticated
-            and not request.user.is_dokumen_admin
+            and not is_document_scope_manager(request.user)
             and not self.get_employee_nip(request.user)
         ):
             return redirect(reverse(
@@ -306,7 +329,7 @@ class EmployeeDocumentListView(
         return self.get_document_queryset()
 
     def get_paginate_by(self, queryset):
-        if self.request.user.is_dokumen_admin and not get_selected_nip(self.request):
+        if is_document_scope_manager(self.request.user) and not get_selected_nip(self.request):
             return self.paginate_by
         return None
 
@@ -316,7 +339,7 @@ class EmployeeDocumentListView(
         common_context.pop('data', None)
         context.update(common_context)
         context['server_side_document_pagination'] = bool(
-            self.request.user.is_dokumen_admin
+            is_document_scope_manager(self.request.user)
             and not get_selected_nip(self.request)
         )
         return context
@@ -329,15 +352,20 @@ class EmployeeDocumentUpdateView(
 ):
     """Reusable update view dengan object-scope dan penghapusan file lama aman."""
 
+    def get_accessible_object(self, **lookup):
+        return get_accessible_document(
+            self.model,
+            self.request.user,
+            **lookup,
+        )
+
     def dispatch(self, request, *args, **kwargs):
         self.validate_configuration()
         if self.form_class is None:
             raise ImproperlyConfigured('form_class wajib untuk update view.')
         if not request.user.is_authenticated:
             return self.handle_no_permission()
-        self.object = get_accessible_document(
-            self.model,
-            request.user,
+        self.object = self.get_accessible_object(
             pk=kwargs[self.pk_url_kwarg],
         )
         return super().dispatch(request, *args, **kwargs)

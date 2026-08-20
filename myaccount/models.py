@@ -1,10 +1,13 @@
+from datetime import date
+import os
+
 from django.db import models
 from django.contrib.auth.models import PermissionsMixin
 from django.dispatch import receiver
 from django.urls import reverse
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.db.models.signals import post_save
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 from django.conf import settings
@@ -24,10 +27,16 @@ from .roles import (
     ADMIN_LAYANAN_DIKLAT,
     ADMIN_LAYANAN_INOVASI,
     ADMIN_LAYANAN_SIP,
+    ADMIN_SSO,
 )
 
 def validate_file_size(value):
-    filesize = value.size
+    try:
+        filesize = value.size
+    except (FileNotFoundError, OSError):
+        # Referensi file lama dapat tetap tersimpan walau fisiknya sudah tidak
+        # tersedia. Kondisi ini tidak boleh menghalangi pembaruan data profil.
+        return
     if filesize > 2621440:  # 2.5MB limit
         raise ValidationError(_("Ukuran maksimal file 2.5 MB"))
 
@@ -166,6 +175,10 @@ class Users(AbstractBaseUser, PermissionsMixin):
     @property
     def is_akun_admin(self):
         return self.has_admin_role(ADMIN_AKUN)
+
+    @property
+    def is_sso_admin(self):
+        return self.has_admin_role(ADMIN_SSO)
     
     @property
     def full_name(self):
@@ -266,13 +279,25 @@ class ProfilSDM(models.Model):
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        if self.foto:
-            img = Image.open(self.foto.path)
+        if not self.foto:
+            return
 
-            if img.height > 300 or img.width > 300:
-                output_size = (300, 300)
-                img.thumbnail(output_size)
-                img.save(self.foto.path)
+        try:
+            foto_path = self.foto.path
+        except (NotImplementedError, ValueError):
+            return
+        if not os.path.isfile(foto_path):
+            return
+
+        try:
+            with Image.open(foto_path) as img:
+                if img.height > 300 or img.width > 300:
+                    output_size = (300, 300)
+                    img.thumbnail(output_size)
+                    img.save(foto_path)
+        except (FileNotFoundError, OSError, UnidentifiedImageError):
+            # Data profil tetap dapat diperbarui bila file lama hilang/rusak.
+            return
 
 
 class ProfilAdmin(models.Model):
@@ -311,6 +336,155 @@ class ProfilAdmin(models.Model):
         elif self.unor.exists():
             data = self.unor.all()
         return str(data)
+
+
+class AdminScopeAssignment(models.Model):
+    """Batas wilayah data untuk satu peran admin operasional."""
+
+    GLOBAL = 'global'
+    INSTANSI_DAERAH = 'instansi_daerah'
+    SATUAN_KERJA_INDUK = 'satuan_kerja_induk'
+    UNIT_ORGANISASI = 'unit_organisasi'
+    BIDANG = 'bidang'
+    SUB_BIDANG = 'sub_bidang'
+    UNIT_INSTALASI = 'unit_instalasi'
+
+    TARGET_FIELDS = (
+        INSTANSI_DAERAH,
+        SATUAN_KERJA_INDUK,
+        UNIT_ORGANISASI,
+        BIDANG,
+        SUB_BIDANG,
+        UNIT_INSTALASI,
+    )
+    SCOPE_TYPES = (
+        (GLOBAL, 'Seluruh organisasi'),
+        (INSTANSI_DAERAH, 'Instansi daerah'),
+        (SATUAN_KERJA_INDUK, 'Satuan kerja induk'),
+        (UNIT_ORGANISASI, 'Unit organisasi'),
+        (BIDANG, 'Bidang'),
+        (SUB_BIDANG, 'Sub bidang'),
+        (UNIT_INSTALASI, 'Unit instalasi'),
+    )
+
+    user = models.ForeignKey(
+        Users,
+        on_delete=models.CASCADE,
+        related_name='admin_scope_assignments',
+    )
+    group = models.ForeignKey(
+        'auth.Group',
+        on_delete=models.CASCADE,
+        related_name='admin_scope_assignments',
+        verbose_name='Peran admin',
+    )
+    scope_type = models.CharField(max_length=24, choices=SCOPE_TYPES)
+    instansi_daerah = models.ForeignKey(
+        'strukturorg.InstansiDaerah',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='admin_scope_assignments',
+    )
+    satuan_kerja_induk = models.ForeignKey(
+        'strukturorg.SatuanKerjaInduk',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='admin_scope_assignments',
+    )
+    unit_organisasi = models.ForeignKey(
+        'strukturorg.UnitOrganisasi',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='admin_scope_assignments',
+    )
+    bidang = models.ForeignKey(
+        'strukturorg.Bidang',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='admin_scope_assignments',
+    )
+    sub_bidang = models.ForeignKey(
+        'strukturorg.SubBidang',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='admin_scope_assignments',
+    )
+    unit_instalasi = models.ForeignKey(
+        'strukturorg.UnitInstalasi',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='admin_scope_assignments',
+    )
+    scope_key = models.CharField(max_length=64, editable=False)
+    valid_from = models.DateField(default=date.today)
+    valid_until = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('user', 'group', 'scope_type', 'scope_key')
+        constraints = [
+            models.UniqueConstraint(
+                fields=('user', 'group', 'scope_key'),
+                name='uniq_admin_role_scope',
+            ),
+        ]
+        verbose_name = 'Cakupan admin'
+        verbose_name_plural = 'Cakupan admin'
+
+    @property
+    def scope_object(self):
+        if self.scope_type == self.GLOBAL:
+            return None
+        return getattr(self, self.scope_type, None)
+
+    def clean(self):
+        super().clean()
+        selected = [
+            field_name for field_name in self.TARGET_FIELDS
+            if getattr(self, f'{field_name}_id', None) is not None
+        ]
+        if self.scope_type == self.GLOBAL:
+            if selected:
+                raise ValidationError(
+                    'Scope global tidak boleh memiliki target struktur.'
+                )
+        elif selected != [self.scope_type]:
+            raise ValidationError(
+                'Pilih tepat satu target struktur yang sesuai dengan jenis scope.'
+            )
+        if self.group_id and self.group.name not in ADMIN_GROUPS:
+            raise ValidationError({
+                'group': 'Scope hanya dapat diberikan untuk grup admin SIMADU.'
+            })
+        if self.valid_until and self.valid_until < self.valid_from:
+            raise ValidationError({
+                'valid_until': 'Tanggal berakhir tidak boleh sebelum tanggal mulai.'
+            })
+
+    def save(self, *args, **kwargs):
+        target_id = (
+            getattr(self, f'{self.scope_type}_id', None)
+            if self.scope_type != self.GLOBAL else None
+        )
+        self.scope_key = (
+            self.GLOBAL
+            if self.scope_type == self.GLOBAL
+            else f'{self.scope_type}:{target_id}'
+        )
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        target = self.scope_object or 'Seluruh organisasi'
+        return f'{self.user} - {self.group.name} - {target}'
 
 
 class TelegramAccount(models.Model):

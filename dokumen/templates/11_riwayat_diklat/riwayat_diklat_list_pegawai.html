@@ -1,7 +1,7 @@
 {% extends '11_riwayat_diklat/riwayat_diklat.html' %}
 
 {% block button %}
-{% if request.user.is_dokumen_admin %}
+{% if can_manage_diklat_role %}
 <a href="{% url 'riwayat_urls:riwayat_diklat_create' %}" class="btn btn-outline-primary">Tambah Riwayat</a>
 {% else %}
 <a href="{% url 'riwayat_urls:riwayat_diklat_detail' pk=request.user.id %}" class="btn btn-outline-info">Diklatku</a>

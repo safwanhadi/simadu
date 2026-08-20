@@ -7,7 +7,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from dokumen.models import RiwayatCuti
-from myaccount.models import Users
+from myaccount.models import AdminScopeAssignment, Users
 from myaccount.roles import ADMIN_LAYANAN_CUTI
 
 from .models import JenisLayanan, LayananCuti
@@ -41,6 +41,11 @@ class UploadFileCutiViewTests(TestCase):
         )
         group, _ = Group.objects.get_or_create(name=ADMIN_LAYANAN_CUTI)
         self.admin.groups.add(group)
+        AdminScopeAssignment.objects.create(
+            user=self.admin,
+            group=group,
+            scope_type=AdminScopeAssignment.GLOBAL,
+        )
 
         jenis_layanan = JenisLayanan.objects.create(
             nama='Layanan Cuti',

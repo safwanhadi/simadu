@@ -3,13 +3,53 @@ from django.forms import inlineformset_factory
 from calendar import monthrange, month_name
 from datetime import date
 from django.utils import timezone
+from django.urls import reverse_lazy
 from django.forms import inlineformset_factory
 
 from .models import JadwalDinasSDM, JenisSDMPerinstalasi, DaftarKegiatanPegawai, KehadiranKegiatan, DetailKategoriJadwalDinas, LogAktivitasAbsen, AbsensiHarian
+from .models import MappingMesinAbsensi
 from myaccount.models import Users
 from strukturorg.models import UnitInstalasi
 from dokumen.models import RiwayatPenempatan
 from .models import HariLibur
+
+
+class MappingMesinAbsensiForm(forms.ModelForm):
+    class Meta:
+        model = MappingMesinAbsensi
+        fields = ('mesin_id', 'pegawai')
+        labels = {
+            'mesin_id': 'ID Pegawai Fingerprint',
+            'pegawai': 'Pegawai SIMADU',
+        }
+        widgets = {
+            'mesin_id': forms.TextInput(attrs={
+                'placeholder': 'Contoh: 12345',
+                'autocomplete': 'off',
+            }),
+            'pegawai': forms.Select(attrs={
+                'class': 'select2-pegawai-mapping',
+                'data-placeholder': 'Cari nama, NIP, atau email pegawai',
+                'data-ajax-url': reverse_lazy(
+                    'disiplinsdm_urls:mapping_pegawai_autocomplete'
+                ),
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        employee_queryset = Users.objects.filter(
+            is_active=True, is_superuser=False
+        ).select_related('profil_user')
+        selected_id = self.instance.pegawai_id if self.instance.pk else None
+        initial_id = self.initial.get('pegawai')
+        posted_id = self.data.get('pegawai') if self.is_bound else None
+        ids = [value for value in (selected_id, initial_id, posted_id) if value]
+        self.fields['pegawai'].queryset = employee_queryset.filter(pk__in=ids)
+        self.fields['pegawai'].empty_label = 'Pilih pegawai SIMADU'
+
+    def clean_mesin_id(self):
+        return self.cleaned_data['mesin_id'].strip()
 
 bootstrap_col = 'form-control col-md-12'
 

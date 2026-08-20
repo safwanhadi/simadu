@@ -9,12 +9,12 @@
     <div class="card-body">
         <div class="table-responsive">
             <table class="table table-bordered table-hover">
-                <thead><tr><th>No</th>{% if request.user.is_dokumen_admin %}<th>Pegawai</th>{% endif %}<th>Nomor Surat</th><th>Tanggal</th><th>Angka Kredit</th><th>File</th><th>Aksi</th></tr></thead>
+                <thead><tr><th>No</th>{% if can_manage_document_scope %}<th>Pegawai</th>{% endif %}<th>Nomor Surat</th><th>Tanggal</th><th>Angka Kredit</th><th>File</th><th>Aksi</th></tr></thead>
                 <tbody>
                     {% for item in data %}
                     <tr>
                         <td>{{ forloop.counter }}</td>
-                        {% if request.user.is_dokumen_admin %}<td>{{ item.pegawai.full_name }}</td>{% endif %}
+                        {% if can_manage_document_scope %}<td>{{ item.pegawai.full_name }}</td>{% endif %}
                         <td>{{ item.no_srt|default:'-' }}</td>
                         <td>{{ item.tgl_srt|date:'d-m-Y'|default:'-' }}</td>
                         <td>{{ item.ak }}</td>

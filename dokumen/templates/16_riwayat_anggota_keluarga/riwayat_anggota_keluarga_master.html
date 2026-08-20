@@ -66,7 +66,7 @@
                 
                 <div class="row" id="list_data" style="display: {{data_view}};">
                     <div class="col-md-12">        
-                        {% if request.user.is_dokumen_admin %}
+                        {% if can_manage_document_scope %}
                             {% include '16_riwayat_anggota_keluarga/riwayat_anggota_keluarga.html' %}
                         {% else %}
                             {% include '16_riwayat_anggota_keluarga/riwayat_anggota_keluarga_perorang.html' %}

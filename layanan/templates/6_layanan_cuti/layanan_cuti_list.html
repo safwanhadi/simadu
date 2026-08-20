@@ -12,7 +12,7 @@
                 <i class="fas fa-edit me-1"></i> Riwayat Cuti Saya
             </a>
         </li>
-        {% if request.user.profil_admin.is_pejabat or request.user.is_cuti_admin %}
+        {% if can_view_subordinates %}
             <li class="nav-item">
                 <a class="nav-link {% if active_tab == 'bawahan' or not active_tab %}active{% endif %}"
                 href="{% url 'layanan_urls:layanan_cuti_bawahan_listview' %}">
@@ -45,7 +45,11 @@
             </p>
         </div>
         <div class="mt-3 mt-md-0">
-            {% if request.user.is_cuti_admin %}
+            {% if is_cuti_scope_admin %}
+            <a href="{% url 'layanan_urls:pola_kerja_pegawai' %}"
+               class="btn btn-outline-info shadow-sm mr-2">
+                <i class="fas fa-business-time me-2"></i>Pola Kerja
+            </a>
             <a href="{% url 'layanan_urls:cuti_pemutihan_admin' %}"
                class="btn btn-outline-warning shadow-sm mr-2">
                 <i class="fas fa-broom me-2"></i>Pemutihan Status
@@ -61,6 +65,26 @@
     <!-- Card wrapper -->
     <div class="card shadow-sm border-0">
         <div class="card-body">
+            <form method="get" class="mb-3" role="search">
+                <div class="input-group">
+                    <input type="search"
+                           name="q"
+                           value="{{ search_query }}"
+                           class="form-control"
+                           placeholder="Cari nama, NIP, jenis cuti, nomor surat, atau status"
+                           aria-label="Cari riwayat cuti">
+                    {% if search_query %}
+                        <a href="{% url 'layanan_urls:layanan_cuti_listview' %}"
+                           class="btn btn-outline-secondary"
+                           title="Hapus pencarian">
+                            <i class="fas fa-times"></i>
+                        </a>
+                    {% endif %}
+                    <button class="btn btn-primary" type="submit">
+                        <i class="fas fa-search mr-1"></i>Cari
+                    </button>
+                </div>
+            </form>
             {% if data %}
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0">
@@ -216,7 +240,7 @@
                                             <i class="fas fa-people-arrows me-1"></i>
                                         </a>
                                         {% endif %}
-                                        {% if request.user.is_cuti_admin %}
+                                        {% if is_cuti_scope_admin %}
                                         <a href="{% url 'layanan_urls:layanan_cuti_delete' pk=item.pk %}" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></a>
                                         {% if item.status_cuti == 'Belum' or item.status_cuti == 'Berlangsung' or item.status_cuti == 'Selesai' %}
                                             <a href="{% url 'layanan_urls:cuti_override_klaim_tunda' riwayat_id=item.id %}" title="Override: Gunakan Cuti Tunda"
@@ -246,12 +270,12 @@
                                 {# Tombol First & Previous #}
                                 {% if page_obj.has_previous %}
                                     <li class="page-item">
-                                        <a class="page-link" href="?page=1" title="Halaman pertama">
+                                        <a class="page-link" href="?page=1{% if search_query %}&amp;q={{ search_query|urlencode }}{% endif %}" title="Halaman pertama">
                                             <i class="fas fa-angle-double-left"></i>
                                         </a>
                                     </li>
                                     <li class="page-item">
-                                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}" title="Sebelumnya">
+                                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search_query %}&amp;q={{ search_query|urlencode }}{% endif %}" title="Sebelumnya">
                                             <i class="fas fa-angle-left"></i>
                                         </a>
                                     </li>
@@ -278,7 +302,7 @@
                                         </li>
                                     {% elif num >= page_obj.number|add:'-2' and num <= page_obj.number|add:'2' or num == 1 or num == paginator.num_pages %}
                                         <li class="page-item">
-                                            <a class="page-link" href="?page={{ num }}">{{ num }}</a>
+                                            <a class="page-link" href="?page={{ num }}{% if search_query %}&amp;q={{ search_query|urlencode }}{% endif %}">{{ num }}</a>
                                         </li>
                                     {% elif num == page_obj.number|add:'-3' or num == page_obj.number|add:'3' %}
                                         <li class="page-item disabled">
@@ -290,12 +314,12 @@
                                 {# Tombol Next & Last #}
                                 {% if page_obj.has_next %}
                                     <li class="page-item">
-                                        <a class="page-link" href="?page={{ page_obj.next_page_number }}" title="Berikutnya">
+                                        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search_query %}&amp;q={{ search_query|urlencode }}{% endif %}" title="Berikutnya">
                                             <i class="fas fa-angle-right"></i>
                                         </a>
                                     </li>
                                     <li class="page-item">
-                                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}" title="Halaman terakhir">
+                                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search_query %}&amp;q={{ search_query|urlencode }}{% endif %}" title="Halaman terakhir">
                                             <i class="fas fa-angle-double-right"></i>
                                         </a>
                                     </li>
@@ -320,7 +344,11 @@
                 <div class="text-center py-5">
                     <i class="far fa-folder-open fa-3x text-muted mb-3"></i>
                     <p class="text-muted mb-0">
-                        Belum ada data riwayat cuti.
+                        {% if search_query %}
+                            Tidak ada riwayat cuti yang cocok dengan pencarian "{{ search_query }}".
+                        {% else %}
+                            Belum ada data riwayat cuti.
+                        {% endif %}
                     </p>
                 </div>
             {% endif %}

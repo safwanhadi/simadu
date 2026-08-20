@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 from openpyxl import load_workbook
 
-from myaccount.models import ProfilSDM, Users
+from myaccount.models import AdminScopeAssignment, ProfilSDM, Users
 from myaccount.roles import ADMIN_DISIPLIN
 from strukturorg.models import (
     Bidang,
@@ -36,6 +36,11 @@ class RawPresensiDatabaseViewTests(TestCase):
             password='Password-123!',
         )
         cls.admin.groups.add(group)
+        AdminScopeAssignment.objects.create(
+            user=cls.admin,
+            group=group,
+            scope_type=AdminScopeAssignment.GLOBAL,
+        )
         cls.non_admin = Users.objects.create_user(
             email='non-admin-data-mentah@example.com',
             first_name='Non',
@@ -174,7 +179,7 @@ class RawPresensiDatabaseViewTests(TestCase):
             response['Content-Type'],
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
-        workbook = load_workbook(BytesIO(response.content))
+        workbook = load_workbook(BytesIO(b''.join(response.streaming_content)))
         worksheet = workbook['Data Mentah Presensi']
         self.assertEqual(worksheet['I5'].value, 'DEVICE-B')
         self.assertEqual(worksheet['H5'].value, 'OUT')

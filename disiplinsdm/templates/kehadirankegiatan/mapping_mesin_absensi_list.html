@@ -1,0 +1,155 @@
+{% extends 'base.html' %}
+
+{% block title_page %}{{ title_page }}{% endblock title_page %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
+        <div>
+            <h3 class="mb-1"><i class="fas fa-fingerprint mr-2"></i>{{ title_page }}</h3>
+            <p class="text-muted mb-0">Hubungkan ID pegawai pada mesin fingerprint dengan akun pegawai di SIMADU.</p>
+        </div>
+        <a href="{% url 'disiplinsdm_urls:mapping_mesin_absensi_create' %}" class="btn btn-primary">
+            <i class="fas fa-plus mr-1"></i>Tambah Mapping
+        </a>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-sm-6 col-xl-3 mb-3 mb-xl-0">
+            <div class="small-box bg-primary mb-0">
+                <div class="inner"><h3>{{ total_employees }}</h3><p>Pegawai SIMADU aktif</p></div>
+                <div class="icon"><i class="fas fa-users"></i></div>
+            </div>
+        </div>
+        <div class="col-sm-6 col-xl-3 mb-3 mb-xl-0">
+            <div class="small-box bg-success mb-0">
+                <div class="inner"><h3>{{ mapped_count }}</h3><p>Sudah terpetakan</p></div>
+                <div class="icon"><i class="fas fa-link"></i></div>
+            </div>
+        </div>
+        <div class="col-sm-6 col-xl-3 mb-3 mb-sm-0">
+            <div class="small-box bg-warning mb-0">
+                <div class="inner"><h3>{{ unmapped_count }}</h3><p>Belum terpetakan</p></div>
+                <div class="icon"><i class="fas fa-unlink"></i></div>
+            </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+            <div class="small-box bg-info mb-0">
+                <div class="inner"><h3>{{ recorded_count }}</h3><p>Ada rekaman fingerprint</p></div>
+                <div class="icon"><i class="fas fa-clock"></i></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white">
+            <form method="get" class="row align-items-end">
+                <div class="col-md-7 mb-2 mb-md-0">
+                    <label for="mapping-query">Cari pegawai, NIP, atau ID fingerprint</label>
+                    <input id="mapping-query" type="search" name="q" value="{{ q }}" class="form-control" placeholder="Ketik kata pencarian">
+                </div>
+                <div class="col-md-3 mb-2 mb-md-0">
+                    <label for="mapping-status">Status rekaman</label>
+                    <select id="mapping-status" name="status" class="form-control">
+                        <option value="">Semua mapping</option>
+                        <option value="terekam" {% if status == 'terekam' %}selected{% endif %}>Sudah ada rekaman</option>
+                        <option value="belum" {% if status == 'belum' %}selected{% endif %}>Belum ada rekaman</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary mr-1"><i class="fas fa-search mr-1"></i>Cari</button>
+                    <a href="{% url 'disiplinsdm_urls:mapping_mesin_absensi_list' %}" class="btn btn-outline-secondary" title="Reset filter"><i class="fas fa-undo"></i></a>
+                </div>
+            </form>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover table-striped mb-0">
+                <thead class="thead-light">
+                    <tr>
+                        <th>Pegawai SIMADU</th>
+                        <th>NIP</th>
+                        <th>ID Fingerprint</th>
+                        <th class="text-center">Jumlah Rekaman</th>
+                        <th>Fingerprint Terakhir</th>
+                        <th class="text-right">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for mapping in mappings %}
+                    <tr>
+                        <td><strong>{{ mapping.pegawai.full_name }}</strong><br><small class="text-muted">{{ mapping.pegawai.email }}</small></td>
+                        <td>{{ mapping.pegawai.profil_user.nip|default:'-' }}</td>
+                        <td><code>{{ mapping.mesin_id }}</code></td>
+                        <td class="text-center">
+                            {% if mapping.fingerprint_count %}<span class="badge badge-success">{{ mapping.fingerprint_count }}</span>{% else %}<span class="badge badge-secondary">Belum ada</span>{% endif %}
+                        </td>
+                        <td>{{ mapping.fingerprint_last|date:'Y-m-d H:i:s'|default:'Belum ada rekaman' }}</td>
+                        <td class="text-right text-nowrap">
+                            <a href="{% url 'disiplinsdm_urls:mapping_mesin_absensi_update' pk=mapping.pk %}" class="btn btn-sm btn-outline-primary" title="Ubah mapping"><i class="fas fa-edit"></i></a>
+                            <form method="post" action="{% url 'disiplinsdm_urls:mapping_mesin_absensi_delete' pk=mapping.pk %}" class="d-inline" onsubmit="return confirm('Hapus mapping ini? Rekaman fingerprint yang sudah tersimpan tetap dipertahankan.');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Hapus mapping"><i class="fas fa-trash"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="6" class="text-center text-muted py-5">Belum ada mapping yang sesuai filter.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if is_paginated %}
+        <div class="card-footer bg-white d-flex justify-content-between align-items-center">
+            <small class="text-muted">Menampilkan {{ page_obj.start_index }}-{{ page_obj.end_index }} dari {{ paginator.count }} mapping</small>
+            <div>
+                {% if page_obj.has_previous %}<a class="btn btn-sm btn-outline-secondary" href="?q={{ q|urlencode }}&status={{ status|urlencode }}&page={{ page_obj.previous_page_number }}">Sebelumnya</a>{% endif %}
+                <span class="btn btn-sm btn-primary disabled">{{ page_obj.number }} / {{ paginator.num_pages }}</span>
+                {% if page_obj.has_next %}<a class="btn btn-sm btn-outline-secondary" href="?q={{ q|urlencode }}&status={{ status|urlencode }}&page={{ page_obj.next_page_number }}">Berikutnya</a>{% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card border-0 shadow-sm mt-4">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <div>
+                <h5 class="mb-1"><i class="fas fa-user-clock text-warning mr-2"></i>Pegawai Belum Di-mapping</h5>
+                <small class="text-muted">Pegawai aktif SIMADU yang belum memiliki ID fingerprint.</small>
+            </div>
+            <span class="badge badge-warning">{{ unmapped_count }} pegawai</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover table-striped mb-0">
+                <thead class="thead-light">
+                    <tr>
+                        <th>Nama Pegawai</th>
+                        <th>NIP</th>
+                        <th>Email</th>
+                        <th class="text-right">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for employee in unmapped_employees %}
+                    <tr>
+                        <td><strong>{{ employee.full_name }}</strong></td>
+                        <td>{{ employee.profil_user.nip|default:'-' }}</td>
+                        <td>{{ employee.email }}</td>
+                        <td class="text-right">
+                            <a href="{% url 'disiplinsdm_urls:mapping_mesin_absensi_create' %}?pegawai={{ employee.pk }}" class="btn btn-sm btn-primary">
+                                <i class="fas fa-link mr-1"></i>Mapping
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-center text-muted py-4">
+                            {% if q %}Tidak ada pegawai belum mapping yang cocok dengan pencarian.{% else %}Semua pegawai aktif sudah memiliki mapping.{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock content %}

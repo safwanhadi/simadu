@@ -96,8 +96,8 @@
       {% endif %}
       <div class="text-right mt-4">
         {% if object.status == 'draft' or object.status == 'ditolak' %}
-          <button type="submit" class="btn btn-success" onclick="return confirm('Ajukan jadwal ini?')">
-            <i class="fas fa-save"></i> Simpan pengajuan Ini
+          <button type="submit" class="btn btn-success" onclick="return confirm('{% if can_approve %}Tetapkan jadwal ini dan langsung aktifkan?{% else %}Ajukan jadwal ini kepada Kepala Ruangan?{% endif %}')">
+            <i class="fas fa-save"></i> {% if can_approve %}Tetapkan Jadwal{% else %}Ajukan ke Kepala Ruangan{% endif %}
           </button>
         {% else %}
           <button type="submit" name="aksi" value="setujui" class="btn btn-success" onclick="return confirm('Setujui jadwal ini?')">

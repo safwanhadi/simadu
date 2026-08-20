@@ -108,54 +108,39 @@
                     </div>
                     <div class="d-flex justify-content-between mb-5 mr-5">
                         <div class="d-flex justify-content-center flex-column">
-                            <span>Diajukan,</span>
                             <span>Pujut, {{tanggal_pengajuan|tanggal_indonesia}}</span>
+                            <span>Ditetapkan oleh Kepala Ruangan,</span>
                             {% if pimpinan_instalasi == request.user %}
                                 {% if not object_draft %}
                                     <img src="{{ qr_image_pengajuan }}" alt="QR dengan logo" style="width: 150px; height: 150px;"/>
                                 {% else %}
                                     <form method="post" action="{% url 'disiplinsdm_urls:pengajuan_jadwal_instalasi' inst=inst bulan=bulan tahun=tahun %}" class="mb-3 mt-3">
                                         {% csrf_token %}
-                                        <button class="btn btn-outline-danger">Pengajuan</button>
+                                        <button class="btn btn-outline-success" onclick="return confirm('Tetapkan jadwal ini dan langsung gunakan untuk evaluasi presensi?')">Tetapkan Jadwal</button>
                                     </form>
                                 {% endif %}
                             {% else %}
                                 {% if not object_draft %}
                                     <img src="{{ qr_image_pengajuan }}" alt="QR dengan logo" style="width: 150px; height: 150px;"/>
                                 {% else %}
-                                    <button type="button" class="btn btn-outline-danger mb-3 mt-3" disabled>Pengajuan</button>
+                                    <button type="button" class="btn btn-outline-success mb-3 mt-3" disabled>Tetapkan Jadwal</button>
                                 {% endif %}
                             {% endif %}
-                            {% if pimpinan_instalasi %}
-                                <p>{{pimpinan_instalasi.full_name_2}}</p>
-                            {% else %}
-                                <p>N/A</p>
-                            {% endif %}
+                            <span>{{pimpinan_instalasi.full_name_2}}</span>
                             
+                            
+                        
                         </div>
-                        <!-- Buat persetujuan kepala seksi disini -->
+                        <!-- Jadwal cukup ditetapkan oleh Kepala Ruangan. -->
                         <div class="d-flex justify-content-center flex-column">
-                            <span>Mengetahui,</span>
+                            <span>Status Jadwal,</span>
                             <span>Pujut, {{tanggal|tanggal_indonesia}}</span>
-                            {% if pimpinan == request.user %}
-                                {% if approved_jadwal and not object_pengajuan %}
-                                    <img src="{{ qr_image }}" alt="QR dengan logo" style="width: 150px; height: 150px;"/>
-                                {% elif object_pengajuan %}
-                                    <form method="post" action="{% url 'disiplinsdm_urls:approval_jadwal' inst=inst bulan=bulan tahun=tahun %}" class="mb-3 mt-3">
-                                        {% csrf_token %}
-                                        <button class="btn btn-outline-danger">Persetujuan</button>
-                                    </form>
-                                {% else %}
-                                <button class="btn btn-outline-danger" disabled>Persetujuan</button>
-                                {% endif %}
+                            {% if approved_jadwal and not object_pengajuan %}
+                                <img src="{{ qr_image }}" alt="QR dengan logo" style="width: 150px; height: 150px;"/>
+                                <span class="badge badge-success">Aktif</span>
                             {% else %}
-                                {% if approved_jadwal and not object_pengajuan %}
-                                    <img src="{{ qr_image }}" alt="QR dengan logo" style="width: 150px; height: 150px;"/>
-                                {% else %}
-                                    <button type="button" class="btn btn-outline-danger mb-3 mt-3" disabled>Persetujuan</button>
-                                {% endif %}
+                                <span class="badge badge-secondary">Belum ditetapkan</span>
                             {% endif %}
-                            <p>{{pimpinan.full_name_2}}</p>
                         </div>
                     </div>
                 </div>

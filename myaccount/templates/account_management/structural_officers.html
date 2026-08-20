@@ -152,3 +152,17 @@
     </div>
 </div>
 {% endblock %}
+
+{% block script %}
+<script>
+    $(function () {
+        $('.select2').select2({
+            theme: 'bootstrap4',
+            width: '100%',
+            placeholder: function () {
+                return $(this).data('placeholder');
+            }
+        });
+    });
+</script>
+{% endblock script %}

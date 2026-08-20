@@ -58,7 +58,7 @@ from .models import TextSPTDiklat
 from .forms import TextSPTDiklatForm
 from layanan.services import CheckCuti
 from layanan.utils import get_nip
-from layanan.cuti_access import (
+from layanan.access.cuti import (
     build_approval_chain,
     can_view_delegation,
     can_view_leave,

@@ -10,6 +10,8 @@ from django.views import View
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
+from layanan.access.sip import filter_profession_history_queryset
+
 from .access import get_selected_nip
 from .document_registry import DOCUMENT_TYPES
 from .models import RiwayatJabatan, RiwayatProfesi, RiwayatSIPProfesi
@@ -190,14 +192,14 @@ class ProfessionSIPExportExcelView(LoginRequiredMixin, View):
                 )
             )
         )
+        queryset = filter_profession_history_queryset(
+            queryset, self.request.user
+        )
         selected_nip = get_selected_nip(self.request)
-        if self.request.user.is_dokumen_admin:
-            if selected_nip:
-                queryset = queryset.filter(
-                    pegawai__profil_user__nip=selected_nip,
-                )
-        else:
-            queryset = queryset.filter(pegawai=self.request.user)
+        if selected_nip:
+            queryset = queryset.filter(
+                pegawai__profil_user__nip=selected_nip,
+            )
         return queryset.order_by(
             'pegawai__first_name',
             'pegawai__last_name',

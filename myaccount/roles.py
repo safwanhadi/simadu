@@ -11,6 +11,7 @@ ADMIN_DISIPLIN = "Admin Disiplin SDM"
 ADMIN_INFORMASI = "Admin Informasi"
 ADMIN_LAPORAN = "Admin Laporan"
 ADMIN_AKUN = "Admin Akun"
+ADMIN_SSO = "Admin SSO"
 
 
 ADMIN_GROUPS = (
@@ -27,4 +28,5 @@ ADMIN_GROUPS = (
     ADMIN_INFORMASI,
     ADMIN_LAPORAN,
     ADMIN_AKUN,
+    ADMIN_SSO,
 )

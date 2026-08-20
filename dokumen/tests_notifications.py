@@ -1,10 +1,11 @@
 from datetime import date, timedelta
 
 from dateutil.relativedelta import relativedelta
+from django.contrib.auth.models import Group
 from django.test import TestCase
 from django.urls import reverse
 
-from myaccount.models import ProfilSDM, Users
+from myaccount.models import ADMIN_DOKUMEN, ProfilSDM, Users
 
 from .models import RiwayatProfesi, RiwayatSIPProfesi
 from .notifications import (
@@ -250,3 +251,51 @@ class SIPExpiryNotificationTests(TestCase):
             response,
             'Semua STR terbaru sudah teridentifikasi berlaku seumur hidup.',
         )
+
+    def test_superuser_melihat_str_semua_pegawai(self):
+        self.profession.no_str = 'STR-PEGAWAI-UNTUK-SUPERUSER'
+        self.profession.berlaku_sd_str = date.today() + timedelta(days=30)
+        self.profession.save(update_fields=['no_str', 'berlaku_sd_str'])
+        superuser = Users.objects.create_superuser(
+            email='superuser-str@example.com',
+            first_name='Superuser',
+            last_name='STR',
+            password='Password-STR-123!',
+        )
+        self.client.force_login(superuser)
+
+        response = self.client.get(
+            reverse('layanan_urls:notifikasi_view'),
+            {'layanan': 'str-expiry'},
+        )
+
+        self.assertContains(response, 'STR-PEGAWAI-UNTUK-SUPERUSER')
+        self.assertContains(response, self.user.full_name)
+
+    def test_admin_dokumen_melihat_str_semua_pegawai_dan_dapat_filter(self):
+        self.profession.no_str = 'STR-SEUMUR-HIDUP-PEGAWAI'
+        self.profession.str_seumur_hidup = True
+        self.profession.berlaku_sd_str = None
+        self.profession.save(update_fields=[
+            'no_str', 'str_seumur_hidup', 'berlaku_sd_str',
+        ])
+        admin = Users.objects.create_user(
+            email='admin-dokumen-str@example.com',
+            first_name='Admin',
+            last_name='Dokumen',
+            password='Password-STR-123!',
+        )
+        group, _created = Group.objects.get_or_create(name=ADMIN_DOKUMEN)
+        admin.groups.add(group)
+        self.client.force_login(admin)
+
+        response = self.client.get(
+            reverse('layanan_urls:notifikasi_view'),
+            {
+                'layanan': 'str-expiry',
+                'status_str': 'seumur_hidup',
+            },
+        )
+
+        self.assertContains(response, 'STR-SEUMUR-HIDUP-PEGAWAI')
+        self.assertContains(response, self.user.full_name)

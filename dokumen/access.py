@@ -1,11 +1,45 @@
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.core.exceptions import FieldDoesNotExist
+from django.core.exceptions import FieldDoesNotExist, FieldError
 from django.http import Http404
+from django.utils.http import url_has_allowed_host_and_scheme
+from urllib.parse import urlencode
+from layanan.access.documents import (
+    filter_document_queryset,
+    is_document_scope_manager,
+)
+
+
+def get_safe_return_url(request):
+    """Ambil URL asal internal tanpa membuka celah open redirect."""
+    return_to = (
+        request.GET.get('return_to')
+        or request.GET.get('redirect_to')
+        or ''
+    ).strip()
+    if return_to and url_has_allowed_host_and_scheme(
+        return_to,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return return_to
+    return None
+
+
+def preserve_return_url(request, url):
+    """Teruskan tujuan kembali saat view melakukan redirect internal."""
+    return_to = get_safe_return_url(request)
+    if not return_to:
+        return url
+    separator = '&' if '?' in url else '?'
+    return f'{url}{separator}{urlencode({"return_to": return_to})}'
 
 
 def is_document_admin(user):
     """Superuser dan anggota grup Admin Dokumen memakai akses lintas pegawai."""
-    return bool(user.is_authenticated and user.is_dokumen_admin)
+    return bool(
+        getattr(user, 'is_authenticated', False)
+        and is_document_scope_manager(user)
+    )
 
 
 def get_selected_nip(request):
@@ -18,7 +52,21 @@ def get_selected_nip(request):
 def scope_document_queryset(queryset, user):
     """Batasi queryset ke pemilik dokumen, kecuali untuk Admin Dokumen."""
     if is_document_admin(user):
-        return queryset
+        model = queryset.model
+        relation_lookup = {
+            'RiwayatSIPProfesi': 'riwayat_profesi__pegawai',
+            'OrangTua': 'keluarga__pegawai',
+            'Pasangan': 'keluarga__pegawai',
+            'Anak': 'keluarga__pegawai',
+        }.get(model.__name__, 'pegawai')
+        try:
+            return filter_document_queryset(
+                queryset,
+                user,
+                employee_path=relation_lookup,
+            )
+        except (FieldDoesNotExist, FieldError):
+            return queryset.none()
 
     model = queryset.model
     try:

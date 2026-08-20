@@ -15,23 +15,72 @@ from django.utils import timezone
 from dateutil.relativedelta import relativedelta
 from typing import Optional
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.http import HttpResponse
+from django.core.paginator import Paginator
+from django.http import HttpResponse, JsonResponse
 import os
 import locale
 import logging 
 from .services import CheckCuti
+from .cuti_calendar import (
+    PolaKerjaTidakDitemukan,
+    get_pola_kerja_aktif,
+    hitung_tanggal_akhir_cuti_tahunan,
+)
 from .utils import resolve_atasan_level3_for_level4
-from .cuti_access import (
+from .access.cuti import (
     build_approval_chain, can_supervise_employee, can_view_leave,
     ensure_diklat_verifier_snapshot, ensure_leave_verifier_snapshot,
+    filter_queryset_for_leave_admin, filter_queryset_for_leave_supervisor,
+    filter_users_for_leave_admin, is_leave_admin,
 )
-from strukturorg.services import filter_structures_led_by, get_active_leader
+from .access.diklat import (
+    can_administer_diklat,
+    can_view_diklat,
+    filter_queryset_for_diklat_admin,
+    filter_queryset_for_diklat_supervisor,
+    is_diklat_admin,
+    is_diklat_participant,
+    is_diklat_supervisor,
+    is_diklat_verifier,
+)
+from .access.sip import (
+    can_manage_sip,
+    filter_sip_service_queryset,
+    is_sip_admin,
+    is_sip_structural_officer,
+)
+from .access.promotion import (
+    can_access_jabatan,
+    can_access_pangkat,
+    filter_jabatan_queryset,
+    filter_pangkat_queryset,
+    is_jabatan_admin,
+    is_pangkat_admin,
+    is_promotion_structural_officer,
+    filter_users_for_jabatan_role,
+    filter_users_for_pangkat_role,
+)
+from .access.berkala import (
+    can_access_berkala,
+    filter_berkala_queryset,
+    is_berkala_admin,
+    is_berkala_structural_officer,
+)
+from .access.inovasi import (
+    can_access_inovasi,
+    filter_inovasi_queryset,
+    is_inovasi_admin,
+    is_inovasi_structural_officer,
+)
+from strukturorg.models import PejabatStruktur
+from strukturorg.services import get_active_leader
 
 # Konfigurasi logger (opsional, tapi direkomendasikan)
 logger = logging.getLogger(__name__)
 
 
-from .forms import OverrideKlaimTundaForCutiForm
+from .forms import OverrideKlaimTundaForCutiForm, PolaKerjaPegawaiForm
+from disiplinsdm.models import PolaKerjaPegawai
 
 from .models import (
     JenisLayanan, 
@@ -59,6 +108,13 @@ from dokumen.models import (
     RiwayatDiklat, 
     RiwayatInovasi,
     RiwayatPengangkatan,
+    RiwayatBekerja,
+    RiwayatJabatan,
+    RiwayatKinerja,
+    RiwayatPAK,
+    RiwayatPendidikan,
+    RiwayatProfesi,
+    UjiKompetensi,
 )
 from .serializers import LayananGajiBerkalaSerializer
 from dokumen.forms import (
@@ -237,6 +293,10 @@ class NotifikasiView(LoginRequiredMixin, View):
                 status_str = 'semua'
 
             all_records = get_latest_str_records(request.user)
+            context['credential_monitoring_all_users'] = (
+                request.user.is_superuser
+                or request.user.is_dokumen_admin
+            )
             context['str_summary'] = {
                 status: sum(
                     item.validity_status == status
@@ -269,9 +329,7 @@ class NotifikasiView(LoginRequiredMixin, View):
         get_case = (request.GET.get('case') or 'detail').strip()
         if get_layanan == 'yancuti':
             data = self.get_cuti_object(id_layanan)
-            can_open = data is not None and (
-                request.user.is_cuti_admin or data.pegawai_id == request.user.pk
-            )
+            can_open = data is not None and can_view_leave(request.user, data)
             if can_open:
                 data.is_read = True
                 data.save(update_fields=['is_read', 'updated_at'])
@@ -283,9 +341,7 @@ class NotifikasiView(LoginRequiredMixin, View):
             return redirect('layanan_urls:layanan_cuti_listview')
         elif get_layanan == 'yanberkala':
             data = self.get_berkala_object(id_layanan)
-            can_open = data is not None and (
-                request.user.is_berkala_admin or data.pegawai_id == request.user.pk
-            )
+            can_open = data is not None and can_access_berkala(request.user, data)
             if can_open:
                 data.is_read = True
                 data.save(update_fields=['is_read', 'updated_at'])
@@ -297,9 +353,9 @@ class NotifikasiView(LoginRequiredMixin, View):
             return redirect('layanan_urls:layanan_berkala_view')
         if get_layanan == 'yandiklat':
             data = self.get_diklat_object(id_layanan)
-            can_open = data is not None and (
-                request.user.is_diklat_admin
-                or data.riwayatdiklat_set.filter(pegawai=request.user).exists()
+            can_open = data is not None and can_view_diklat(
+                request.user,
+                data,
             )
             if can_open:
                 data.is_read = True
@@ -312,10 +368,7 @@ class NotifikasiView(LoginRequiredMixin, View):
             return redirect('layanan_urls:layanan_diklat_list_view')
         if get_layanan == 'yaninovasi':
             data = self.get_inovasi_object(id_layanan)
-            can_open = data is not None and (
-                request.user.is_inovasi_admin
-                or data.pegawai_id == request.user.pk
-            )
+            can_open = data is not None and can_access_inovasi(request.user, data)
             if can_open:
                 data.is_read = True
                 data.save(update_fields=['is_read', 'updated_at'])
@@ -327,9 +380,7 @@ class NotifikasiView(LoginRequiredMixin, View):
             return redirect('layanan_urls:layanan_inovasi_view')
         if get_layanan == 'yansip':
             data = self.get_sip_object(id_layanan)
-            can_open = data is not None and (
-                request.user.is_sip_admin or data.pegawai_id == request.user.pk
-            )
+            can_open = data is not None and can_manage_sip(request.user, data)
             if can_open:
                 data.is_read = True
                 data.save(update_fields=['is_read', 'updated_at'])
@@ -339,32 +390,30 @@ class NotifikasiView(LoginRequiredMixin, View):
             return redirect('layanan_urls:layanan_sip_list')
         if get_layanan == 'yanpangkat':
             data = self.get_pangkat_object(id_layanan)
-            can_open = data is not None and (
-                request.user.is_pangkat_admin or data.pegawai_id == request.user.pk
-            )
+            can_open = data is not None and can_access_pangkat(request.user, data)
             if can_open:
-                if not request.user.is_pangkat_admin:
+                scope_admin = is_pangkat_admin(request.user, data.pegawai)
+                if not scope_admin:
                     data.is_read = True
                     data.save(update_fields=['is_read', 'updated_at'])
                 route_name = (
                     'layanan_urls:layanan_pangkat_process'
-                    if request.user.is_pangkat_admin
+                    if scope_admin
                     else 'layanan_urls:layanan_pangkat_detail'
                 )
                 return redirect(reverse(route_name, kwargs={'pk': data.pk}))
             return redirect('layanan_urls:layanan_pangkat_list')
         if get_layanan == 'yanjabatan':
             data = self.get_jabatan_object(id_layanan)
-            can_open = data is not None and (
-                request.user.is_jabatan_admin or data.pegawai_id == request.user.pk
-            )
+            can_open = data is not None and can_access_jabatan(request.user, data)
             if can_open:
-                if not request.user.is_jabatan_admin:
+                scope_admin = is_jabatan_admin(request.user, data.pegawai)
+                if not scope_admin:
                     data.is_read = True
                     data.save(update_fields=['is_read', 'updated_at'])
                 route_name = (
                     'layanan_urls:layanan_jabatan_process'
-                    if request.user.is_jabatan_admin
+                    if scope_admin
                     else 'layanan_urls:layanan_jabatan_detail'
                 )
                 return redirect(reverse(route_name, kwargs={'pk': data.pk}))
@@ -379,6 +428,25 @@ class NotifikasiView(LoginRequiredMixin, View):
 
 notfoundview = 'riwayat_urls:notfound_view'
 
+
+def filter_riwayat_cuti_search(queryset, query):
+    query = (query or '').strip()
+    if not query:
+        return queryset
+
+    return queryset.filter(
+        Q(pegawai__first_name__icontains=query)
+        | Q(pegawai__last_name__icontains=query)
+        | Q(pegawai__email__icontains=query)
+        | Q(pegawai__profil_user__nip__icontains=query)
+        | Q(jenis_cuti__icontains=query)
+        | Q(alasan_cuti__icontains=query)
+        | Q(domisili_saat_cuti__icontains=query)
+        | Q(no_surat__icontains=query)
+        | Q(usulan__status__icontains=query)
+    ).distinct()
+
+
 class RiwayatLayananCutiView(LoginRequiredMixin, CheckCuti, ListView):
     model = RiwayatCuti
     template_name = '6_layanan_cuti/layanan_cuti_list.html'
@@ -389,12 +457,14 @@ class RiwayatLayananCutiView(LoginRequiredMixin, CheckCuti, ListView):
         user = self.request.user
         nip = get_nip(user)
         data = RiwayatCuti.objects.all().order_by('-updated_at')
-        if not self.request.user.is_cuti_admin:
+        if is_leave_admin(user):
+            data = filter_queryset_for_leave_admin(data, user)
+        else:
             if nip:
                 data = RiwayatCuti.objects.filter(pegawai__profil_user__nip=nip).order_by('-updated_at')
             else:
                 return RiwayatCuti.objects.none()
-        return data
+        return filter_riwayat_cuti_search(data, self.request.GET.get('q'))
     
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -404,6 +474,15 @@ class RiwayatLayananCutiView(LoginRequiredMixin, CheckCuti, ListView):
             'selected': 'yancuti',
             'title_page': 'Riwayat Cuti Saya',
             'active_tab': 'saya',  # untuk nav/tab
+            'search_query': self.request.GET.get('q', '').strip(),
+            'is_cuti_scope_admin': is_leave_admin(self.request.user),
+            'can_view_subordinates': (
+                is_leave_admin(self.request.user)
+                or PejabatStruktur.objects.filter(
+                    pejabat=self.request.user,
+                    is_active=True,
+                ).exists()
+            ),
         })
         return ctx
 
@@ -441,64 +520,19 @@ class RiwayatCutiBawahanView(LoginRequiredMixin, UserPassesTestMixin, ListView):
             .order_by('-updated_at')
         )
 
-        if user.is_cuti_admin:
-            return base_qs
-
         snapshot_qs = base_qs.filter(
             Q(usulan__verifikasicuti__verifikator1=user)
             | Q(usulan__verifikasicuti__verifikator2=user)
             | Q(usulan__verifikasicuti__verifikator3=user)
         )
-
-        profil_admin = getattr(user, 'profil_admin', None)
-        if not profil_admin:
-            return snapshot_qs.distinct()
-
-        # hanya pegawai dengan penempatan aktif
-        qs = base_qs.filter(
-            pegawai__riwayat_penempatan__status=True
-        ).exclude(pegawai=user)
-
-        p = profil_admin
-
-        instalasi_aktif = filter_structures_led_by(p.instalasi.all(), user)
-        sub_bidang_aktif = filter_structures_led_by(p.sub_bidang.all(), user)
-        bidang_aktif = filter_structures_led_by(p.bidang.all(), user)
-        unor_aktif = filter_structures_led_by(p.unor.all(), user)
-
-        if instalasi_aktif.exists():
-            # atasan unit instalasi → bawahan: semua pegawai di instalasi tsb
-            qs = qs.filter(
-                pegawai__riwayat_penempatan__penempatan_level4__in=instalasi_aktif
-            )
-
-        elif sub_bidang_aktif.exists():
-            # atasan sub_bidang → semua yg langsung di sub_bidang + instalasi di bawahnya
-            qs = qs.filter(
-                Q(pegawai__riwayat_penempatan__penempatan_level3__in=sub_bidang_aktif) |
-                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__in=sub_bidang_aktif)
-            )
-
-        elif bidang_aktif.exists():
-            # atasan bidang → semua level di bawah bidang tsb
-            qs = qs.filter(
-                Q(pegawai__riwayat_penempatan__penempatan_level2__in=bidang_aktif) |
-                Q(pegawai__riwayat_penempatan__penempatan_level3__bidang__in=bidang_aktif) |
-                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang__in=bidang_aktif)
-            )
-
-        elif unor_aktif.exists():
-            # atasan unor (level 1) → semua pegawai di unit tsb
-            qs = qs.filter(
-                Q(pegawai__riwayat_penempatan__penempatan_level1__in=unor_aktif) |
-                Q(pegawai__riwayat_penempatan__penempatan_level2__unor__in=unor_aktif) |
-                Q(pegawai__riwayat_penempatan__penempatan_level3__bidang__unor__in=unor_aktif) |
-                Q(pegawai__riwayat_penempatan__penempatan_level4__sub_bidang__bidang__unor__in=unor_aktif)
-            )
-        else:
-            return snapshot_qs.distinct()
-
-        return (qs | snapshot_qs).distinct()
+        admin_qs = filter_queryset_for_leave_admin(base_qs, user)
+        supervisor_qs = filter_queryset_for_leave_supervisor(base_qs, user)
+        data = base_qs.filter(
+            Q(pk__in=admin_qs.values('pk'))
+            | Q(pk__in=supervisor_qs.values('pk'))
+            | Q(pk__in=snapshot_qs.values('pk'))
+        ).distinct()
+        return filter_riwayat_cuti_search(data, self.request.GET.get('q'))
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -508,6 +542,15 @@ class RiwayatCutiBawahanView(LoginRequiredMixin, UserPassesTestMixin, ListView):
             'selected': 'yancuti',
             'title_page': 'Riwayat Pengajuan Cuti Bawahan',
             'active_tab': 'bawahan',  # untuk nav/tab
+            'search_query': self.request.GET.get('q', '').strip(),
+            'is_cuti_scope_admin': is_leave_admin(self.request.user),
+            'can_view_subordinates': (
+                is_leave_admin(self.request.user)
+                or PejabatStruktur.objects.filter(
+                    pejabat=self.request.user,
+                    is_active=True,
+                ).exists()
+            ),
         })
         return ctx
 
@@ -544,7 +587,7 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
         return DokumenSDM.objects.filter(url='cuti').first()
 
     def get_nip_user(self):
-        if self.request.user.is_cuti_admin:
+        if is_leave_admin(self.request.user):
             return None
         profil = getattr(self.request.user, 'profil_user', None)
         return getattr(profil, 'nip', None)
@@ -552,7 +595,7 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
     def get_target_pegawai(self):
         """Pegawai pemohon; admin boleh memilih, pengguna biasa selalu dirinya."""
         user = self.request.user
-        if not user.is_cuti_admin:
+        if not is_leave_admin(user):
             return user
 
         raw_id = (
@@ -562,11 +605,11 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
         )
         if not raw_id:
             return None
-        return (
+        return filter_users_for_leave_admin(
             Users.objects.filter(pk=raw_id, is_active=True)
-            .exclude(is_superuser=True)
-            .first()
-        )
+            .exclude(is_superuser=True),
+            user,
+        ).first()
 
     # ---------- form utama ----------
     def get_form_kwargs(self):
@@ -579,7 +622,7 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
         user = self.request.user
         layanan_default = self.get_layanan_default()
 
-        if not user.is_cuti_admin:
+        if not is_leave_admin(user):
             initial['pegawai'] = user
         else:
             target_pegawai = self.get_target_pegawai()
@@ -643,6 +686,7 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
             'layanan': 'active',
             'selected': 'yancuti',
             'today': date.today(),
+            'is_cuti_scope_admin': is_leave_admin(self.request.user),
         })
         return context
 
@@ -656,7 +700,7 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
             tahun_pengajuan = form.cleaned_data.get('tahun') or tahun_pengajuan
             target_pegawai = (
                 form.cleaned_data.get('pegawai')
-                if request.user.is_cuti_admin
+                if is_leave_admin(request.user)
                 else request.user
             )
             formset = self.get_formset(
@@ -696,7 +740,7 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
             # 1) Simpan LayananCuti
             # ============================================================
             self.object = form.save(commit=False)
-            if not request.user.is_cuti_admin:
+            if not is_leave_admin(request.user):
                 self.object.pegawai = request.user
             # Field workflow tidak boleh dipercaya dari hidden input browser.
             layanan_default = self.get_layanan_default()
@@ -731,7 +775,23 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
 
             # hitung tgl_akhir jika belum diisi
             if tgl_mulai_cuti and not tgl_akhir_cuti and lama_cuti:
-                tgl_akhir_cuti = tgl_mulai_cuti + timedelta(days=lama_cuti - 1)
+                if jenis_cuti == CheckCuti.CUTI_TAHUNAN:
+                    try:
+                        pola = get_pola_kerja_aktif(
+                            self.object.pegawai,
+                            tgl_mulai_cuti,
+                        )
+                    except PolaKerjaTidakDitemukan:
+                        raise CutiSubmissionError(
+                            'Pola kerja pegawai belum ditentukan pada tanggal mulai cuti.'
+                        )
+                    tgl_akhir_cuti = hitung_tanggal_akhir_cuti_tahunan(
+                        tgl_mulai_cuti,
+                        lama_cuti,
+                        pola.pola_kerja,
+                    )
+                else:
+                    tgl_akhir_cuti = tgl_mulai_cuti + timedelta(days=lama_cuti - 1)
 
             target_pegawai = self.object.pegawai
             # Serialisasi seluruh perubahan saldo per pegawai. Ini mencegah dua
@@ -780,6 +840,20 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
             # 5) CABANG: CUTI TAHUNAN
             # ============================================================
             if jenis_cuti == "Cuti Tahunan":
+                try:
+                    pola_kerja_cuti = get_pola_kerja_aktif(
+                        target_pegawai,
+                        tgl_mulai_cuti,
+                    )
+                except PolaKerjaTidakDitemukan:
+                    raise CutiSubmissionError(
+                        'Pola kerja pegawai belum ditentukan pada tanggal mulai cuti. '
+                        'Hubungi pengelola jadwal.'
+                    )
+                for item in data_form:
+                    item.menggunakan_pola_shift = (
+                        pola_kerja_cuti.pola_kerja == pola_kerja_cuti.SHIFT
+                    )
                 # waktu pengajuan tetap divalidasi utk cuti tahunan (mau tunda saja / normal)
                 status_pegawai = self.get_status_pegawai(target_pegawai)
                 if not status_pegawai:
@@ -927,14 +1001,30 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
                 "Cuti Besar",
                 "Cuti Diluar Tanggungan Negara",
             ]:
-                for item in data_form:
+                cuti_baru_main = None
+                for idx, item in enumerate(data_form):
                     item.save()
+                    if idx == 0:
+                        cuti_baru_main = item
                 self.simpan_snapshot_saldo_cuti(
                     target_pegawai,
                     tahun_pengajuan,
                 )
-                messages.success(request, "Pengajuan cuti anda sukses, dan segera akan ditindaklanjuti oleh bagian SDM.")
-                return redirect(self.success_url)
+                if cuti_baru_main:
+                    messages.success(
+                        request,
+                        "Pengajuan cuti berhasil disimpan. "
+                        "Silakan lengkapi dokumen pelimpahan tugas.",
+                    )
+                    return redirect(
+                        reverse(
+                            'layanan_urls:pelimpahan_create',
+                            kwargs={'riwayat_pk': cuti_baru_main.pk},
+                        )
+                    )
+                raise CutiSubmissionError(
+                    "Detail cuti gagal disimpan untuk proses pelimpahan tugas."
+                )
 
             # ============================================================
             # 7) DEFAULT
@@ -983,7 +1073,7 @@ class AdminOverrideKlaimTundaForCutiView(LoginRequiredMixin, UserPassesTestMixin
     form_class = OverrideKlaimTundaForCutiForm
 
     def test_func(self):
-        return self.request.user.is_cuti_admin
+        return is_leave_admin(self.request.user, self.cuti_klaim.pegawai)
 
     def dispatch(self, request, *args, **kwargs):
         self.cuti_klaim = get_object_or_404(RiwayatCuti, pk=kwargs["riwayat_id"])
@@ -1069,14 +1159,12 @@ class PelimpahanTugasCreateView(LoginRequiredMixin, CreateView):
         self.riwayat_cuti = get_object_or_404(RiwayatCuti, pk=kwargs['riwayat_pk'])
         self.pelimpahan_existing = getattr(self.riwayat_cuti, 'pelimpahan_tugas', None)
 
-        # opsional: pastikan hanya pemilik cuti yang boleh buat pelimpahan
-        if request.user.is_cuti_admin and self.pelimpahan_existing:
-            return redirect('layanan_urls:pelimpahan_detail', pk=self.pelimpahan_existing.pk)
-        if request.user.is_cuti_admin:
-            messages.info(request, 'Pemohon belum membuat pelimpahan tugas.')
-            return redirect('layanan_urls:layanan_cuti_listview')
-
-        if self.riwayat_cuti.pegawai != request.user:
+        # Pemilik mengisi sendiri; admin cuti/superuser boleh melengkapi atas
+        # nama pegawai ketika pengajuan dibuat melalui layanan administrasi.
+        if (
+            self.riwayat_cuti.pegawai != request.user
+            and not is_leave_admin(request.user, self.riwayat_cuti.pegawai)
+        ):
             messages.error(request, "Anda tidak berhak membuat pelimpahan untuk cuti ini.")
             return redirect('layanan_urls:layanan_cuti_listview')
 
@@ -1098,7 +1186,9 @@ class PelimpahanTugasCreateView(LoginRequiredMixin, CreateView):
     def form_valid(self, form):
         obj = form.save(commit=False)
         obj.riwayat_cuti = self.riwayat_cuti
-        obj.pemberi_tugas = self.request.user
+        # Pemberi tugas tetap pegawai yang menjalankan cuti. Admin hanya
+        # bertindak sebagai operator penginput.
+        obj.pemberi_tugas = self.riwayat_cuti.pegawai
         # Default status ketika selesai isi form: menunggu persetujuan penerima
         obj.status = 'menunggu_penerima'
         obj.persetujuan_penerima = "belum"
@@ -1140,7 +1230,9 @@ class PelimpahanTugasDetailView(LoginRequiredMixin, DetailView):
         u = request.user
 
         # hanya superuser, pemberi, penerima, atasan penyetuju yang boleh akses
-        if u.is_cuti_admin or u in [obj.pemberi_tugas, obj.penerima_tugas, obj.atasan_penyetuju]:
+        if is_leave_admin(u, obj.riwayat_cuti.pegawai) or u in [
+            obj.pemberi_tugas, obj.penerima_tugas, obj.atasan_penyetuju
+        ]:
             return super().dispatch(request, *args, **kwargs)
         
         # Jika bukan siapa-siapa → redirect
@@ -1160,19 +1252,41 @@ class PelimpahanTugasPenerimaListView(LoginRequiredMixin, ListView):
     context_object_name = 'pelimpahan_list'
 
     def get_queryset(self):
-        return PelimpahanTugas.objects.filter(
+        queryset = PelimpahanTugas.objects.filter(
+            status__in=(
+                'menunggu_penerima', 'menunggu_atasan', 'disetujui',
+                'ditolak_penerima', 'ditolak_atasan',
+            )
+        ).select_related(
+            'riwayat_cuti',
+            'riwayat_cuti__pegawai',
+            'pemberi_tugas',
+            'penerima_tugas',
+            'atasan_penyetuju',
+        )
+        if is_leave_admin(self.request.user):
+            return filter_queryset_for_leave_admin(
+                queryset,
+                self.request.user,
+                employee_path='riwayat_cuti__pegawai',
+            ).order_by('-created_at')
+        return queryset.filter(
             penerima_tugas=self.request.user,
-            status__in=['menunggu_penerima', 'menunggu_atasan', 'disetujui']
-        ).select_related('riwayat_cuti', 'pemberi_tugas')
+        ).order_by('-created_at')
         
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['title_page'] = 'Daftar Pelimpahan Tugas Saya'
+        is_admin = is_leave_admin(self.request.user)
+        context['title_page'] = (
+            'Monitoring Persetujuan Penerima Tugas'
+            if is_admin else 'Daftar Pelimpahan Tugas Saya'
+        )
         context.update({
             'cuti': 'active',
             'layanan': 'active',
             'selected': 'yancuti',
             'active_tab': 'pelimpahan',  # untuk nav/tab
+            'is_cuti_scope_admin': is_admin,
         })
         return context
 
@@ -1233,7 +1347,8 @@ class PelimpahanTugasPenerimaUpdateView(LoginRequiredMixin, UpdateView):
 
 class PelimpahanKepalaListView(LoginRequiredMixin, ListView):
     """
-    Daftar pelimpahan tugas yang MENUNGGU persetujuan kepala (kasi/subbidang).
+    Daftar pelimpahan tugas bawahan yang akan memerlukan persetujuan kepala.
+    Tahap menunggu penerima ditampilkan sebagai informasi tanpa aksi paraf.
     Hanya untuk kasus pemohon cuti level 4 (instalasi/unit).
     """
     template_name = "6_layanan_cuti/pelimpahan/list_kepala.html"
@@ -1253,24 +1368,38 @@ class PelimpahanKepalaListView(LoginRequiredMixin, ListView):
                 "riwayat_cuti__pegawai__profil_user",
                 "penerima_tugas",
                 "penerima_tugas__profil_user",
+                "atasan_penyetuju",
             ).order_by('-created_at')
         )
 
         # Gunakan snapshot atasan saat pelimpahan diajukan. Mutasi pejabat tidak
         # boleh memindahkan pengajuan lama ke pejabat baru secara diam-diam.
+        # Kepala dapat memantau sejak tahap penerima, tetapi baru dapat memberi
+        # keputusan setelah status berubah menjadi menunggu_atasan.
         qs = qs.filter(
-            status='menunggu_atasan',
-            atasan_penyetuju=user,
-        ).distinct()
-
-        return qs
+            status__in=('menunggu_penerima', 'menunggu_atasan'),
+        )
+        if is_leave_admin(user):
+            qs = filter_queryset_for_leave_admin(
+                qs,
+                user,
+                employee_path='riwayat_cuti__pegawai',
+            )
+        else:
+            qs = qs.filter(atasan_penyetuju=user)
+        return qs.distinct()
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx.update({
             "title_page": "Persetujuan Pelimpahan Tugas",
-            "card_title": "Daftar Pelimpahan Menunggu Persetujuan Anda",
+            "card_title": (
+                "Monitoring Persetujuan Pelimpahan Tugas"
+                if is_leave_admin(self.request.user)
+                else "Daftar Pelimpahan Menunggu Persetujuan Anda"
+            ),
             "active_tab": "pelimpahan_kepala",
+            "is_cuti_scope_admin": is_leave_admin(self.request.user),
         })
         return ctx
 
@@ -1370,7 +1499,6 @@ class LayananCutiDetailView(LoginRequiredMixin, DetailView):
         # izin akses sederhana:
         # - pemohon boleh lihat detailnya sendiri
         # - superuser boleh lihat semua
-        # - admin boleh (opsional) tambahkan rules profil_admin sesuai kebutuhan
         user = self.request.user
         can_view = can_view_leave(user, layanan)
         # jika Anda punya aturan admin, bisa diperluas di sini
@@ -1401,7 +1529,7 @@ class LayananCutiDetailView(LoginRequiredMixin, DetailView):
             "status_ringkas": status_ringkas,
             "is_owner": layanan.pegawai_id == user.id,
             "can_upload_surat_cuti": bool(
-                (user.is_superuser or user.is_cuti_admin)
+                is_leave_admin(user, layanan.pegawai)
                 and main
                 and layanan.status in ('disetujui', 'selesai')
             ),
@@ -1445,8 +1573,11 @@ class UploadFileCutiView(
     raise_exception = True
 
     def test_func(self):
-        user = self.request.user
-        return user.is_superuser or user.is_cuti_admin
+        riwayat = get_object_or_404(
+            RiwayatCuti.objects.select_related('pegawai'),
+            pk=self.kwargs['pk'],
+        )
+        return is_leave_admin(self.request.user, riwayat.pegawai)
 
     def get_queryset(self):
         return (
@@ -1517,7 +1648,7 @@ class LayananCutiUpdateView(LoginRequiredMixin, View):
             raise PermissionDenied("Alur cuti lama sudah dinonaktifkan.")
 
         if request.GET.get('case') == 'tindaklanjut' and (
-            request.user.is_cuti_admin
+            is_leave_admin(request.user, layanan.pegawai)
             or any(
                 item['user'] and item['user'].pk == request.user.pk
                 for item in build_approval_chain(layanan.pegawai)
@@ -1678,8 +1809,10 @@ class VerifikasiCutiAccessMixin(LoginRequiredMixin):
         return self._current_level
 
     def is_monitor_user(self) -> bool:
-        u = self.request.user
-        return u.is_authenticated and u.is_cuti_admin
+        return is_leave_admin(
+            self.request.user,
+            self.get_layanan_cuti().pegawai,
+        )
 
     def can_monitor_as_supervisor(self) -> bool:
         if not hasattr(self, '_can_monitor_as_supervisor'):
@@ -1957,11 +2090,121 @@ class LayananCutiVerifikasiView(VerifikasiCutiAccessMixin, CheckCuti, UpdateView
         return ctx
 
 
-class LayananCutiDeleteView(SuccessMessageMixin, DeleteView):
+class LayananCutiDeleteView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    SuccessMessageMixin,
+    DeleteView,
+):
     model = RiwayatCuti
     template_name = 'delete.html'
     success_url = reverse_lazy('layanan_urls:layanan_cuti_listview')
     success_message = "Data berhasil dihapus!"
+
+    def test_func(self):
+        riwayat = get_object_or_404(
+            RiwayatCuti.objects.select_related('pegawai'),
+            pk=self.kwargs['pk'],
+        )
+        return is_leave_admin(self.request.user, riwayat.pegawai)
+
+    def get_queryset(self):
+        return filter_queryset_for_leave_admin(
+            super().get_queryset(),
+            self.request.user,
+        )
+
+
+class PolaKerjaPegawaiListCreateView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    FormView,
+):
+    template_name = '6_layanan_cuti/pola_kerja_pegawai.html'
+    form_class = PolaKerjaPegawaiForm
+    success_url = reverse_lazy('layanan_urls:pola_kerja_pegawai')
+
+    def test_func(self):
+        return is_leave_admin(self.request.user)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['request'] = self.request
+        return kwargs
+
+    def get_queryset(self):
+        queryset = PolaKerjaPegawai.objects.select_related(
+            'pegawai', 'pegawai__profil_user'
+        )
+        queryset = filter_queryset_for_leave_admin(
+            queryset,
+            self.request.user,
+        )
+        query = self.request.GET.get('q', '').strip()
+        if query:
+            queryset = queryset.filter(
+                Q(pegawai__first_name__icontains=query)
+                | Q(pegawai__last_name__icontains=query)
+                | Q(pegawai__email__icontains=query)
+                | Q(pegawai__profil_user__nip__icontains=query)
+            )
+        return queryset.order_by('pegawai__first_name', '-berlaku_mulai', '-pk')
+
+    def form_valid(self, form):
+        form.save()
+        messages.success(self.request, 'Pola kerja pegawai berhasil ditambahkan.')
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        paginator = Paginator(self.get_queryset(), 25)
+        page_obj = paginator.get_page(self.request.GET.get('page'))
+        context.update({
+            'pola_kerja_list': page_obj.object_list,
+            'page_obj': page_obj,
+            'paginator': paginator,
+            'is_paginated': page_obj.has_other_pages(),
+            'q': self.request.GET.get('q', '').strip(),
+            'title_page': 'Pola Kerja Pegawai',
+            'cuti': 'active',
+            'layanan': 'active',
+            'selected': 'yancuti',
+        })
+        return context
+
+
+class PolaKerjaPegawaiUpdateView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    UpdateView,
+):
+    model = PolaKerjaPegawai
+    form_class = PolaKerjaPegawaiForm
+    template_name = '6_layanan_cuti/pola_kerja_pegawai_form.html'
+    success_url = reverse_lazy('layanan_urls:pola_kerja_pegawai')
+
+    def test_func(self):
+        return is_leave_admin(self.request.user)
+
+    def get_queryset(self):
+        return filter_queryset_for_leave_admin(
+            PolaKerjaPegawai.objects.select_related('pegawai'),
+            self.request.user,
+        )
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['request'] = self.request
+        return kwargs
+
+    def form_valid(self, form):
+        messages.success(self.request, 'Pola kerja pegawai berhasil diperbarui.')
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title_page'] = 'Ubah Pola Kerja Pegawai'
+        return context
 
 
 class CutiPemutihanAdminView(LoginRequiredMixin, UserPassesTestMixin, View):
@@ -1971,7 +2214,7 @@ class CutiPemutihanAdminView(LoginRequiredMixin, UserPassesTestMixin, View):
     allowed_actions = {'disetujui', 'selesai', 'ditolak', 'dibatalkan'}
 
     def test_func(self):
-        return self.request.user.is_cuti_admin
+        return is_leave_admin(self.request.user)
 
     def _parse_date(self, value, default):
         try:
@@ -2013,6 +2256,10 @@ class CutiPemutihanAdminView(LoginRequiredMixin, UserPassesTestMixin, View):
                 created_at__date__lte=filters['tanggal_akhir'],
             )
             .order_by('created_at', 'id')
+        )
+        queryset = filter_queryset_for_leave_admin(
+            queryset,
+            self.request.user,
         )
         status = filters['status']
         if status == 'proses':
@@ -2210,7 +2457,9 @@ class BerkalaListView(LoginRequiredMixin, ListView):
         # - `partition_by=[F('pegawai')]`: Mengelompokkan data per pegawai.
         # - `order_by=F('tmt_gaji').desc()`: Mengurutkan riwayat gaji dari yang terbaru.
         # - `RowNumber()`: Memberikan nomor urut 1, 2, 3, ... dalam setiap kelompok.
-        latest_berkala_qs = RiwayatGajiBerkala.objects.annotate(
+        latest_berkala_qs = filter_berkala_queryset(
+            RiwayatGajiBerkala.objects.all(), self.request.user
+        ).annotate(
             row_number=Window(
                 expression=RowNumber(),
                 partition_by=[F('pegawai')],
@@ -2278,7 +2527,10 @@ class BerkalaListView(LoginRequiredMixin, ListView):
                 'interval_category': interval_category,
                 'interval_sort_key': interval_sort_key,
                 'days_until_due': days_until_due,
-                'berkala_status': berkala_status
+                'berkala_status': berkala_status,
+                'can_process': is_berkala_admin(
+                    self.request.user, berkala.pegawai
+                ),
             })
 
         # Urutkan data di Python berdasarkan kategori dan sisa hari
@@ -2288,6 +2540,10 @@ class BerkalaListView(LoginRequiredMixin, ListView):
     
     def get_context_data(self):
         context = super().get_context_data()
+        context['can_manage_berkala_role'] = bool(
+            is_berkala_admin(self.request.user)
+            or is_berkala_structural_officer(self.request.user)
+        )
         context.update({
             'berkala':'active',
             'layanan':'active',
@@ -2298,10 +2554,17 @@ class BerkalaListView(LoginRequiredMixin, ListView):
 
 
 def createlayananberkala(request, riwayat_id):
-    if not request.user.is_authenticated or not request.user.is_berkala_admin:
+    if not request.user.is_authenticated:
         raise PermissionDenied
     try:
-        riwayat_berkala = RiwayatGajiBerkala.objects.get(id=riwayat_id)
+        riwayat_berkala = get_object_or_404(
+            filter_berkala_queryset(
+                RiwayatGajiBerkala.objects.all(), request.user
+            ),
+            id=riwayat_id,
+        )
+        if not is_berkala_admin(request.user, riwayat_berkala.pegawai):
+            raise PermissionDenied
         jenis_layanan = JenisLayanan.objects.filter(url='yanberkala').first()
         nip = riwayat_berkala.pegawai.profil_user.nip if riwayat_berkala.pegawai and hasattr(riwayat_berkala.pegawai, 'profil_user') else None
         # if riwayat_berkala.has_layanan and not riwayat_berkala.is_final:
@@ -2319,6 +2582,8 @@ def createlayananberkala(request, riwayat_id):
         
         messages.success(request, 'Layanan Gaji Berkala berhasil dibuat!')
         return redirect(reverse('layanan_urls:layanan_berkala_admin_view', kwargs={'layanan_id':data.pk, 'nip':nip}))
+    except PermissionDenied:
+        raise
     except Exception as e:
         messages.error(request, f'Maaf layanan gaji berkala gagal dibuat! Error: {str(e)}')
         return redirect(reverse('layanan_urls:layanan_berkala_view'))
@@ -2331,11 +2596,12 @@ class LayananGajiBerkalaUpdateView(LoginRequiredMixin, GajiBerkalaCheck, View):
 
     redirect_display = 'layanan_urls:layanan_berkala_view'
     def detail_object(self, id):
-        try:
-            layanan = LayananGajiBerkala.objects.get(id=id)
-            return layanan
-        except Exception:
-            return None
+        return get_object_or_404(
+            filter_berkala_queryset(
+                LayananGajiBerkala.objects.all(), self.request.user
+            ),
+            id=id,
+        )
     
     def get(self, request, **kwargs):
         id_obj = kwargs.get('id')
@@ -2375,11 +2641,14 @@ class LayananGajiBerkalaAdminView(LoginRequiredMixin, UserPassesTestMixin, View)
     redirect_field_name = 'next'
 
     def test_func(self):
-        return self.request.user.is_berkala_admin
+        data = self.get_object(self.kwargs.get('layanan_id'))
+        return bool(data and is_berkala_admin(self.request.user, data.pegawai))
 
     def get_object(self, layanan_id):
         try:
-            data = LayananGajiBerkala.objects.get(id=layanan_id)
+            data = filter_berkala_queryset(
+                LayananGajiBerkala.objects.all(), self.request.user
+            ).get(id=layanan_id)
             return data
         except Exception:
             return None
@@ -2396,7 +2665,7 @@ class LayananGajiBerkalaAdminView(LoginRequiredMixin, UserPassesTestMixin, View)
         detail = self.get_object(layanan_id)
         selected_nip = kwargs.get('nip')
         nip = None
-        if request.user.is_berkala_admin:
+        if detail and is_berkala_admin(request.user, detail.pegawai):
             nip = selected_nip
         else:
             nip = get_nip(request.user)
@@ -2421,7 +2690,12 @@ class LayananGajiBerkalaAdminAddView(LoginRequiredMixin, UserPassesTestMixin, Vi
     redirect_field_name = 'next'
 
     def test_func(self):
-        return self.request.user.is_berkala_admin
+        layanan = filter_berkala_queryset(
+            LayananGajiBerkala.objects.all(), self.request.user
+        ).filter(id=self.kwargs.get('layanan_id')).first()
+        return bool(
+            layanan and is_berkala_admin(self.request.user, layanan.pegawai)
+        )
         
     def get_user(self, nip):
         try: 
@@ -2431,15 +2705,16 @@ class LayananGajiBerkalaAdminAddView(LoginRequiredMixin, UserPassesTestMixin, Vi
             return None
 
     def get(self, request, **kwargs):
-        selected_nip = kwargs.get('nip')
+        layanan = get_object_or_404(
+            filter_berkala_queryset(
+                LayananGajiBerkala.objects.select_related('pegawai'),
+                request.user,
+            ),
+            id=kwargs.get('layanan_id'),
+        )
         dokumen = DokumenSDM.objects.filter(url='berkala')
-        nip = None
-        if request.user.is_berkala_admin:
-            nip = selected_nip
-        else:
-            nip = get_nip(request.user)
-
-        pegawai = self.get_user(nip)
+        pegawai = layanan.pegawai
+        nip = get_nip(pegawai)
         panggol = RiwayatPanggol.objects.filter(pegawai__profil_user__nip=nip)
         tempat_kerja = RiwayatPenempatan.objects.filter(pegawai__profil_user__nip=nip)
         initial = {
@@ -2464,11 +2739,32 @@ class LayananGajiBerkalaAdminAddView(LoginRequiredMixin, UserPassesTestMixin, Vi
     
     def post(self, request, **kwargs):
         layanan_id = kwargs.get('layanan_id')
-        nip = kwargs.get('nip')
+        layanan = get_object_or_404(
+            filter_berkala_queryset(
+                LayananGajiBerkala.objects.select_related('pegawai'),
+                request.user,
+            ),
+            id=layanan_id,
+        )
+        nip = get_nip(layanan.pegawai)
         form = RiwayatGajiBerkalaForm(data=request.POST)
+        if form.is_valid():
+            if form.cleaned_data.get('pangkat') and (
+                form.cleaned_data['pangkat'].pegawai_id != layanan.pegawai_id
+            ):
+                form.add_error('pangkat', 'Pangkat bukan milik pegawai layanan.')
+            if form.cleaned_data.get('tempat_kerja') and (
+                form.cleaned_data['tempat_kerja'].pegawai_id
+                != layanan.pegawai_id
+            ):
+                form.add_error(
+                    'tempat_kerja',
+                    'Penempatan bukan milik pegawai layanan.',
+                )
         if form.is_valid():
             with transaction.atomic():
                 berkala = form.save(commit=False)
+                berkala.pegawai = layanan.pegawai
                 berkala.has_layanan = True
                 berkala.save()
                 LayananGajiBerkala.objects.filter(id=layanan_id).update(berkala=berkala, status='proses')
@@ -2484,7 +2780,14 @@ class LayananGajiBerkalaUpload(LoginRequiredMixin, UserPassesTestMixin, View):
     redirect_field_name = 'next'
 
     def test_func(self):
-        return self.request.user.is_berkala_admin
+        layanan = filter_berkala_queryset(
+            LayananGajiBerkala.objects.all(), self.request.user
+        ).filter(id=self.kwargs.get('layanan_id')).first()
+        return bool(
+            layanan
+            and layanan.berkala_id == self.kwargs.get('berkala_id')
+            and is_berkala_admin(self.request.user, layanan.pegawai)
+        )
 
     def get_object(self, id):
         try:
@@ -2546,7 +2849,11 @@ class PengalihanDiklatCreateView(LoginRequiredMixin, UserPassesTestMixin, Create
     success_url = reverse_lazy('layanan_urls:layanan_diklat_staf_view')
 
     def test_func(self):
-        return self.request.user.is_staff or self.request.user.is_diklat_admin
+        source = self.get_object()
+        return bool(
+            can_administer_diklat(self.request.user, source)
+            or is_diklat_supervisor(self.request.user, source)
+        )
     
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -2615,7 +2922,14 @@ class PenugasanDiklatCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateV
     success_url = reverse_lazy('layanan_urls:layanan_diklat_staf_view')
 
     def test_func(self):
-        return self.request.user.is_staff or self.request.user.is_diklat_admin
+        return bool(
+            is_diklat_admin(self.request.user)
+            or PejabatStruktur.objects.filter(
+                pejabat=self.request.user,
+                pejabat__is_active=True,
+                is_active=True,
+            ).exists()
+        )
     
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -2665,23 +2979,30 @@ class LayananUsulanDiklatStaffView(LoginRequiredMixin, UserPassesTestMixin, List
     model = LayananUsulanDiklat
 
     def test_func(self):
-        return self.request.user.is_staff or self.request.user.is_diklat_admin
+        return bool(
+            is_diklat_admin(self.request.user)
+            or PejabatStruktur.objects.filter(
+                pejabat=self.request.user,
+                pejabat__is_active=True,
+                is_active=True,
+            ).exists()
+        )
     
     def get_queryset(self):
-        queryset = None
-        if self.request.user.is_staff and not self.request.user.is_diklat_admin:
-            penempatan_admin = self.request.user.riwayat_penempatan.filter(status=True).last()
-            if penempatan_admin:
-                queryset=self.model.objects.filter(
-                        riwayatdiklat__pegawai__riwayat_penempatan__penempatan_level3__sub_bidang=penempatan_admin.penempatan, riwayatdiklat__pegawai__riwayat_penempatan__status=True
-                    ).order_by('-id').exclude(riwayatdiklat__pegawai=self.request.user).distinct()|self.model.objects.filter(
-                        riwayatdiklat__pegawai__riwayat_penempatan__penempatan_level2__bidang=penempatan_admin.penempatan, riwayatdiklat__pegawai__riwayat_penempatan__status=True
-                    ).order_by('-id').exclude(riwayatdiklat__pegawai=self.request.user).distinct()|self.model.objects.filter(
-                        riwayatdiklat__pegawai__riwayat_penempatan__penempatan_level1__unor=penempatan_admin.penempatan, riwayatdiklat__pegawai__riwayat_penempatan__status=True
-                    ).order_by('-id').exclude(riwayatdiklat__pegawai=self.request.user).distinct()  
-        elif self.request.user.is_diklat_admin:
-            queryset = super().get_queryset()
-        return queryset
+        base = super().get_queryset()
+        admin_data = filter_queryset_for_diklat_admin(
+            base,
+            self.request.user,
+        )
+        subordinate_data = filter_queryset_for_diklat_supervisor(
+            base,
+            self.request.user,
+        )
+        return (
+            admin_data | subordinate_data
+        ).exclude(
+            riwayatdiklat__pegawai=self.request.user,
+        ).order_by('-id').distinct()
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -2701,18 +3022,23 @@ class LayananUsulanDiklatListView(LoginRequiredMixin, ListView):
     model = LayananUsulanDiklat
     
     def get_queryset(self):
-        nip = get_nip(self.request.user)
-        if not self.request.user.is_diklat_admin and nip:
-            queryset = LayananUsulanDiklat.objects.filter(riwayatdiklat__pegawai__profil_user__nip=nip).order_by('-id')
+        queryset = LayananUsulanDiklat.objects.all()
+        if is_diklat_admin(self.request.user):
+            queryset = filter_queryset_for_diklat_admin(
+                queryset,
+                self.request.user,
+            )
         else:
-            queryset = LayananUsulanDiklat.objects.all().order_by('-id')
-        return queryset
+            queryset = queryset.filter(
+                riwayatdiklat__pegawai=self.request.user
+            )
+        return queryset.order_by('-id').distinct()
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         nip = get_nip(self.request.user)
         context['card_title'] = 'Riwayat Usulan Diklat'
-        if not self.request.user.is_diklat_admin and nip:
+        if not is_diklat_admin(self.request.user) and nip:
             context['card_title'] = 'Riwayat Diklat Saya'
         context['diklat']='active'
         context['layanan']='active'
@@ -2721,7 +3047,7 @@ class LayananUsulanDiklatListView(LoginRequiredMixin, ListView):
         return context
     
     def get_template_names(self):
-        if self.request.user.is_diklat_admin:
+        if is_diklat_admin(self.request.user):
             return ['7_layanan_diklat/layanan_diklat_list.html']
         return ['7_layanan_diklat/layanan_diklat_perorang.html']
     
@@ -2747,7 +3073,7 @@ class LayananUsulanDiklatCreateView(LoginRequiredMixin, CreateView):
         user = Users.objects.filter(profil_user__nip=nip)
         dokumen = DokumenSDM.objects.filter(url='diklat')
         initial = [{'dokumen':dokumen.first()}]
-        if not self.request.user.is_diklat_admin:
+        if not is_diklat_admin(self.request.user):
             initial = [{
                 'pegawai':user, 'dokumen':dokumen.first()
             }]
@@ -2863,12 +3189,29 @@ class LayananUsulanDiklatUpdateView(LoginRequiredMixin, UpdateView):
     success_url = reverse_lazy('layanan_urls:layanan_diklat_list_view')
 
     def dispatch(self, request, *args, **kwargs):
-        if request.GET.get('case') == 'spt' and not request.user.is_diklat_admin:
+        instance = self.get_object()
+        if not can_view_diklat(request.user, instance):
+            raise PermissionDenied
+        case = request.GET.get('case')
+        if case == 'spt' and not can_administer_diklat(request.user, instance):
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
-        if request.GET.get('case') == 'proses' and not request.user.is_diklat_admin:
+        instance = self.get_object()
+        case = request.GET.get('case')
+        if case in {'proses', 'spt'} and not can_administer_diklat(
+            request.user,
+            instance,
+        ):
+            raise PermissionDenied
+        if (
+            case not in {'proses', 'spt', 'laporan'}
+            and not (
+                is_diklat_participant(request.user, instance)
+                or can_administer_diklat(request.user, instance)
+            )
+        ):
             raise PermissionDenied
         return super().post(request, *args, **kwargs)
     
@@ -3009,6 +3352,19 @@ class LayananUsulanDiklatUpdateView(LoginRequiredMixin, UpdateView):
 
 class VerifikasiDiklatView(LoginRequiredMixin, UpdateView):
     model = VerifikasiDiklat
+
+    def dispatch(self, request, *args, **kwargs):
+        verification = self.get_object()
+        level = request.GET.get('level')
+        if level not in {'1', '2', '3'}:
+            raise PermissionDenied
+        if not is_diklat_verifier(
+            request.user,
+            verification.layanan_diklat,
+            level=level,
+        ):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
     
     def get_form_class(self):
         level = self.request.GET.get('level')
@@ -3053,7 +3409,10 @@ class CatatanSDMUsulanLayananDiklatUpdateView(
     template_name = '7_layanan_diklat/layanan_diklat_catatan_sdm.html'
 
     def test_func(self):
-        return self.request.user.is_diklat_admin
+        return can_administer_diklat(
+            self.request.user,
+            self.get_object(),
+        )
     
     def get_success_url(self):
         url = reverse('layanan_urls:layanan_diklat_update_view', kwargs={'pk':self.get_object().id})
@@ -3091,12 +3450,18 @@ class LayananUsulanInovasiView(LoginRequiredMixin, View):
         user = request.user
         dokumen = DokumenSDM.objects.filter(url='inovasi')
         layanan = JenisLayanan.objects.filter(url='yaninovasi')
-        data = LayananUsulanInovasi.objects.all()
+        data = filter_inovasi_queryset(
+            LayananUsulanInovasi.objects.all(), request.user
+        )
         initial_riwayat = {'dokumen':dokumen.first()}
         initial = {'layanan':layanan.first(), 'status':'usulan'}
         nip = None
         card_title = 'Riwayat Usulan Inovasi'
-        if not request.user.is_inovasi_admin:
+        can_manage_role = bool(
+            is_inovasi_admin(request.user)
+            or is_inovasi_structural_officer(request.user)
+        )
+        if not can_manage_role:
             initial_riwayat = {'pegawai':user, 'dokumen':dokumen.first()}
             initial = {'pegawai':user, 'layanan':layanan.first(), 'status':'usulan'}
             nip = get_nip(user)
@@ -3104,6 +3469,9 @@ class LayananUsulanInovasiView(LoginRequiredMixin, View):
                 data = LayananUsulanInovasi.objects.filter(pegawai__profil_user__nip=nip)
             else:
                 return redirect(reverse(notfoundview, kwargs={'bagian':'layanan', 'selected':'yaninovasi'}))
+        data = list(data.select_related('pegawai', 'inovasi'))
+        for item in data:
+            item.can_process = is_inovasi_admin(request.user, item.pegawai)
         
         riwayat_form = RiwayatInovasiForm(initial=initial_riwayat, request=request)
         form = inovasi_formset(initial=[initial], form_kwargs={'request': request})
@@ -3120,10 +3488,13 @@ class LayananUsulanInovasiView(LoginRequiredMixin, View):
             'title_page':'Layanan Inovasi',
             'selected':'yaninovasi'
         }
+        context['can_manage_inovasi_role'] = can_manage_role
         return render(request, '8_layanan_inovasi/layanan_inovasi_master.html', context)
     
     def post(self, request, *args, **kwargs):
-        riwayat_form = RiwayatInovasiForm(data=request.POST, files=request.POST, request=request)
+        riwayat_form = RiwayatInovasiForm(
+            data=request.POST, files=request.FILES, request=request
+        )
         form = inovasi_formset(data=request.POST, files=request.FILES, form_kwargs={'request': request})
         if riwayat_form.is_valid() and form.is_valid():
             data_riwayat = riwayat_form.save()
@@ -3145,15 +3516,21 @@ class LayananUsulanInovasiUpdateView(LoginRequiredMixin, View):
 
     def dispatch(self, request, *args, **kwargs):
         admin_cases = {'proses', 'sk', 'tl'}
-        if request.GET.get('case') in admin_cases and not request.user.is_inovasi_admin:
+        layanan = self.get_object(kwargs.get('id'))
+        if layanan is None:
+            raise Http404
+        if (
+            request.GET.get('case') in admin_cases
+            and not is_inovasi_admin(request.user, layanan.pegawai)
+        ):
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
 
     def get_object(self, id):
         try:
-            queryset = LayananUsulanInovasi.objects.all()
-            if not self.request.user.is_inovasi_admin:
-                queryset = queryset.filter(pegawai=self.request.user)
+            queryset = filter_inovasi_queryset(
+                LayananUsulanInovasi.objects.all(), self.request.user
+            )
             data = queryset.get(id=id)
             return data
         except LayananUsulanInovasi.DoesNotExist:
@@ -3161,7 +3538,9 @@ class LayananUsulanInovasiUpdateView(LoginRequiredMixin, View):
         
     def get_riwayat_object(self, id):
         try:
-            data = RiwayatInovasi.objects.get(id=id)
+            data = filter_inovasi_queryset(
+                RiwayatInovasi.objects.all(), self.request.user
+            ).get(id=id)
             return data
         except RiwayatInovasi.DoesNotExist:
             return None
@@ -3175,11 +3554,13 @@ class LayananUsulanInovasiUpdateView(LoginRequiredMixin, View):
         card_title = 'Edit Usulan Inovasi'
         form_view = 'block'
         data_view = 'none'
-        if request.user.is_inovasi_admin:
+        layanan_instance = self.get_object(id)
+        if layanan_instance and is_inovasi_admin(
+            request.user, layanan_instance.pegawai
+        ):
             nip = selected_nip
         else:
             nip = get_nip(request.user)  
-        layanan_instance = self.get_object(id)
         if layanan_instance is not None:
             id_riwayat = layanan_instance.inovasi.id if hasattr(layanan_instance, 'inovasi') else None
         riwayat_instance = self.get_riwayat_object(id_riwayat)
@@ -3207,7 +3588,7 @@ class LayananUsulanInovasiUpdateView(LoginRequiredMixin, View):
             card_title = 'Detail Usulan Inovasi'
             data_view = 'block'
             form_view = 'none'
-        elif request.user.is_inovasi_admin:
+        elif is_inovasi_admin(request.user, layanan_instance.pegawai):
             form = full_update_inovasi_formset(instance=riwayat_instance)
             riwayat_form = RiwayatInovasiFullForm(instance=riwayat_instance, request=request)
         context={
@@ -3225,6 +3606,13 @@ class LayananUsulanInovasiUpdateView(LoginRequiredMixin, View):
             'title_page':'Layanan Inovasi',
             'selected':'yaninovasi'
         }
+        context['is_inovasi_scope_admin'] = is_inovasi_admin(
+            request.user, layanan_instance.pegawai
+        )
+        context['can_manage_inovasi_role'] = bool(
+            context['is_inovasi_scope_admin']
+            or is_inovasi_structural_officer(request.user)
+        )
         return render(request, '8_layanan_inovasi/layanan_inovasi_master.html', context)
     
     def post(self, request, *args, **kwargs):
@@ -3248,11 +3636,12 @@ class LayananUsulanInovasiUpdateView(LoginRequiredMixin, View):
         elif get_case == 'tl':
             form = tindaklanjut_inovasi_formset(data=request.POST, files=request.FILES, instance=riwayat_instance, form_kwargs={'request': request})
             riwayat_form = RiwayatInovasiTLForm(data=request.POST, files=request.FILES, instance=riwayat_instance, request=request)
-        elif request.user.is_inovasi_admin:
+        elif is_inovasi_admin(request.user, layanan_instance.pegawai):
             form = full_update_inovasi_formset(data=request.POST, files=request.FILES, instance=riwayat_instance)
             riwayat_form = RiwayatInovasiFullForm(data=request.POST, files=request.FILES, instance=riwayat_instance, request=request)
         if riwayat_form.is_valid() and form.is_valid():
             data_riwayat = riwayat_form.save(commit=False)
+            data_riwayat.pegawai = layanan_instance.pegawai
             if data_riwayat.makalah and riwayat_existing.makalah and riwayat_existing.makalah != data_riwayat.makalah and os.path.exists(riwayat_existing.makalah.path):
                 os.remove(riwayat_existing.makalah.path)
             if data_riwayat.file_sk and riwayat_existing.file_sk and riwayat_existing.file_sk != data_riwayat.file_sk and os.path.exists(riwayat_existing.file_sk.path):
@@ -3287,21 +3676,19 @@ class LayananSIPListView(LoginRequiredMixin, ListView):
     paginate_by = 10
 
     def get_queryset(self):
-        layanan_sip = LayananSIP.objects.filter(pegawai=self.request.user).select_related(
-            "pegawai",
+        return filter_sip_service_queryset(
+            LayananSIP.objects.select_related("pegawai"),
+            self.request.user,
         ).order_by("-created_at")
-
-        if self.request.user.is_sip_admin:
-            layanan_sip = LayananSIP.objects.all().select_related(
-                "pegawai",
-            ).order_by("-created_at")
-
-        return layanan_sip
 
     def get_context_data(self):
         context = super().get_context_data()
         context["card_title"] = "Data Permohonan SIP"
         context["title_page"] = "Layanan SIP"
+        context["can_manage_sip_role"] = bool(
+            is_sip_admin(self.request.user)
+            or is_sip_structural_officer(self.request.user)
+        )
         return context
 
 
@@ -3317,7 +3704,10 @@ class LayananSIPCreateView(LoginRequiredMixin, CreateView):
         return kwargs
 
     def form_valid(self, form):
-        if not self.request.user.is_sip_admin:
+        if not (
+            is_sip_admin(self.request.user)
+            or is_sip_structural_officer(self.request.user)
+        ):
             form.instance.pegawai = self.request.user
         response = super().form_valid(form)
 
@@ -3345,17 +3735,15 @@ class LayananSIPDetailView(LoginRequiredMixin, DetailView):
             "str_profesi",
         )
 
-        # 2. Atur hak akses: Jika BUKAN superuser, kunci hanya untuk datanya sendiri
-        if not self.request.user.is_sip_admin:
-            queryset = queryset.filter(pegawai=self.request.user)
-
-        # JIKA SUPERUSER, biarkan lolos tanpa filter agar bisa melihat detail SIP milik siapa saja
-        return queryset
+        return filter_sip_service_queryset(queryset, self.request.user)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["card_title"] = "Detail Permohonan SIP"
         context["title_page"] = "Layanan SIP"
+        context["is_sip_scope_admin"] = is_sip_admin(
+            self.request.user, self.object.pegawai
+        )
         return context
 
 
@@ -3371,15 +3759,13 @@ class LayananSIPUpdateView(LoginRequiredMixin, UpdateView):
         return kwargs
 
     def get_queryset(self):
-        qs = LayananSIP.objects.all()
-
-        if self.request.user.is_sip_admin:
-            return qs
-
-        return qs.filter(pegawai=self.request.user)
+        return filter_sip_service_queryset(LayananSIP.objects.all(), self.request.user)
 
     def form_valid(self, form):
-        if not self.request.user.is_sip_admin:
+        if not (
+            is_sip_admin(self.request.user)
+            or is_sip_structural_officer(self.request.user)
+        ):
             form.instance.pegawai = self.request.user
 
         return super().form_valid(form)
@@ -3393,10 +3779,7 @@ class LayananSIPUploadRekomendasiView(
     template_name = "layanan_sip/upload_rekomendasi.html"
 
     def test_func(self):
-        return (
-            self.request.user.is_sip_admin
-            or self.get_object().pegawai_id == self.request.user.pk
-        )
+        return can_manage_sip(self.request.user, self.get_object())
 
     def handle_no_permission(self):
         messages.error(self.request, "Anda tidak memiliki akses untuk mengunggah dokumen SKP ini.")
@@ -3419,7 +3802,7 @@ class LayananSIPUploadRekomendasiView(
 
         # Permohonan baru dinyatakan selesai setelah rekomendasi final tersedia.
         if (
-            self.request.user.is_sip_admin
+            is_sip_admin(self.request.user, self.object.pegawai)
             and form.cleaned_data.get("surat_rekomendasi_sip")
         ):
             form.instance.status = "selesai"
@@ -3438,7 +3821,7 @@ class LayananSIPUploadRekomendasiView(
                         robust=True,
                     )
 
-        if self.request.user.is_sip_admin and self.object.surat_rekomendasi_sip:
+        if is_sip_admin(self.request.user, self.object.pegawai) and self.object.surat_rekomendasi_sip:
             message = "Dokumen berhasil diunggah dan status permohonan menjadi selesai."
         else:
             message = "Dokumen rekomendasi SIP berhasil diunggah."
@@ -3452,7 +3835,9 @@ class LayananSIPUploadRekomendasiView(
         context = super().get_context_data(**kwargs)
         context["card_title"] = "Upload/Ganti Dokumen Rekomendasi SIP"
         context["title_page"] = "Layanan SIP"
-        context["is_admin_upload"] = self.request.user.is_sip_admin
+        context["is_admin_upload"] = is_sip_admin(
+            self.request.user, self.object.pegawai
+        )
         context["current_documents"] = [
             {
                 "label": form_field.label,
@@ -3617,7 +4002,10 @@ class PerubahanJadwalCutiVerifikasiView(LoginRequiredMixin, FormView):
             messages.info(request, 'Permohonan perubahan jadwal ini sudah tidak menunggu verifikasi.')
             return redirect('layanan_urls:layanan_cuti_detail', pk=self.perubahan.riwayat_cuti.usulan_id)
         self.current_level = self._get_current_level(request.user)
-        if request.user.is_cuti_admin:
+        if is_leave_admin(
+            request.user,
+            self.perubahan.riwayat_cuti.pegawai,
+        ):
             self.current_level = None
         elif self.current_level is None:
             raise PermissionDenied('Anda bukan verifikator perubahan jadwal ini.')
@@ -3633,7 +4021,10 @@ class PerubahanJadwalCutiVerifikasiView(LoginRequiredMixin, FormView):
         return None
 
     def post(self, request, *args, **kwargs):
-        if request.user.is_cuti_admin:
+        if is_leave_admin(
+            request.user,
+            self.perubahan.riwayat_cuti.pegawai,
+        ):
             messages.info(request, 'Admin cuti berada dalam mode monitoring.')
             return redirect(request.path)
         previous = [
@@ -3704,7 +4095,10 @@ class PerubahanJadwalCutiVerifikasiView(LoginRequiredMixin, FormView):
             'perubahan': self.perubahan,
             'chain': chain,
             'current_level': self.current_level,
-            'is_monitor': self.request.user.is_cuti_admin,
+            'is_monitor': is_leave_admin(
+                self.request.user,
+                self.perubahan.riwayat_cuti.pegawai,
+            ),
             'title_page': 'Verifikasi Perubahan Jadwal Cuti',
             'cuti': 'active',
             'layanan': 'active',
@@ -3718,9 +4112,11 @@ class LayananSIPUploadPersyaratanView(LoginRequiredMixin, FormView):
 
     def dispatch(self, request, *args, **kwargs):
         self.layanan_sip = get_object_or_404(
-            LayananSIP.objects.select_related("pegawai", "ijazah"),
+            filter_sip_service_queryset(
+                LayananSIP.objects.select_related("pegawai", "ijazah"),
+                request.user,
+            ),
             pk=kwargs["pk"],
-            pegawai=request.user,
         )
         return super().dispatch(request, *args, **kwargs)
 
@@ -3749,6 +4145,51 @@ class LayananSIPUploadPersyaratanView(LoginRequiredMixin, FormView):
         return context
 
 
+class PromotionSupportingOptionsView(LoginRequiredMixin, View):
+    """Pilihan dokumen promosi milik pegawai yang boleh dikelola pengguna."""
+
+    model_map = {
+        'pangkat': {
+            'sk_kp_terakhir': RiwayatPanggol,
+            'kinerja_dua_thn': RiwayatKinerja,
+            'sk_jabfung': RiwayatJabatan,
+            'pak': RiwayatPAK,
+            'pendidikan': RiwayatPendidikan,
+            'pengangkatan': RiwayatPengangkatan,
+            'mutasi': RiwayatBekerja,
+        },
+        'jabatan': {
+            'kinerja_dua_thn': RiwayatKinerja,
+            'kompetensi': UjiKompetensi,
+            'pendidikan': RiwayatPendidikan,
+            'str_profesi': RiwayatProfesi,
+            'pak': RiwayatPAK,
+        },
+    }
+
+    def get(self, request, service, employee_id):
+        models = self.model_map.get(service)
+        if models is None:
+            return JsonResponse({'detail': 'Jenis layanan tidak valid.'}, status=404)
+
+        user_filter = (
+            filter_users_for_pangkat_role
+            if service == 'pangkat'
+            else filter_users_for_jabatan_role
+        )
+        employee = get_object_or_404(
+            user_filter(Users.objects.filter(is_active=True), request.user),
+            pk=employee_id,
+        )
+        fields = {}
+        for field_name, model in models.items():
+            fields[field_name] = [
+                {'id': item.pk, 'text': str(item)}
+                for item in model.objects.filter(pegawai=employee).order_by('-id')
+            ]
+        return JsonResponse({'fields': fields})
+
+
 class LayananNaikPangkatListView(LoginRequiredMixin, ListView):
     model = LayananNaikPangkat
     template_name = 'layanan_pangkat/list.html'
@@ -3762,12 +4203,14 @@ class LayananNaikPangkatListView(LoginRequiredMixin, ListView):
             .prefetch_related('kinerja_dua_thn', 'pak')
             .order_by('-created_at')
         )
-        if self.request.user.is_pangkat_admin:
-            return queryset
-        return queryset.filter(pegawai=self.request.user)
+        return filter_pangkat_queryset(queryset, self.request.user)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context['can_manage_pangkat_role'] = bool(
+            is_pangkat_admin(self.request.user)
+            or is_promotion_structural_officer(self.request.user)
+        )
         context.update({
             'card_title': 'Usulan Kenaikan Pangkat',
             'title_page': 'Layanan Kenaikan Pangkat',
@@ -3793,7 +4236,11 @@ class LayananNaikPangkatCreateView(LoginRequiredMixin, CreateView):
             form.add_error(None, 'Jenis layanan kenaikan pangkat belum dikonfigurasi.')
             return self.form_invalid(form)
 
-        form.instance.pegawai = self.request.user
+        if not (
+            is_pangkat_admin(self.request.user)
+            or is_promotion_structural_officer(self.request.user)
+        ):
+            form.instance.pegawai = self.request.user
         form.instance.layanan = layanan
         form.instance.status = 'pengajuan'
         form.instance.is_read = False
@@ -3835,7 +4282,7 @@ class LayananNaikPangkatUpdateView(LoginRequiredMixin, UpdateView):
         form.instance.pegawai = self.request.user
         form.instance.is_read = False
         messages.success(self.request, 'Usulan kenaikan pangkat berhasil diperbarui.')
-        return redirect(self.get_success_url())
+        return super().form_valid(form)
 
     def get_success_url(self):
         return reverse('layanan_urls:layanan_pangkat_detail', kwargs={'pk': self.object.pk})
@@ -3865,12 +4312,13 @@ class LayananNaikPangkatDetailView(LoginRequiredMixin, DetailView):
             )
             .prefetch_related('kinerja_dua_thn', 'pak', 'riwayatpanggol_set')
         )
-        if self.request.user.is_pangkat_admin:
-            return queryset
-        return queryset.filter(pegawai=self.request.user)
+        return filter_pangkat_queryset(queryset, self.request.user)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context['is_pangkat_scope_admin'] = is_pangkat_admin(
+            self.request.user, self.object.pegawai
+        )
         context.update({
             'hasil_pangkat': self.object.riwayatpanggol_set.order_by('-id').first(),
             'card_title': 'Detail Usulan Kenaikan Pangkat',
@@ -3889,14 +4337,17 @@ class LayananNaikPangkatProcessView(
 
     def dispatch(self, request, *args, **kwargs):
         self.usulan = get_object_or_404(
-            LayananNaikPangkat.objects.select_related('pegawai', 'layanan'),
+            filter_pangkat_queryset(
+                LayananNaikPangkat.objects.select_related('pegawai', 'layanan'),
+                request.user,
+            ),
             pk=kwargs['pk'],
         )
         self.hasil = self.usulan.riwayatpanggol_set.order_by('-id').first()
         return super().dispatch(request, *args, **kwargs)
 
     def test_func(self):
-        return self.request.user.is_pangkat_admin
+        return is_pangkat_admin(self.request.user, self.usulan.pegawai)
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -3970,12 +4421,17 @@ class LayananNaikJabatanListView(LoginRequiredMixin, ListView):
             .prefetch_related('kinerja_dua_thn')
             .order_by('-created_at')
         )
-        if self.request.user.is_jabatan_admin:
-            return queryset
-        return queryset.filter(pegawai=self.request.user)
+        return filter_jabatan_queryset(queryset, self.request.user)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context['can_manage_jabatan_role'] = bool(
+            is_jabatan_admin(self.request.user)
+            or is_promotion_structural_officer(self.request.user)
+        )
+        context['can_generate_jabatan_letter'] = is_jabatan_admin(
+            self.request.user
+        )
         context.update({
             'card_title': 'Usulan Kenaikan Jabatan',
             'title_page': 'Layanan Kenaikan Jabatan',
@@ -3992,14 +4448,17 @@ class SuratUsulanJabatanView(
     template_name = 'layanan_jabatan/surat_form.html'
 
     def test_func(self):
-        return self.request.user.is_jabatan_admin
+        return is_jabatan_admin(self.request.user)
 
     def form_valid(self, form):
         periode = datetime.strptime(
             form.cleaned_data['periode'], '%Y-%m-%d'
         ).date()
         usulan = (
-            LayananNaikJabatan.objects.filter(periode=periode)
+            filter_jabatan_queryset(
+                LayananNaikJabatan.objects.filter(periode=periode),
+                self.request.user,
+            )
             .select_related(
                 'pegawai', 'pegawai__profil_user', 'pak', 'kompetensi',
             )
@@ -4053,7 +4512,11 @@ class LayananNaikJabatanCreateView(LoginRequiredMixin, CreateView):
             form.add_error(None, 'Jenis layanan kenaikan jabatan belum dikonfigurasi.')
             return self.form_invalid(form)
 
-        form.instance.pegawai = self.request.user
+        if not (
+            is_jabatan_admin(self.request.user)
+            or is_promotion_structural_officer(self.request.user)
+        ):
+            form.instance.pegawai = self.request.user
         form.instance.layanan = layanan
         form.instance.status = 'pengajuan'
         form.instance.is_read = False
@@ -4125,12 +4588,13 @@ class LayananNaikJabatanDetailView(LoginRequiredMixin, DetailView):
             )
             .prefetch_related('kinerja_dua_thn', 'riwayatjabatan_set')
         )
-        if self.request.user.is_jabatan_admin:
-            return queryset
-        return queryset.filter(pegawai=self.request.user)
+        return filter_jabatan_queryset(queryset, self.request.user)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context['is_jabatan_scope_admin'] = is_jabatan_admin(
+            self.request.user, self.object.pegawai
+        )
         context.update({
             'hasil_jabatan': self.object.riwayatjabatan_set.order_by('-id').first(),
             'card_title': 'Detail Usulan Kenaikan Jabatan',
@@ -4149,14 +4613,17 @@ class LayananNaikJabatanProcessView(
 
     def dispatch(self, request, *args, **kwargs):
         self.usulan = get_object_or_404(
-            LayananNaikJabatan.objects.select_related('pegawai', 'layanan'),
+            filter_jabatan_queryset(
+                LayananNaikJabatan.objects.select_related('pegawai', 'layanan'),
+                request.user,
+            ),
             pk=kwargs['pk'],
         )
         self.hasil = self.usulan.riwayatjabatan_set.order_by('-id').first()
         return super().dispatch(request, *args, **kwargs)
 
     def test_func(self):
-        return self.request.user.is_jabatan_admin
+        return is_jabatan_admin(self.request.user, self.usulan.pegawai)
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()

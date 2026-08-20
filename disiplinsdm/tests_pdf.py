@@ -1,7 +1,8 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from openpyxl import load_workbook
 from io import BytesIO
 
@@ -14,9 +15,17 @@ from strukturorg.models import (
     SubBidang,
     UnitInstalasi,
     UnitOrganisasi,
+    PejabatStruktur,
 )
 
-from .models import AbsensiHarian, JenisSDMPerinstalasi, LogAktivitasAbsen
+from .models import (
+    AbsensiHarian,
+    ApprovedJadwalDinasSDM,
+    DetailKategoriJadwalDinas,
+    JenisSDMPerinstalasi,
+    KategoriJadwalDinas,
+    LogAktivitasAbsen,
+)
 from .services import NewAttendanceOrchestrator
 
 
@@ -52,13 +61,23 @@ class DownloadPresensiBulananPDFViewTests(TestCase):
             unor='RS Mandalika',
         )
         bidang = Bidang.objects.create(unor=cls.unor, bidang='Pelayanan')
+        bagian_tata_usaha = Bidang.objects.create(
+            unor=cls.unor,
+            bidang='Bagian Tata Usaha',
+        )
         sub_bidang = SubBidang.objects.create(bidang=bidang, sub_bidang='Keperawatan')
         cls.instalasi = UnitInstalasi.objects.create(
             sub_bidang=sub_bidang,
             instalasi='Instalasi Pengujian',
         )
+        PejabatStruktur.objects.create(
+            bidang=bagian_tata_usaha,
+            pejabat=cls.admin,
+            nama_jabatan='Kepala Bagian Tata Usaha',
+            tanggal_mulai=date(2025, 1, 1),
+        )
 
-        JenisSDMPerinstalasi.objects.create(
+        employee_metadata = JenisSDMPerinstalasi.objects.create(
             pegawai=cls.employee,
             unor=cls.unor,
             bidang=bidang,
@@ -68,7 +87,7 @@ class DownloadPresensiBulananPDFViewTests(TestCase):
             tahun=2026,
             status='disetujui',
         )
-        AbsensiHarian.objects.create(
+        attendance = AbsensiHarian.objects.create(
             pegawai=cls.employee,
             tanggal=date(2026, 1, 2),
             unor=cls.unor,
@@ -76,6 +95,35 @@ class DownloadPresensiBulananPDFViewTests(TestCase):
             sub_bidang=sub_bidang,
             instalasi=cls.instalasi,
             status_final='HADIR',
+        )
+        schedule_category = KategoriJadwalDinas.objects.create(
+            kategori_dinas='REG',
+        )
+        schedule_detail = DetailKategoriJadwalDinas.objects.create(
+            kategori_dinas=schedule_category,
+            hari='Senin s/d kamis',
+            kategori_jadwal='Pagi',
+            waktu_datang=time(8, 0),
+            waktu_pulang=time(17, 0),
+        )
+        ApprovedJadwalDinasSDM.objects.create(
+            pegawai=employee_metadata,
+            tanggal=date(2026, 1, 2),
+            kategori_jadwal=schedule_detail,
+            is_approved=True,
+            approved_by=cls.admin,
+        )
+        LogAktivitasAbsen.objects.create(
+            absensi_harian=attendance,
+            tipe='DATANG',
+            waktu=timezone.make_aware(datetime(2026, 1, 2, 8, 45)),
+            status_ketepatan='Terlambat Berat',
+        )
+        LogAktivitasAbsen.objects.create(
+            absensi_harian=attendance,
+            tipe='PULANG',
+            waktu=timezone.make_aware(datetime(2026, 1, 2, 16, 30)),
+            status_ketepatan='Cepat Pulang',
         )
         RiwayatPengangkatan.objects.create(
             pegawai=cls.employee,
@@ -152,6 +200,18 @@ class DownloadPresensiBulananPDFViewTests(TestCase):
         worksheet = workbook['Presensi Bulanan']
         self.assertEqual(worksheet['B6'].value, 'Pegawai Contoh')
         self.assertEqual(worksheet['F6'].value, 'H')
+        self.assertEqual(worksheet['AJ5'].value, 'Hadir')
+        self.assertEqual(worksheet['AJ6'].value, 1)
+        self.assertEqual(worksheet['AP6'].value, '00:45')
+        self.assertEqual(worksheet['AQ6'].value, '00:30')
+        self.assertEqual(worksheet['AR6'].value, '01:15')
+        self.assertIn('Pujut,', worksheet['AN11'].value)
+        self.assertEqual(worksheet['AN12'].value, 'Kepala Bagian Tata Usaha,')
+        self.assertEqual(worksheet['AN17'].value, cls.admin.full_name_2)
+        self.assertIn(
+            'Dokumen ini digenerate secara otomatis dari aplikasi SIMADU BERDANSA',
+            worksheet.oddFooter.center.text,
+        )
         self.assertEqual(worksheet.protection.sheet, False)
 
     def test_admin_can_download_all_installations_by_latest_employee_status(self):
@@ -223,7 +283,7 @@ class DownloadPresensiBulananPDFViewTests(TestCase):
         self.assertEqual(attendance.status_final, 'ALPA')
         self.assertIn('jadwal dinas pegawai belum dibuat', attendance.keterangan)
 
-    def test_tapping_without_schedule_still_becomes_alpa_until_schedule_exists(self):
+    def test_reassessment_does_not_overwrite_real_tapping_when_schedule_missing(self):
         target_date = date(2026, 1, 5)
         attendance = AbsensiHarian.objects.create(
             pegawai=self.employee,
@@ -248,5 +308,5 @@ class DownloadPresensiBulananPDFViewTests(TestCase):
 
         self.assertTrue(success)
         attendance.refresh_from_db()
-        self.assertEqual(attendance.status_final, 'ALPA')
-        self.assertIn('jadwal dinas pegawai belum dibuat', attendance.keterangan)
+        self.assertEqual(attendance.status_final, 'HADIR')
+        self.assertIn('log presensi', attendance.keterangan)

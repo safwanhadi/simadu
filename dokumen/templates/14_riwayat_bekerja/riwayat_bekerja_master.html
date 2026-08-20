@@ -30,9 +30,9 @@
                     </div>
                     {% if not update_form %}
                     <div>
-                        {% if request.user.is_dokumen_admin and not nip %}
+                        {% if can_manage_document_scope and not nip %}
                         <a href="{% url 'riwayat_urls:riwayat_bekerja_urutkan' pk=dok.id %}" class="btn btn-outline-info">Urutkan Dokumen</a>
-                        {% elif request.user.is_dokumen_admin and nip %}
+                        {% elif can_manage_document_scope and nip %}
                         <a href="{% url 'riwayat_urls:riwayat_bekerja_urutkan' pk=dok.id %}?nip={{nip}}" class="btn btn-outline-info">Urutkan Dokumen</a>
                         {% endif %}
                         <input type="button" class="btn btn-outline-success" id="add_data" value="Tambah Data">
@@ -54,7 +54,7 @@
                     <div class="col-md-12">
                         {% if nip %}
                             {% include '14_riwayat_bekerja/riwayat_bekerja_perorang.html' %}
-                        {% elif request.user.is_dokumen_admin  %}
+                        {% elif can_manage_document_scope  %}
                             {% include '14_riwayat_bekerja/riwayat_bekerja.html' %}
                         {% endif %}
                     </div>

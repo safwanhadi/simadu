@@ -1078,12 +1078,66 @@ class NewAttendanceMappingService:
         # 3. PREPARASI DATA DETAIL CHILD (ANTI-DOUBLE TAP LINTAS HARI)
         # -------------------------------------------------------------------------
         seen_minutes = set()
-        existing_details_qs = LogAktivitasAbsen.objects.filter(
+        # Cari signature berdasarkan waktu fisik log, bukan tanggal parent.
+        # Log pulang shift malam dipindahkan dari parent H+1 ke H; pembatasan
+        # berdasarkan parent akan membuat log mentah yang sama dibuat kembali
+        # ketika penilaian H+1 dijalankan.
+        existing_details = list(LogAktivitasAbsen.objects.filter(
             absensi_harian__pegawai_id__in=user_ids,
-            absensi_harian__tanggal__in=[target_date, esok_hari]
-        ).values_list('absensi_harian__pegawai_id', 'waktu')
-        
-        for p_id_exist, dt_exist in existing_details_qs:
+            waktu__range=(start_dt, end_dt),
+        ).select_related('absensi_harian').order_by('pk'))
+
+        # Pulihkan data yang sudah telanjur terduplikasi oleh versi lama.
+        # Jika timestamp PULANG yang sama ada di parent tanggal fisik dan H-1,
+        # parent H-1 adalah hasil rekonsiliasi shift malam yang harus dipertahankan.
+        details_by_signature = defaultdict(list)
+        for detail in existing_details:
+            detail_local = (
+                timezone.localtime(detail.waktu)
+                if timezone.is_aware(detail.waktu)
+                else detail.waktu
+            )
+            signature = (
+                detail.absensi_harian.pegawai_id,
+                detail_local.strftime('%Y-%m-%d %H:%M'),
+                detail.tipe,
+            )
+            details_by_signature[signature].append(detail)
+
+        duplicate_ids_to_delete = []
+        for details in details_by_signature.values():
+            if len(details) < 2:
+                continue
+            physical_date = (
+                timezone.localtime(details[0].waktu).date()
+                if timezone.is_aware(details[0].waktu)
+                else details[0].waktu.date()
+            )
+            previous_parent = next((
+                detail for detail in details
+                if detail.tipe == 'PULANG'
+                and detail.absensi_harian.tanggal == physical_date - timedelta(days=1)
+            ), None)
+            keeper = previous_parent or next((
+                detail for detail in details
+                if detail.absensi_harian.tanggal == physical_date
+            ), details[0])
+            duplicate_ids_to_delete.extend(
+                detail.pk for detail in details if detail.pk != keeper.pk
+            )
+
+        if duplicate_ids_to_delete:
+            LogAktivitasAbsen.objects.filter(
+                pk__in=duplicate_ids_to_delete
+            ).delete()
+            existing_details = [
+                detail for detail in existing_details
+                if detail.pk not in duplicate_ids_to_delete
+            ]
+
+        for detail in existing_details:
+            p_id_exist = detail.absensi_harian.pegawai_id
+            dt_exist = detail.waktu
             dt_local = timezone.localtime(dt_exist) if timezone.is_aware(dt_exist) else dt_exist
             minute_str_exist = dt_local.strftime('%Y-%m-%d %H:%M')
             seen_minutes.add(f"{p_id_exist}-{minute_str_exist}")
@@ -1216,11 +1270,19 @@ class NewAttendanceReconciliationService:
             # jadwal_kerja di sini ADALAH objek DetailKategoriJadwalDinas langsung
             jadwal_kerja = approved_schedules.get(sdm_id) or draft_schedules.get(sdm_id)
             if not jadwal_kerja or not jadwal_kerja.waktu_datang or not jadwal_kerja.waktu_pulang:
+                kategori_dinas = (
+                    getattr(getattr(jadwal_kerja, 'kategori_dinas', None), 'kategori_dinas', '')
+                    if jadwal_kerja else ''
+                )
+                is_jadwal_libur = 'libur' in (kategori_dinas or '').lower()
                 for log in logs:
                     if log.absensi_harian.tanggal == target_date:
                         log.status_ketepatan = 'Luar Jadwal'
                         child_updates.append(log)
-                        parent_ids_to_present.add(log.absensi_harian_id)
+                        # Log PULANG lanjutan shift malam tidak boleh mengubah
+                        # Lepas Piket/Libur menjadi HADIR pada hari berikutnya.
+                        if not is_jadwal_libur:
+                            parent_ids_to_present.add(log.absensi_harian_id)
                 continue
 
             is_shift_malam = jadwal_kerja.waktu_pulang < jadwal_kerja.waktu_datang
@@ -1576,7 +1638,10 @@ class NewAttendanceOrchestrator:
                     pegawai_id__in=jadwal_libur_ids,
                     tanggal=target_date
                 ).exclude(
-                    status_final__in=['HADIR', 'IZIN', 'DINAS']
+                    status_final__in=['IZIN', 'DINAS']
+                ).filter(
+                    ~Q(status_final='HADIR')
+                    | Q(keterangan__startswith='Sistem: Hadir')
                 )
 
                 total_libur_processed = libur_parents.count()
@@ -1609,13 +1674,20 @@ class NewAttendanceOrchestrator:
                     keterangan="Sistem: Mangkir. Hari kerja aktif tetapi tidak ditemukan log tapping mesin hingga batas waktu evaluasi."
                 )
 
-                # Hari kerja biasa tanpa jadwal tetap dinilai ALPA, tetapi
-                # keterangannya dibedakan dari mangkir pada jadwal aktif.
+                # Hari kerja biasa tanpa jadwal hanya boleh dinilai ALPA jika
+                # benar-benar tidak mempunyai tapping nyata. Rekonsiliasi di
+                # tahap sebelumnya dapat menetapkan HADIR + "Luar Jadwal";
+                # keputusan itu tidak boleh ditimpa hanya karena jadwal belum
+                # dibuat/disetujui.
                 jadwal_kosong_parents = AbsensiHarian.objects.filter(
                     pegawai_id__in=jadwal_belum_dibuat_ids,
                     tanggal=target_date,
                 ).exclude(
-                    status_final__in=['IZIN', 'DINAS'],
+                    status_final__in=['HADIR', 'IZIN', 'DINAS'],
+                ).annotate(
+                    has_real_log=Exists(real_log_exists),
+                ).filter(
+                    has_real_log=False,
                 )
 
                 total_tk_jadwal_kosong = jadwal_kosong_parents.count()

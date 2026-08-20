@@ -1,17 +1,23 @@
 {% extends 'base.html' %}
+{% load static %}
 {% load crispy_forms_tags %}
 
+{% block styles %}
+<link rel="stylesheet" href="{% static 'src/service-module.css' %}">
+{% endblock styles %}
+
 {% block content %}
+<div class="service-shell">
 <div class="row justify-content-center">
     <div class="col-lg-7">
-        <div class="card card-solid">
+        <div class="card service-card">
             <div class="card-header">
-                <h5 class="mb-0">{{ card_title }}</h5>
+                <h5 class="service-page-title"><i class="fas fa-file-word text-primary mr-2"></i>{{ card_title }}</h5>
             </div>
             <form method="post">
                 {% csrf_token %}
                 <div class="card-body">
-                    <div class="alert alert-info">
+                    <div class="alert alert-info service-form-note">
                         Dokumen berisi surat pengantar dan lampiran seluruh pengusul
                         yang berada pada periode pilihan. Periksa kembali data jabatan
                         yang diusulkan sebelum mengunduh surat. Placeholder nomor,
@@ -21,8 +27,8 @@
                     {{ form|crispy }}
                 </div>
                 <div class="card-footer d-flex justify-content-between">
-                    <a href="{% url 'layanan_urls:layanan_jabatan_list' %}" class="btn btn-secondary">
-                        Kembali
+                    <a href="{% url 'layanan_urls:layanan_jabatan_list' %}" class="btn btn-outline-secondary">
+                        <i class="fas fa-arrow-left mr-1"></i>Kembali
                     </a>
                     <button type="submit" class="btn btn-success">
                         <i class="fas fa-file-word mr-1"></i>Generate dan Download DOCX
@@ -31,5 +37,6 @@
             </form>
         </div>
     </div>
+</div>
 </div>
 {% endblock content %}

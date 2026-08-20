@@ -5,6 +5,7 @@ from django.db.models.signals import pre_save
 from django.template.defaultfilters import slugify
 from django.db.models import Sum, Case, When, F, Q, Count
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 from datetime import datetime, timedelta, date
 from .utils import hitung_standar_jam_kerja, hitung_standar_max_jam_kerja, jam_standar_min_hari, jam_standar_max_hari
 
@@ -79,6 +80,56 @@ class HariLibur(models.Model):
 
     def __str__(self):
         return f"{self.tanggal} - {self.keterangan}"
+
+
+class PolaKerjaPegawai(models.Model):
+    REGULER = 'reguler'
+    SHIFT = 'shift'
+    POLA_KERJA_CHOICES = (
+        (REGULER, 'Reguler'),
+        (SHIFT, 'Shift'),
+    )
+
+    pegawai = models.ForeignKey(
+        'myaccount.Users',
+        on_delete=models.CASCADE,
+        related_name='riwayat_pola_kerja',
+    )
+    pola_kerja = models.CharField(max_length=10, choices=POLA_KERJA_CHOICES)
+    berlaku_mulai = models.DateField()
+    berlaku_sampai = models.DateField(null=True, blank=True)
+    keterangan = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('-berlaku_mulai', '-pk')
+        verbose_name = 'Pola kerja pegawai'
+        verbose_name_plural = 'Riwayat pola kerja pegawai'
+
+    def __str__(self):
+        return f'{self.pegawai} - {self.get_pola_kerja_display()}'
+
+    def clean(self):
+        super().clean()
+        if self.berlaku_sampai and self.berlaku_sampai < self.berlaku_mulai:
+            raise ValidationError({
+                'berlaku_sampai': 'Tanggal selesai tidak boleh sebelum tanggal mulai.'
+            })
+
+        if not self.pegawai_id or not self.berlaku_mulai:
+            return
+        overlaps = type(self).objects.filter(
+            pegawai_id=self.pegawai_id,
+            berlaku_mulai__lte=self.berlaku_sampai or date.max,
+        ).filter(
+            Q(berlaku_sampai__isnull=True)
+            | Q(berlaku_sampai__gte=self.berlaku_mulai)
+        )
+        if self.pk:
+            overlaps = overlaps.exclude(pk=self.pk)
+        if overlaps.exists():
+            raise ValidationError('Periode pola kerja pegawai tidak boleh tumpang tindih.')
 
 STATUS_CHOICES = [
     ('draft', 'Draft'),

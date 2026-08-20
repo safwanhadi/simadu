@@ -59,11 +59,14 @@ def get_latest_str_records(user, today=None):
         return []
 
     today = today or date.today()
+    records = RiwayatProfesi.objects
+    if not (user.is_superuser or user.is_dokumen_admin):
+        records = records.filter(pegawai=user)
     records = (
-        RiwayatProfesi.objects
-        .filter(pegawai=user)
-        .select_related('profesi')
+        records
+        .select_related('pegawai', 'pegawai__profil_user', 'profesi')
         .order_by(
+            'pegawai_id',
             'profesi_id',
             F('tgl_str').desc(nulls_last=True),
             F('str_seumur_hidup').desc(),
@@ -76,7 +79,7 @@ def get_latest_str_records(user, today=None):
     seen_professions = set()
     for str_record in records:
         profession_key = (
-            ('profesi', str_record.profesi_id)
+            ('pegawai_profesi', str_record.pegawai_id, str_record.profesi_id)
             if str_record.profesi_id
             else ('record', str_record.pk)
         )
