@@ -1,3 +1,4 @@
+from myaccount.models import CoordinationAssignment
 from strukturorg.services import get_active_leader, get_active_title
 
 
@@ -43,8 +44,22 @@ def get_jabatan_unit(user) -> tuple[str, str]:
 
 def resolve_atasan_level3_for_level4(user):
     """
-    Jika user penempatan aktif level4 => atasan aktif pada struktur level4.
+    Prioritaskan atasan langsung eksplisit; gunakan struktur level4 sebagai fallback.
     """
+    direct_assignment = (
+        CoordinationAssignment.objects.filter(
+            employee=user,
+            relation_type=CoordinationAssignment.DIRECT_SUPERVISOR,
+            is_active=True,
+            coordinator__is_active=True,
+        )
+        .select_related('coordinator')
+        .order_by('-valid_from', '-pk')
+        .first()
+    )
+    if direct_assignment:
+        return direct_assignment.coordinator
+
     rp = get_rp_aktif(user)
     if not rp:
         return None

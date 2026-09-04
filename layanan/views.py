@@ -101,7 +101,7 @@ from .models import (
     LayananNaikPangkat,
     LayananNaikJabatan,
 )
-from myaccount.models import Users
+from myaccount.models import CoordinationAssignment, Users
 from dokumen.models import (
     DokumenSDM, 
     RiwayatCuti, 
@@ -486,6 +486,10 @@ class RiwayatLayananCutiView(LoginRequiredMixin, CheckCuti, ListView):
                     pejabat=self.request.user,
                     is_active=True,
                 ).exists()
+                or CoordinationAssignment.objects.filter(
+                    coordinator=self.request.user,
+                    is_active=True,
+                ).exists()
             ),
         })
         return ctx
@@ -552,6 +556,10 @@ class RiwayatCutiBawahanView(LoginRequiredMixin, UserPassesTestMixin, ListView):
                 is_leave_admin(self.request.user)
                 or PejabatStruktur.objects.filter(
                     pejabat=self.request.user,
+                    is_active=True,
+                ).exists()
+                or CoordinationAssignment.objects.filter(
+                    coordinator=self.request.user,
                     is_active=True,
                 ).exists()
             ),
@@ -866,7 +874,8 @@ class LayananCutiCreateView(LoginRequiredMixin, CheckCuti, CreateView):
                     )
                 if not self.cek_waktu_pengajuan_cuti(tgl_mulai_cuti, status_pegawai):
                     raise CutiSubmissionError(
-                        "Mohon maaf waktu pengajuan cuti Anda terlalu mepet atau tidak sesuai."
+                        "Pegawai PNS harus mengajukan cuti tahunan minimal 7 hari "
+                        "sebelum tanggal mulai cuti."
                     )
 
                 # if lama_cuti <= 0: user boleh buat cuti dengan lama cuti 0 nanti akan divalidasi di saat verifikasi pimpinan
@@ -1200,8 +1209,8 @@ class PelimpahanTugasCreateView(LoginRequiredMixin, CreateView):
         obj.persetujuan_atasan = "belum"
         obj.catatan_atasan = ""
         
-        # aturan: jika pemberi level4 => set atasan (level3) sebagai penyetuju
-        # jika pemberi level3+ => persetujuan atasan tidak diperlukan => auto "disetujui"
+        # Atasan langsung eksplisit diprioritaskan. Jika tidak ada, pegawai
+        # level4 tetap menggunakan pimpinan struktur sebagai penyetuju.
         if obj.requires_atasan_approval():
             obj.butuh_persetujuan_atasan = True
             obj.atasan_penyetuju = resolve_atasan_level3_for_level4(obj.pemberi_tugas)
@@ -3090,6 +3099,10 @@ class PenugasanDiklatCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateV
                 pejabat__is_active=True,
                 is_active=True,
             ).exists()
+            or CoordinationAssignment.objects.filter(
+                coordinator=self.request.user,
+                is_active=True,
+            ).exists()
         )
     
     def get_form_kwargs(self):
@@ -3145,6 +3158,10 @@ class LayananUsulanDiklatStaffView(LoginRequiredMixin, UserPassesTestMixin, List
             or PejabatStruktur.objects.filter(
                 pejabat=self.request.user,
                 pejabat__is_active=True,
+                is_active=True,
+            ).exists()
+            or CoordinationAssignment.objects.filter(
+                coordinator=self.request.user,
                 is_active=True,
             ).exists()
         )

@@ -11,10 +11,10 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 import os
 from pathlib import Path
-from tkinter import FALSE
 from django.contrib import messages
 from decouple import config
-from .scopes import Scopes
+
+from sisdm.scopes import Scopes
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -24,12 +24,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-%jc$sjzf58i)dhokb41uoqs%!j%xjkin6cd@f@#xxh3ei8yw*e'
+# SECRET_KEY = '6iu!he%jc$sjzf58i)dhokb41uoqs%!j%xjkin6cd@f@#xxh3ei8yw*e'
+SECRET_KEY = config('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [
+    'simadu.rsmandalika.com', 
+    'www.simadu.rsmandalika.com', 
+    '202.46.155.236', 
+    'localhost', 
+    '127.0.0.1'
+]
 
 
 # Application definition
@@ -70,10 +77,6 @@ INSTALLED_APPS = [
 
 AUTH_USER_MODEL = 'myaccount.Users'
 
-# Kontak publik yang ditampilkan pada halaman Kebijakan Privasi. Isi variabel
-# PRIVACY_CONTACT_EMAIL di environment production dengan alamat resmi pengelola.
-PRIVACY_CONTACT_EMAIL = config('PRIVACY_CONTACT_EMAIL', default='')
-
 # Integrasi Bot Telegram untuk pemulihan password. Rahasia hanya disimpan di
 # environment dan tidak boleh ditulis langsung ke source code.
 TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='')
@@ -85,6 +88,9 @@ TELEGRAM_PUBLIC_BASE_URL = config(
 ).rstrip('/')
 TELEGRAM_RESET_COOLDOWN = 60
 PASSWORD_RESET_TIMEOUT = 30 * 60
+# Kontak publik yang ditampilkan pada halaman Kebijakan Privasi. Isi variabel
+# PRIVACY_CONTACT_EMAIL di environment production dengan alamat resmi pengelola.
+PRIVACY_CONTACT_EMAIL = config('PRIVACY_CONTACT_EMAIL', default='')
 SIP_EXPIRY_REMINDER_MONTHS = config(
     'SIP_EXPIRY_REMINDER_MONTHS',
     default=6,
@@ -99,7 +105,6 @@ ACCOUNT_LOGIN_METHODS = {'email'}
 
 # Karena Anda tidak menggunakan username:
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
-
 CRISPY_TEMPLATE_PACK = 'bootstrap4'
 
 MIDDLEWARE = [
@@ -112,7 +117,6 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'allauth.account.middleware.AccountMiddleware',
 ]
-
 
 ROOT_URLCONF = 'sisdm.urls'
 
@@ -220,15 +224,17 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 20,
 }
 
+
+
 # Internationalization
 # https://docs.djangoproject.com/en/5.0/topics/i18n/
 
-LANGUAGE_CODE = 'id'
+LANGUAGE_CODE = 'id-id'
 
 USE_I18N = True
 
 USE_TZ = False
-TIME_ZONE = 'Asia/Makassar'
+TIME_ZONE = 'Asia/Makassar'  # atau zona waktu kamu
 
 
 # Static files (CSS, JavaScript, Images)
@@ -263,8 +269,6 @@ MESSAGE_TAGS = {
 
 X_FRAME_OPTIONS = 'SAMEORIGIN'
 
-ALLOW_CUTI_TUNDA = True
-
 TINYMCE_DEFAULT_CONFIG = {
     "height": "320px",
     #"width": "960px",
@@ -281,30 +285,34 @@ TINYMCE_DEFAULT_CONFIG = {
 }
 
 # SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-# SECURE_SSL_REDIRECT = True
-# SESSION_COOKIE_SECURE = True
+# ACCOUNT_DEFAULT_HTTP_PROTOCOL = "https"  # Force allauth to use https
+CSRF_COOKIE_HTTPONLY = True
 # CSRF_COOKIE_SECURE = True
+# SECURE_SSL_REDIRECT = True
+SESSION_COOKIE_HTTPONLY = True
+# SESSION_COOKIE_SECURE = True
 
-# LOGGING = {
-#     'version': 1,
-#     'disable_existing_loggers': False,
-#     'handlers': {
-#         'file': {
-#             'level': 'ERROR',
-#             'class': 'logging.FileHandler',
-#             'filename': '/home/mandalikahospital/sisdm_upload/error.log',
-#         },
-#     },
-#     'loggers': {
-#         'django': {
-#             'handlers': ['file'],
-#             'level': 'ERROR',
-#             'propagate': True,
-#         },
-#     },
-# }
+"""
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'file': {
+            'level': 'ERROR',
+            'class': 'logging.FileHandler',
+            'filename': '/home/mandalikahospital/sisdm_upload/error.log',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['file'],
+            'level': 'ERROR',
+            'propagate': True,
+        },
+    },
+}
 
-
+"""
 
 """
 cara menampilkan logging di veiw
@@ -334,24 +342,49 @@ APP_VISUAL = {
         "bg_class": "bg-gradient-to-br from-indigo-500 to-indigo-600",
         "category": "Kepegawaian",
     },
-    "remun": {
-        "icon": "fas fa-coins",
-        "bg_class": "bg-gradient-to-br from-emerald-500 to-teal-600",
-        "category": "Keuangan",
-    },
     "simrs": {
-        "icon": "fas fa-hospital",
+        "icon": "fas fa-hospital-user",
         "bg_class": "bg-gradient-to-br from-blue-500 to-teal-600",
         "category": "Rekam Medis",
     },
     "admin_epasien": {
         "icon": "fas fa-user-injured", 
         "bg_class": "bg-gradient-to-br from-cyan-500 to-blue-600",
-        "category": "Admin Epasien",
+        "category": "Admin MandaCare",
+    },
+    "remun": {
+        "icon": "fas fa-coins",
+        "bg_class": "bg-gradient-to-br from-emerald-500 to-teal-600",
+        "category": "Keuangan",
+    },
+    "dashboard": {
+        "icon": "fas fa-chart-line",
+        "bg_class": "bg-gradient-to-br from-green-500 to-teal-600",
+        "category": "Dashboard",
+    },
+    "anggaran": {
+        "icon": "fas fa-balance-scale",
+        "bg_class": "bg-gradient-to-br from-amber-500 to-teal-600",
+        "category": "Keuangan",
+    },
+    "perencanaan": {
+        "icon": "fas fa-clipboard-list",
+        "bg_class": "bg-gradient-to-br from-yellow-500 to-teal-600",
+        "category": "Perencanaan",
+    },
+    "aset": {
+        "icon": "fas fa-boxes",
+        "bg_class": "bg-gradient-to-br from-amber-500 to-teal-600",
+        "category": "Aset",
+    },
+    "pemeliharaan": {
+        "icon": "fas fa-wrench",
+        "bg_class": "bg-gradient-to-br from-red-500 to-teal-600",
+        "category": "Pemeliharaan",
     },
     "koperasi": {
-        "icon": "fas fa-balance-scale", # Diambil dari simbol timbangan pada logo Koperasi
-        "bg_class": "bg-gradient-to-br from-amber-500 to-orange-600",
+        "icon": "fas fa-balance-scale",
+        "bg_class": "bg-gradient-to-br from-blue-500 to-teal-600",
         "category": "Koperasi & Syariah",
     },
     "datahub": {
@@ -367,72 +400,113 @@ SSO_CLIENTS = {
         "label": "SIMADU",
         "type": "local",  # login internal SIMADU
         "dashboard": "/",
-        "client_id": None,  # tidak perlu client_id untuk aplikasi lokal
         "dashboard_absensi": "/dashboard-absensi/",
-        "login_url":None,
+        "login_url": None,
+    },"simrs": {
+        "label": "SIMRS",
+        "type": "oauth_client",
+        # ini DIDAPAT dari DOT Application untuk SIMRS (client_id + redirect_uri)
+        "client_id": config("SIMRS_CLIENT_ID"),
+        "redirect_uri": "http://simrs.rsmandalika.com/callback/",
+        "login_url": None,
+        "scopes": "read:rm_read write:rm_write",
+    },
+    "admin_epasien": {
+        "label": "MANDACARE",
+        "type": "oauth_client",
+        "client_id": config("EPASIEN_CLIENT_ID"),
+        "redirect_uri": "http://mandacare.rsmandalika.com/admin-web/sso/callback/",
+        "login_url": "https://mandacare.rsmandalika.com/admin-web/sso/login/",
+        "scopes": "read:pasien",
     },
     "remun": {
         "label": "REMUNERASI",
         "type": "oauth_client",
         # ini DIDAPAT dari DOT Application untuk REMUN (client_id + redirect_uri)
-        "client_id": config("CLIENT_ID_REMUN"),
-        "redirect_uri": "http://127.0.0.1:8001/callback/",
-        "login_url":None,
+        "client_id": config("REMUN_CLIENT_ID"),
+        "redirect_uri": "http://simrs.rsmandalika.com/callback/",
+        "login_url": None,
         "scopes": "read:pegawai",
     },
-    "simrs": {
-        "label": "SIMRS",
+    "anggaran": {
+        "label": "ANGGARAN",
         "type": "oauth_client",
-        # ini DIDAPAT dari DOT Application untuk SIMRS (client_id + redirect_uri)
-        "client_id": config("SIMRS_CLIENT_ID"),
-        "redirect_uri": "http://127.0.0.1:8002/callback/",
-        "login_url":None,
-        "scopes": "read:rm_read write:rm_write",
+        # ini DIDAPAT dari DOT Application untuk ANGGARAN (client_id + redirect_uri)
+        "client_id": config("ANGGARAN_CLIENT_ID"),
+        "redirect_uri": "http://simrs.rsmandalika.com/callback/",
+        "login_url": None,
+        "scopes": "read:anggaran",
     },
-    "admin_epasien": {
-        "label": "EPASIEN",
+    "perencanaan": {
+        "label": "PERENCANAAN",
         "type": "oauth_client",
-        "client_id": config("EPASIEN_CLIENT_ID"),
-        "redirect_uri": "http://127.0.0.1:8003/callback/",
-        "login_url": "http://127.0.0.1:8005/admin-web/sso/login/",
-        "scopes": "read:pasien",
+        # ini DIDAPAT dari DOT Application untuk PERENCANAAN (client_id + redirect_uri)
+        "client_id": config("PERENCANAAN_CLIENT_ID"),
+        "redirect_uri": "http://simrs.rsmandalika.com/callback/",
+        "login_url": None,
+        "scopes": "read:perencanaan",
+    },
+    "aset": {
+        "label": "ASET",
+        "type": "oauth_client",
+        # ini DIDAPAT dari DOT Application untuk aset (client_id + redirect_uri)
+        "client_id": config("ASET_CLIENT_ID"),
+        "redirect_uri": "http://simrs.rsmandalika.com/callback/",
+        "login_url": None,
+        "scopes": "read:aset",
+    },
+    "dashboard": {
+        "label": "DASHBOARD",
+        "type": "oauth_client",
+        # ini DIDAPAT dari DOT Application untuk DASHBOARD (client_id + redirect_uri)
+        "client_id": config("DASHBOARD_CLIENT_ID"),
+        "redirect_uri": "https://dash.rsmandalika.com/callback/",
+        "login_url": None,
+        "scopes": "read:dash",
+    },
+    "pemeliharaan": {
+        "label": "PEMELIHARAAN",
+        "type": "oauth_client",
+        # ini DIDAPAT dari DOT Application untuk pemeliharaan (client_id + redirect_uri)
+        "client_id": config("PEMELIHARAAN_CLIENT_ID"),
+        "redirect_uri": "http://simrs.rsmandalika.com/callback/",
+        "login_url": None,
+        "scopes": "read:pemeliharaan",
     },
     "koperasi": {
         "label": "KOPERASI",
         "type": "oauth_client",
         "client_id": config("KOPERASI_CLIENT_ID"),
         "redirect_uri": "http://127.0.0.1:3000/api/auth/callback/django-oauth2",
-        "login_url":None,
+        "login_url": None,
         "scopes": "read:koperasi",
     },
     "datahub": {
         "label": "DATAHUB",
         "type": "oauth_client",
-        "client_id": config("DATAHUB_CLIENT_ID", default=""),
-        "redirect_uri": "http://127.0.0.1:8000/accounts/callback/",
-        "login_url": None,
-        "scopes": "read:pegawai read:dash",
+        "client_id": config("DASHBOARD_CLIENT_ID"),
+        "redirect_uri": "https://datahub.rsmandalika.com/accounts/callback/",
+        "login_url": "https://datahub.rsmandalika.com/accounts/simadu/launch/",
+        "scopes": "read:pegawai",
     },
     # tambah aplikasi lain tinggal copy ini
 }
-SSO_AUTH_BASE = "http://127.0.0.1:8000"  # base SIMADU sendiri
-PRESENSI_BASE_URL = "http://127.0.0.1:5000"  # base Flask Bridge untuk presensi
+SSO_AUTH_BASE = "https://simadu.rsmandalika.com"  # base SIMADU sendiri
+PRESENSI_BASE_URL = "http://172.16.16.19"  # base Flask Bridge untuk presensi
+
+# "SCOPES": {
+#         "read": "Read basic data",
+#         "profile": "Read user profile",
+#         'read_attlog': 'Melihat data absensi',
+#         'sync_attlog': 'Menandai data sudah sinkron',
+#         'manage_attlog': 'Menghapus atau memodifikasi data',
+#     }
 
 OAUTH2_PROVIDER = {
     "ACCESS_TOKEN_EXPIRE_SECONDS": 3600,
     "REFRESH_TOKEN_EXPIRE_SECONDS": 7 * 24 * 3600,
     "SCOPES": Scopes.as_choices(),
-    # 'OIDC_ENABLED': True,
-    # 'INTROSPECTION_REQUIRE_CLIENT_CREDENTIALS': True,
 }
-
-# "SCOPES": {
-#     "read_pegawai": "Read basic data",
-#     "profile_pegawai": "Read user profile",
-#     'read_attlog': 'Melihat data absensi',
-#     'sync_attlog': 'Menandai data sudah sinkron',
-#     'manage_attlog': 'Menghapus atau memodifikasi data',
-# }
 
 
 CACHES = {
@@ -448,8 +522,6 @@ CACHES = {
 SESSION_COOKIE_NAME="simadu_sessionid"
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 SESSION_CACHE_ALIAS = "default"
-# pilih TRUE untuk produksi agar cookie hanya dikirim via HTTPS, tapi untuk testing di localhost biarkan False
-SESSION_COOKIE_SECURE=False
 
 Q_CLUSTER = {
     'name': 'simadu',

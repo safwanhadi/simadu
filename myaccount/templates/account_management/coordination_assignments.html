@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row">
+  <div class="col-lg-4"><div class="card card-warning card-outline">
+    <div class="card-header"><h3 class="card-title">Tambah Penugasan Koordinasi</h3></div>
+    <form method="post" novalidate>{% csrf_token %}<div class="card-body">
+      <div class="alert alert-info py-2">Tidak mengubah jabatan struktural maupun penempatan pegawai.</div>
+      {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+      {% for field in form %}<div class="form-group"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div>{% endfor %}
+    </div><div class="card-footer d-flex justify-content-between"><a href="{% url 'myaccount_urls:account_management_list' %}" class="btn btn-secondary">Kembali</a><button class="btn btn-warning" type="submit">Simpan Penugasan</button></div></form>
+  </div></div>
+  <div class="col-lg-8"><div class="card"><div class="card-header"><h3 class="card-title">Daftar Penugasan</h3></div><div class="card-body">
+    <div class="btn-group mb-3"><a href="?status=active" class="btn btn-sm {% if status == 'active' %}btn-success{% else %}btn-outline-success{% endif %}">Aktif</a><a href="?status=inactive" class="btn btn-sm {% if status == 'inactive' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">Riwayat</a><a href="?status=all" class="btn btn-sm {% if status == 'all' %}btn-primary{% else %}btn-outline-primary{% endif %}">Semua</a></div>
+    <div class="table-responsive"><table class="table table-bordered table-hover table-sm"><thead><tr><th>Koordinator/Atasan</th><th>Pegawai/Staf</th><th>Hubungan</th><th>Masa Berlaku</th><th>Aksi</th></tr></thead><tbody>
+    {% for assignment in assignment_list %}<tr>
+      <td>{{ assignment.coordinator.full_name_2|default:assignment.coordinator.email }}</td><td>{{ assignment.employee.full_name_2|default:assignment.employee.email }}</td>
+      <td>{{ assignment.get_relation_type_display }}{% if assignment.notes %}<br><small class="text-muted">{{ assignment.notes }}</small>{% endif %}</td>
+      <td>{{ assignment.valid_from|date:'d M Y' }}{% if assignment.valid_until %}<br><small>s.d. {{ assignment.valid_until|date:'d M Y' }}</small>{% endif %}</td>
+      <td>{% if assignment.is_active %}<form method="post" action="{% url 'myaccount_urls:coordination_assignment_deactivate' pk=assignment.pk %}" onsubmit="return confirm('Akhiri penugasan ini?');">{% csrf_token %}<div class="input-group input-group-sm"><input type="date" name="valid_until" value="{{ today|date:'Y-m-d' }}" min="{{ assignment.valid_from|date:'Y-m-d' }}" max="{{ today|date:'Y-m-d' }}" class="form-control" required><div class="input-group-append"><button class="btn btn-outline-danger" type="submit">Akhiri</button></div></div></form>{% else %}<span class="badge badge-secondary">Selesai</span>{% endif %}</td>
+    </tr>{% empty %}<tr><td colspan="5" class="text-center text-muted">Belum ada penugasan.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div></div></div>
+</div>
+{% endblock %}
+{% block script %}<script>$(function(){$('.select2').select2({theme:'bootstrap4',width:'100%'});});</script>{% endblock script %}

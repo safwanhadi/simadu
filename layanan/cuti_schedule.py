@@ -10,6 +10,11 @@ from myaccount.models import Users
 
 from .models import PelimpahanTugas, PerubahanJadwalCuti, VerifikasiCuti
 from .services import CheckCuti
+from .cuti_calendar import (
+    PolaKerjaTidakDitemukan,
+    get_pola_kerja_aktif,
+    hitung_lama_cuti_tahunan,
+)
 
 
 def _iso(value):
@@ -72,6 +77,30 @@ def _validate_capacity(change, riwayat):
         raise ValidationError('Saldo cuti berubah dan tidak lagi mencukupi jadwal baru.')
 
 
+def _normalize_duration(change, riwayat):
+    if riwayat.jenis_cuti == CheckCuti.CUTI_TAHUNAN:
+        try:
+            pola = get_pola_kerja_aktif(
+                riwayat.pegawai, change.tanggal_mulai_baru,
+            )
+        except PolaKerjaTidakDitemukan as exc:
+            raise ValidationError(
+                'Pola kerja pegawai belum ditentukan pada tanggal mulai baru.'
+            ) from exc
+        duration = hitung_lama_cuti_tahunan(
+            change.tanggal_mulai_baru,
+            change.tanggal_akhir_baru,
+            pola.pola_kerja,
+        )
+    else:
+        duration = (change.tanggal_akhir_baru - change.tanggal_mulai_baru).days + 1
+    if duration <= 0:
+        raise ValidationError('Rentang perubahan tidak memiliki hari cuti yang terhitung.')
+    if change.lama_cuti_baru != duration:
+        change.lama_cuti_baru = duration
+        change.save(update_fields=('lama_cuti_baru', 'updated_at'))
+
+
 def _reset_verification(verifikasi):
     if verifikasi is None:
         return
@@ -117,6 +146,7 @@ def apply_nonfinal_change(change_id):
     ).get(pk=change_id)
     riwayat = RiwayatCuti.objects.select_for_update().get(pk=change.riwayat_cuti_id)
     Users.objects.select_for_update().get(pk=riwayat.pegawai_id)
+    _normalize_duration(change, riwayat)
     _validate_capacity(change, riwayat)
 
     verifikasi = VerifikasiCuti.objects.filter(layanan_cuti=riwayat.usulan).first()
@@ -148,6 +178,7 @@ def approve_final_change(change_id):
         return change
     riwayat = RiwayatCuti.objects.select_for_update().get(pk=change.riwayat_cuti_id)
     Users.objects.select_for_update().get(pk=riwayat.pegawai_id)
+    _normalize_duration(change, riwayat)
     _validate_capacity(change, riwayat)
     pelimpahan = PelimpahanTugas.objects.select_for_update().filter(
         riwayat_cuti=riwayat

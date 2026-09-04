@@ -55,6 +55,11 @@ from dokumen.forms import (
 )
 from myaccount.models import Users
 from disiplinsdm.models import PolaKerjaPegawai
+from .cuti_calendar import (
+    PolaKerjaTidakDitemukan,
+    get_pola_kerja_aktif,
+    hitung_lama_cuti_tahunan,
+)
 from dokumen.models import (
     RiwayatCuti, 
     RiwayatGajiBerkala, 
@@ -759,6 +764,22 @@ class PerubahanJadwalCutiForm(forms.ModelForm):
             return cleaned
 
         lama_baru = (akhir - mulai).days + 1
+        if self.riwayat_cuti.jenis_cuti == 'Cuti Tahunan':
+            try:
+                pola = get_pola_kerja_aktif(self.riwayat_cuti.pegawai, mulai)
+            except PolaKerjaTidakDitemukan:
+                self.add_error(
+                    'tanggal_mulai_baru',
+                    'Pola kerja pegawai belum ditentukan pada tanggal mulai baru.',
+                )
+                return cleaned
+            lama_baru = hitung_lama_cuti_tahunan(
+                mulai, akhir, pola.pola_kerja,
+            )
+            if lama_baru <= 0:
+                raise forms.ValidationError(
+                    'Rentang perubahan hanya berisi Ahad atau hari libur.'
+                )
         self.instance.lama_cuti_baru = lama_baru
         if (
             mulai == self.riwayat_cuti.tgl_mulai_cuti

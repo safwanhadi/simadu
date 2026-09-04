@@ -8,7 +8,8 @@ from django.contrib.auth.forms import UserCreationForm
 from django.forms import inlineformset_factory
 from django.db import transaction
 from .models import (
-    AccountRegistration, AdminScopeAssignment, ProfilSDM, Users,
+    AccountRegistration, AdminScopeAssignment, CoordinationAssignment,
+    ProfilSDM, Users,
 )
 from .roles import ADMIN_GROUPS
 from strukturorg.models import (
@@ -376,6 +377,35 @@ class StructuralOfficerForm(forms.Form):
             is_active=True,
             **{field_name: structure},
         )
+
+
+class CoordinationAssignmentForm(forms.ModelForm):
+    class Meta:
+        model = CoordinationAssignment
+        fields = (
+            'coordinator', 'employee', 'relation_type', 'valid_from', 'notes',
+        )
+        widgets = {
+            'coordinator': forms.Select(attrs={'class': 'form-control select2'}),
+            'employee': forms.Select(attrs={'class': 'form-control select2'}),
+            'relation_type': forms.Select(attrs={'class': 'form-control'}),
+            'valid_from': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'notes': forms.TextInput(attrs={'class': 'form-control'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        users = Users.objects.filter(
+            is_active=True, is_superuser=False
+        ).select_related('profil_user').order_by('first_name', 'last_name', 'email')
+        self.fields['coordinator'].queryset = users
+        self.fields['employee'].queryset = users
+
+    def clean_valid_from(self):
+        value = self.cleaned_data['valid_from']
+        if value > date.today():
+            raise forms.ValidationError('TMT penugasan aktif tidak boleh di masa depan.')
+        return value
 
 
 class EmployeeRegistrationForm(UserCreationForm):

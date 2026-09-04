@@ -487,6 +487,103 @@ class AdminScopeAssignment(models.Model):
         return f'{self.user} - {self.group.name} - {target}'
 
 
+class CoordinationAssignment(models.Model):
+    """Relasi koordinasi pegawai yang tidak mengubah jabatan atau penempatan."""
+
+    DIRECT_SUPERVISOR = 'atasan_langsung'
+    SUPPORT_STAFF = 'staf_pendukung'
+    RELATION_TYPES = (
+        (DIRECT_SUPERVISOR, 'Atasan langsung'),
+        (SUPPORT_STAFF, 'Staf pendukung/koordinasi'),
+    )
+
+    coordinator = models.ForeignKey(
+        Users,
+        on_delete=models.PROTECT,
+        related_name='coordination_subordinates',
+        verbose_name='Koordinator/atasan',
+    )
+    employee = models.ForeignKey(
+        Users,
+        on_delete=models.PROTECT,
+        related_name='coordination_supervisors',
+        verbose_name='Pegawai/staf',
+    )
+    relation_type = models.CharField(
+        max_length=24,
+        choices=RELATION_TYPES,
+        default=SUPPORT_STAFF,
+        verbose_name='Jenis hubungan',
+    )
+    valid_from = models.DateField(default=date.today, verbose_name='TMT')
+    valid_until = models.DateField(
+        null=True, blank=True, verbose_name='Tanggal berakhir'
+    )
+    notes = models.CharField(max_length=255, blank=True, verbose_name='Keterangan')
+    is_active = models.BooleanField(default=True, db_index=True)
+    # NULL untuk riwayat agar constraint aktif kompatibel dengan MySQL/MariaDB.
+    active_slot = models.BooleanField(null=True, editable=False)
+    direct_supervisor_slot = models.BooleanField(null=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('coordinator', 'employee', 'relation_type')
+        constraints = [
+            models.UniqueConstraint(
+                fields=('coordinator', 'employee', 'relation_type', 'active_slot'),
+                name='uniq_active_coordination_pair',
+            ),
+            models.UniqueConstraint(
+                fields=('employee', 'direct_supervisor_slot'),
+                name='uniq_active_direct_supervisor',
+            ),
+        ]
+        verbose_name = 'Penugasan koordinasi'
+        verbose_name_plural = 'Penugasan koordinasi'
+
+    def clean(self):
+        super().clean()
+        if self.coordinator_id and self.coordinator_id == self.employee_id:
+            raise ValidationError({
+                'employee': 'Pegawai tidak dapat menjadi bawahan dirinya sendiri.'
+            })
+        if self.valid_until and self.valid_until < self.valid_from:
+            raise ValidationError({
+                'valid_until': 'Tanggal berakhir tidak boleh sebelum TMT.'
+            })
+        if self.is_active:
+            if self.coordinator_id and not self.coordinator.is_active:
+                raise ValidationError({
+                    'coordinator': 'Akun koordinator harus aktif.'
+                })
+            if self.employee_id and not self.employee.is_active:
+                raise ValidationError({'employee': 'Akun pegawai harus aktif.'})
+            reverse_exists = type(self).objects.filter(
+                coordinator_id=self.employee_id,
+                employee_id=self.coordinator_id,
+                is_active=True,
+            ).exclude(pk=self.pk).exists()
+            if reverse_exists:
+                raise ValidationError(
+                    'Relasi terbalik yang aktif dapat membentuk siklus koordinasi.'
+                )
+
+    def save(self, *args, **kwargs):
+        self.active_slot = True if self.is_active else None
+        self.direct_supervisor_slot = (
+            True if self.is_active and self.relation_type == self.DIRECT_SUPERVISOR
+            else None
+        )
+        if not self.is_active and self.valid_until is None:
+            self.valid_until = date.today()
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.coordinator} - {self.employee} ({self.get_relation_type_display()})'
+
+
 class TelegramAccount(models.Model):
     user = models.OneToOneField(
         Users,

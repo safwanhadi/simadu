@@ -11,6 +11,7 @@ from myaccount.admin_scopes import (
     has_admin_scope_for_employee,
 )
 from myaccount.roles import ADMIN_LAYANAN_CUTI
+from myaccount.models import CoordinationAssignment
 from .base import RoleScopeAccess
 from strukturorg.models import PejabatStruktur
 from strukturorg.services import (
@@ -190,6 +191,10 @@ def _is_structural_officer(user):
         pejabat=user,
         pejabat__is_active=True,
         is_active=True,
+    ).exists() or CoordinationAssignment.objects.filter(
+        coordinator=user,
+        employee__is_active=True,
+        is_active=True,
     ).exists()
 
 
@@ -239,12 +244,18 @@ def filter_queryset_for_leave_supervisor(queryset, user, *, employee_path='pegaw
         if employee_path else 'riwayat_penempatan'
     )
     scope_query = _appointment_scope_filter(appointments, placement_path)
-    if not scope_query:
-        return queryset.none()
-    scoped = queryset.filter(
-        scope_query,
-        **{f'{placement_path}__status': True},
-    )
+    direct_employee_ids = CoordinationAssignment.objects.filter(
+        coordinator=user,
+        coordinator__is_active=True,
+        employee__is_active=True,
+        is_active=True,
+    ).values('employee_id')
+    direct_lookup = f'{employee_path}__in' if employee_path else 'pk__in'
+    direct_query = Q(**{direct_lookup: direct_employee_ids})
+    structural_query = Q()
+    if scope_query:
+        structural_query = scope_query & Q(**{f'{placement_path}__status': True})
+    scoped = queryset.filter(structural_query | direct_query)
     if employee_path:
         scoped = scoped.exclude(**{employee_path: user})
     else:
@@ -260,6 +271,15 @@ def can_supervise_employee(user, pegawai):
         or user.pk == getattr(pegawai, 'pk', None)
     ):
         return False
+
+    if CoordinationAssignment.objects.filter(
+        coordinator=user,
+        employee=pegawai,
+        is_active=True,
+        coordinator__is_active=True,
+        employee__is_active=True,
+    ).exists():
+        return True
 
     penempatan = get_active_placement(pegawai)
     if penempatan is None:

@@ -400,6 +400,15 @@ class PelimpahanTugas(models.Model):
         if self.butuh_persetujuan_atasan is not None:
             return self.butuh_persetujuan_atasan
 
+        from myaccount.models import CoordinationAssignment
+        if CoordinationAssignment.objects.filter(
+            employee=self.pemberi_tugas,
+            relation_type=CoordinationAssignment.DIRECT_SUPERVISOR,
+            is_active=True,
+            coordinator__is_active=True,
+        ).exists():
+            return True
+
         rp = (
             self.pemberi_tugas.riwayat_penempatan.filter(status=True)
             .order_by("-updated_at", "-id")
@@ -544,7 +553,11 @@ class PerubahanJadwalCuti(models.Model):
             if self.tanggal_akhir_baru < self.tanggal_mulai_baru:
                 raise ValidationError('Tanggal akhir baru tidak boleh sebelum tanggal mulai baru.')
             jumlah = (self.tanggal_akhir_baru - self.tanggal_mulai_baru).days + 1
-            if self.lama_cuti_baru and self.lama_cuti_baru != jumlah:
+            cuti_tahunan = (
+                self.riwayat_cuti_id
+                and self.riwayat_cuti.jenis_cuti == 'Cuti Tahunan'
+            )
+            if self.lama_cuti_baru and not cuti_tahunan and self.lama_cuti_baru != jumlah:
                 raise ValidationError('Jumlah hari perubahan tidak sesuai dengan rentang tanggal baru.')
 
     @property

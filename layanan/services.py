@@ -516,15 +516,16 @@ class CheckCuti:
         )
     
     def cek_waktu_pengajuan_cuti(self, tanggal_mulai_cuti, status_pegawai) -> bool:
-        tanggal_sekarang = date.today()
-        selisih_hari = (tanggal_mulai_cuti - tanggal_sekarang).days
-        status = (status_pegawai or '').strip()
+        """Terapkan batas H-7 untuk PNS dan izinkan non-PNS mulai hari ini."""
+        if not tanggal_mulai_cuti:
+            return False
+
+        selisih_hari = (tanggal_mulai_cuti - date.today()).days
         if selisih_hari < 0:
-            return False  # tanggal cuti sudah lewat
-        if status == "PNS":
-            return selisih_hari >= 7
-        else:
-            return True
+            return False
+
+        status = (status_pegawai or '').strip()
+        return selisih_hari >= 7 if status == 'PNS' else True
     
     def is_penerima_memiliki_pelimpahan_aktif(
         self,

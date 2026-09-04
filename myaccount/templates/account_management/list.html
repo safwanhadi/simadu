@@ -11,6 +11,9 @@
             <a href="{% url 'myaccount_urls:structural_officer_management' %}" class="btn btn-sm btn-info">
                 <i class="fas fa-sitemap"></i> Pejabat Struktural
             </a>
+            <a href="{% url 'myaccount_urls:coordination_assignment_management' %}" class="btn btn-sm btn-warning">
+                <i class="fas fa-people-arrows"></i> Penugasan Koordinasi
+            </a>
             <a href="{% url 'myaccount_urls:account_registration_review_list' %}" class="btn btn-sm btn-warning">
                 <i class="fas fa-user-clock"></i> Verifikasi Registrasi
                 {% if pending_registration_count %}<span class="badge badge-light">{{ pending_registration_count }}</span>{% endif %}

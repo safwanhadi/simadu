@@ -1193,7 +1193,7 @@ class ApprovalJadwalInstalasi(LoginRequiredMixin, UserPassesTestMixin, generic.V
         return redirect(reverse('disiplinsdm_urls:jadwal_pivot', kwargs={'inst':instalasi_id}))
 
 
-def generate_qr_with_logo_for_excel(data: str, logo_path: str, size=300) -> BytesIO:
+def generate_qr_with_logo_for_excel(data: str, logo_path=None, size=300) -> BytesIO:
     # Buat QR Code
     qr = qrcode.QRCode(
         error_correction=qrcode.constants.ERROR_CORRECT_H  # Tingkat koreksi tinggi agar QR masih bisa dibaca meski ditimpa logo
@@ -1205,14 +1205,30 @@ def generate_qr_with_logo_for_excel(data: str, logo_path: str, size=300) -> Byte
     # Resize QR
     qr_img = qr_img.resize((size, size), Image.LANCZOS)
 
-    # Buka logo
-    logo = Image.open(logo_path)
-    logo_size = size // 4  # Logo 1/4 dari ukuran QR
-    logo = logo.resize((logo_size, logo_size), Image.LANCZOS)
-
-    # Tempel logo ke tengah QR
-    pos = ((qr_img.size[0] - logo.size[0]) // 2, (qr_img.size[1] - logo.size[1]) // 2)
-    qr_img.paste(logo, pos, mask=logo if logo.mode == 'RGBA' else None)
+    # Logo bersifat opsional. Pada deployment dengan static files yang belum
+    # terkumpul, finders.find() dapat mengembalikan None; ekspor harus tetap
+    # menghasilkan QR standar dan tidak menggagalkan seluruh dokumen Excel.
+    if logo_path and os.path.isfile(logo_path):
+        try:
+            with Image.open(logo_path) as logo_source:
+                logo = logo_source.copy()
+            logo_size = size // 4
+            logo = logo.resize((logo_size, logo_size), Image.LANCZOS)
+            pos = (
+                (qr_img.size[0] - logo.size[0]) // 2,
+                (qr_img.size[1] - logo.size[1]) // 2,
+            )
+            qr_img.paste(logo, pos, mask=logo if logo.mode == 'RGBA' else None)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning(
+                "Logo QR Excel tidak dapat digunakan; QR dibuat tanpa logo: %s",
+                exc,
+            )
+    else:
+        logger.warning(
+            "Logo QR Excel tidak ditemukan pada path %r; QR dibuat tanpa logo.",
+            logo_path,
+        )
 
     # Simpan ke BytesIO
     buffer = BytesIO()

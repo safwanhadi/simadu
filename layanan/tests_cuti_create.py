@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 from django import forms
 from django.contrib.auth.models import Group
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.urls import reverse
 
 from dokumen.forms import RiwayatPengajuanCutiForm
@@ -11,9 +11,53 @@ from disiplinsdm.models import HariLibur, PolaKerjaPegawai
 from myaccount.models import AdminScopeAssignment, Users
 from myaccount.roles import ADMIN_LAYANAN_CUTI
 
-from .forms import LayananCutiForm, pengajuan_cuti_formset
+from .forms import (
+    LayananCutiForm, PerubahanJadwalCutiForm, pengajuan_cuti_formset,
+)
 from .models import JenisLayanan, LayananCuti, PelimpahanTugas
 from .services import CheckCuti
+
+
+class CutiSubmissionTimingTests(SimpleTestCase):
+    def test_pns_wajib_mengajukan_minimal_tujuh_hari_sebelumnya(self):
+        checker = CheckCuti()
+
+        self.assertFalse(
+            checker.cek_waktu_pengajuan_cuti(
+                date.today() + timedelta(days=6),
+                'PNS',
+            )
+        )
+        self.assertTrue(
+            checker.cek_waktu_pengajuan_cuti(
+                date.today() + timedelta(days=7),
+                'PNS',
+            )
+        )
+
+    def test_non_pns_dapat_mengajukan_pada_hari_pelaksanaan(self):
+        checker = CheckCuti()
+
+        for status in ('Magang', 'Kontrak', 'Mitra', 'PPPK', 'CPNS'):
+            with self.subTest(status=status):
+                self.assertTrue(
+                    checker.cek_waktu_pengajuan_cuti(
+                        date.today(),
+                        status,
+                    )
+                )
+
+    def test_semua_status_menolak_tanggal_yang_sudah_lewat(self):
+        checker = CheckCuti()
+
+        for status in ('Magang', 'Kontrak', 'Mitra', 'PPPK', 'CPNS', 'PNS'):
+            with self.subTest(status=status):
+                self.assertFalse(
+                    checker.cek_waktu_pengajuan_cuti(
+                        date.today() - timedelta(days=1),
+                        status,
+                    )
+                )
 
 
 class LayananCutiCreateTests(TestCase):
@@ -343,6 +387,44 @@ class LayananCutiCreateTests(TestCase):
             form.cleaned_data['tgl_akhir_cuti'],
             mulai + timedelta(days=4),
         )
+
+    def test_perubahan_jadwal_reguler_tidak_mengurangi_hak_pada_ahad_dan_libur(self):
+        mulai = date.today() + timedelta(days=10)
+        while mulai.weekday() != 5:
+            mulai += timedelta(days=1)
+        akhir = mulai + timedelta(days=3)
+        HariLibur.objects.create(
+            tanggal=mulai + timedelta(days=2),
+            keterangan='Libur perubahan jadwal',
+        )
+        usulan = LayananCuti.objects.create(
+            pegawai=self.pegawai,
+            layanan=self.jenis_layanan,
+            tahun=mulai.year,
+        )
+        riwayat = RiwayatCuti.objects.create(
+            pegawai=self.pegawai,
+            dokumen=self.dokumen,
+            usulan=usulan,
+            jenis_cuti='Cuti Tahunan',
+            tgl_mulai_cuti=mulai + timedelta(days=7),
+            tgl_akhir_cuti=mulai + timedelta(days=8),
+            lama_cuti=2,
+            tahun_cuti=mulai.year,
+            status_cuti='Belum',
+        )
+        form = PerubahanJadwalCutiForm(
+            data={
+                'tanggal_mulai_baru': mulai.isoformat(),
+                'tanggal_akhir_baru': akhir.isoformat(),
+                'alasan': 'Penyesuaian jadwal',
+            },
+            riwayat_cuti=riwayat,
+            check_cuti=CheckCuti(),
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.instance.lama_cuti_baru, 2)
 
     def test_cuti_tahunan_shift_tetap_menghitung_hari_libur(self):
         PolaKerjaPegawai.objects.filter(pegawai=self.pegawai).delete()

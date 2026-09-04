@@ -33,13 +33,15 @@ from rest_framework.response import Response
 from .models import ProfilSDM
 
 from .models import (
-    AccountRegistration, AdminScopeAssignment, ProfilSDM, Users,
+    AccountRegistration, AdminScopeAssignment, CoordinationAssignment,
+    ProfilSDM, Users,
 )
 from .forms import (
     AccountAdminRolesForm,
     AdminScopeAssignmentForm,
     AdminResetPasswordForm,
     EmployeeRegistrationForm,
+    CoordinationAssignmentForm,
     ProfilForm,
     StructuralOfficerForm,
     UserAdminChangeForm,
@@ -331,6 +333,65 @@ class StructuralOfficerDeactivateView(AccountAdminRequiredMixin, View):
             f'{appointment.struktur_object} berhasil ditutup.',
         )
         return redirect('myaccount_urls:structural_officer_management')
+
+
+class CoordinationAssignmentManagementView(AccountAdminRequiredMixin, FormView):
+    form_class = CoordinationAssignmentForm
+    template_name = 'account_management/coordination_assignments.html'
+    success_url = reverse_lazy('myaccount_urls:coordination_assignment_management')
+
+    def form_valid(self, form):
+        assignment = form.save()
+        messages.success(
+            self.request,
+            f'{assignment.employee.full_name_2} berhasil ditugaskan kepada '
+            f'{assignment.coordinator.full_name_2} tanpa mengubah jabatan atau penempatan.',
+        )
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        status = self.request.GET.get('status', 'active')
+        assignments = CoordinationAssignment.objects.select_related(
+            'coordinator', 'coordinator__profil_user', 'employee', 'employee__profil_user'
+        )
+        if status == 'inactive':
+            assignments = assignments.filter(is_active=False)
+        elif status != 'all':
+            status = 'active'
+            assignments = assignments.filter(is_active=True)
+        context.update({
+            'assignment_list': assignments,
+            'status': status,
+            'today': date.today(),
+            'account_management': 'active',
+            'card_title': 'Penugasan Koordinasi',
+            'title_page': 'Pengelolaan Penugasan Koordinasi',
+        })
+        return context
+
+
+class CoordinationAssignmentDeactivateView(AccountAdminRequiredMixin, View):
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        assignment = get_object_or_404(
+            CoordinationAssignment.objects.select_for_update(),
+            pk=kwargs['pk'], is_active=True,
+        )
+        raw_date = request.POST.get('valid_until', '').strip()
+        try:
+            end_date = date.fromisoformat(raw_date) if raw_date else date.today()
+        except ValueError:
+            messages.error(request, 'Tanggal berakhir tidak valid.')
+            return redirect('myaccount_urls:coordination_assignment_management')
+        if end_date < assignment.valid_from or end_date > date.today():
+            messages.error(request, 'Tanggal berakhir harus berada di antara TMT dan hari ini.')
+            return redirect('myaccount_urls:coordination_assignment_management')
+        assignment.is_active = False
+        assignment.valid_until = end_date
+        assignment.save()
+        messages.success(request, 'Penugasan koordinasi berhasil diakhiri.')
+        return redirect('myaccount_urls:coordination_assignment_management')
 
 
 class AdminScopeAssignmentListView(AccountAdminRequiredMixin, ListView):
