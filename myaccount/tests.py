@@ -1,13 +1,15 @@
 from datetime import date
 
+from django.conf import settings
 from django.contrib.auth.models import Group
 from django.contrib.auth import authenticate
-from django.test import TestCase, override_settings
-from django.template.loader import render_to_string
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
+from django.template.loader import get_template, render_to_string
 from django.urls import reverse
 from urllib.parse import parse_qs, urlparse
 
 from allauth.socialaccount.models import SocialApp
+from oauth2_provider.forms import AllowForm
 
 from .adapters import RestrictToExistingUserAdapter
 from .models import AccountRegistration, ProfilSDM, Users
@@ -18,6 +20,7 @@ from .roles import (
     ADMIN_GROUPS,
     ADMIN_INFORMASI,
 )
+from .views import SimaduLoginView
 from strukturorg.models import (
     InstansiDaerah, PejabatStruktur, SatuanKerjaInduk, UnitOrganisasi,
 )
@@ -503,6 +506,98 @@ class GoogleLoginConfigurationTests(TestCase):
         adapter = RestrictToExistingUserAdapter()
 
         self.assertFalse(adapter.is_open_for_signup(None, None))
+
+
+class SimaduLoginPKCETests(SimpleTestCase):
+    def setUp(self):
+        self.authorize_url = (
+            '/o/authorize/?response_type=code'
+            '&client_id=pkce-client'
+            '&redirect_uri=https%3A%2F%2Fclient.example.com%2Fcallback'
+            '&code_challenge=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG'
+            '&code_challenge_method=S256'
+        )
+
+    def test_form_login_meneruskan_next_pkce_sebagai_hidden_input(self):
+        content = get_template('sso/login.html').template.source
+
+        self.assertIn('name="{{ redirect_field_name }}"', content)
+        self.assertIn('value="{{ redirect_field_value }}"', content)
+
+    def test_login_mengarahkan_kembali_ke_authorize_dengan_pkce_utuh(self):
+        request = RequestFactory().post(
+            reverse('myaccount_urls:login_view'),
+            {'next': self.authorize_url},
+        )
+        view = SimaduLoginView()
+        view.request = request
+
+        success_url = view.get_success_url()
+
+        self.assertEqual(success_url, self.authorize_url)
+        redirect_params = parse_qs(urlparse(success_url).query)
+        self.assertEqual(redirect_params['code_challenge_method'], ['S256'])
+        self.assertEqual(
+            redirect_params['code_challenge'],
+            ['abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG'],
+        )
+
+    def test_form_consent_mempertahankan_pkce_saat_post(self):
+        form = AllowForm(
+            data={
+                'allow': 'Authorize',
+                'redirect_uri': 'https://client.example.com/callback',
+                'scope': 'read:pegawai',
+                'client_id': 'pkce-client',
+                'response_type': 'code',
+                'code_challenge': 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
+                'code_challenge_method': 'S256',
+            },
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(
+            form.cleaned_data['code_challenge'],
+            'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
+        )
+        self.assertEqual(form.cleaned_data['code_challenge_method'], 'S256')
+
+    def test_template_consent_mengirim_hidden_input_pkce(self):
+        challenge = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG'
+        content = render_to_string(
+            'oauth2_provider/authorize.html',
+            {
+                'form': AllowForm(
+                    initial={
+                        'redirect_uri': 'https://client.example.com/callback',
+                        'scope': 'read:pegawai',
+                        'client_id': 'pkce-client',
+                        'response_type': 'code',
+                        'code_challenge': challenge,
+                        'code_challenge_method': 'S256',
+                    },
+                ),
+                'application': type('Application', (), {'name': 'Akreditasi'})(),
+                'scopes_descriptions': ['Data pegawai'],
+            },
+        )
+
+        self.assertIn('name="code_challenge"', content)
+        self.assertIn(f'value="{challenge}"', content)
+        self.assertIn('name="code_challenge_method"', content)
+        self.assertIn('value="S256"', content)
+
+    def test_portal_akreditasi_memulai_pkce_dari_aplikasi_klien(self):
+        client = settings.SSO_CLIENTS['akreditasi']
+
+        self.assertEqual(
+            client['login_url'],
+            'https://akreditasi.rsmandalika.com/sso/simadu/',
+        )
+        self.assertEqual(
+            client['redirect_uri'],
+            'https://akreditasi.rsmandalika.com/sso/simadu/callback/',
+        )
 
 
 class PrivacyPolicyTests(TestCase):

@@ -143,6 +143,9 @@
                 <!-- Form Login -->
                 <form class="space-y-5" action="{% url 'myaccount_urls:login_view' %}" method="POST">
                     {% csrf_token %}
+                    {% if redirect_field_value %}
+                        <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
+                    {% endif %}
 
                     <!-- ID Karyawan / NIP -->
                     <div>

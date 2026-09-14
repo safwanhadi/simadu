@@ -799,7 +799,10 @@ class SimaduLoginView(LoginView):
     template_name = 'sso/login.html'
 
     def get_success_url(self):
-        redirect_to = self.request.GET.get(self.redirect_field_name)
+        redirect_to = (
+            self.request.POST.get(self.redirect_field_name)
+            or self.request.GET.get(self.redirect_field_name)
+        )
         sso_url = reverse('myaccount_urls:sso_portal')
         # dashboard_url = reverse('dashboard_urls:dashboard_view')
         # dashboard_absensi_url = reverse('dashboard_urls:dashboard_absensi_view')

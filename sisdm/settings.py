@@ -392,6 +392,11 @@ APP_VISUAL = {
         "bg_class": "bg-gradient-to-br from-purple-500 to-indigo-600",
         "category": "Data & Analitik",
     },
+    "akreditasi": {
+        "icon": "fas fa-clipboard-check",
+        "bg_class": "bg-gradient-to-br from-teal-500 to-cyan-600",
+        "category": "Mutu & Akreditasi",
+    },
     # tambahkan aplikasi lain di sini
 }
 
@@ -487,6 +492,14 @@ SSO_CLIENTS = {
         "client_id": config("DASHBOARD_CLIENT_ID"),
         "redirect_uri": "https://datahub.rsmandalika.com/accounts/callback/",
         "login_url": "https://datahub.rsmandalika.com/accounts/simadu/launch/",
+        "scopes": "read:pegawai",
+    },
+    "akreditasi": {
+        "label": "SELF ASSESSMENT AKREDITASI",
+        "type": "oauth_client",
+        "client_id": config("AKREDITASI_CLIENT_ID"),
+        "redirect_uri": "https://akreditasi.rsmandalika.com/sso/simadu/callback/",
+        "login_url": "https://akreditasi.rsmandalika.com/sso/simadu/",
         "scopes": "read:pegawai",
     },
     # tambah aplikasi lain tinggal copy ini
