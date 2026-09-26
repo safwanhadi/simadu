@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Akreditasi</title>
+  <path fill="#fff" d="M18 8h28a6 6 0 0 1 6 6v36a6 6 0 0 1-6 6H18a6 6 0 0 1-6-6V14a6 6 0 0 1 6-6Z"/>
+  <path fill="#14b8a6" d="M25 5h14a4 4 0 0 1 4 4v6H21V9a4 4 0 0 1 4-4Z"/>
+  <path fill="#0f766e" d="M22 27h13a2 2 0 1 1 0 4H22a2 2 0 1 1 0-4Zm0 9h9a2 2 0 1 1 0 4h-9a2 2 0 1 1 0-4Z"/>
+  <circle cx="43" cy="39" r="11" fill="#fbbf24"/>
+  <path fill="#fff" d="m37.8 39.2 3.2 3.2 6.5-7a2 2 0 1 1 3 2.7l-8 8.6a2 2 0 0 1-2.9.1L35 42a2 2 0 1 1 2.8-2.8Z"/>
+  <path fill="#f59e0b" d="m38 48-2 11 7-4 6 4-1.8-10.8A14.8 14.8 0 0 1 38 48Z"/>
+</svg>

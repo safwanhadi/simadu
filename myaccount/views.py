@@ -1047,6 +1047,7 @@ def sso_portal(request):
                 "login_url": client.get("login_url"),
                 "type": client.get("type"),
                 "icon": visual.get("icon", "fas fa-th-large"),
+                "icon_image": visual.get("icon_image", ""),
                 "bg_class": visual.get("bg_class", "bg-gradient-to-br from-blue-500 to-blue-600"),
                 "category": visual.get("category", "Umum"),
                 "is_dev": is_dev,

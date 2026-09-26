@@ -180,6 +180,20 @@ class DokterSpesialisSerializer(serializers.ModelSerializer):
         model = Users
         # Daftarkan field yang Anda butuhkan
         fields = ['id', 'nama_user', 'is_spesialis', 'nik_user']
+
+
+class TenagaPerawatAktifSerializer(serializers.Serializer):
+    """Identitas minimum tenaga perawat aktif untuk kebutuhan integrasi."""
+
+    nip = serializers.SerializerMethodField()
+    email = serializers.EmailField(read_only=True)
+    first_name = serializers.CharField(read_only=True)
+    last_name = serializers.CharField(read_only=True)
+    full_name = serializers.ReadOnlyField(source='full_name_2')
+
+    def get_nip(self, obj):
+        profil = getattr(obj, 'profil_user', None)
+        return profil.nip if profil else None
         
         
 class DataMinimalPegawaiSerializer(serializers.Serializer):
@@ -187,6 +201,7 @@ class DataMinimalPegawaiSerializer(serializers.Serializer):
     last_name = serializers.SerializerMethodField()
     full_name = serializers.SerializerMethodField()
     nik = serializers.SerializerMethodField()
+    nip = serializers.SerializerMethodField()
     email = serializers.SerializerMethodField()
     status_pegawai = serializers.SerializerMethodField()
     jabatan_terakhir = serializers.SerializerMethodField()
@@ -201,6 +216,10 @@ class DataMinimalPegawaiSerializer(serializers.Serializer):
     def get_nik(self, obj):
         profile = self.get_profile(obj)
         return profile.no_ktp if profile else None
+    
+    def get_nip(self, obj):
+        profile = self.get_profile(obj)
+        return profile.nip if profile else None
 
     def get_first_name(self, obj):
         return obj.first_name

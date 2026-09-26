@@ -1,38 +1,26 @@
 {% load static %}
-{% load humanize %}
-<div class="col-md-9">
-    <div class="row p-3 mt-3">
-        <div class="col-md-12 d-flex justify-content-start" style="padding-left: 1rem; padding-right:1rem;">
-            <div>
-                <h3 class="art-text">Informasi Terbaru</h3>
-                <hr style="width:100%; height: 5px; border:0; background: linear-gradient(to right, #02b9fc, #c4e9ff);">
-            </div>
-        </div>
-    
-        <div class="col-md-12 mb-3">
-            <div class="row">
-                {% for item in page_obj %}
-                    <div class="col-md-4 mb-3">
-                        <div class="informasi-card">
-                            <div class="card-image-container">
-                                {% if item.gambar %}
-                                    <img src="{{item.gambar.url}}" alt="image" class="card-image">
-                                {% else %}
-                                    <img src="{% static '/img/picture_logo.png' %}" alt="image" class="card-image">
-                                {% endif %}
-                            </div>
-                            <h4 class="card-crop-content">{{item.judul}}</h4>
-                            <div class="headline-crop-content mt-2 mb-3">
-                                {{item.isi|safe}}
-                            </div>
-                            <a href="{% url 'informasi_urls:informasi_view' slug=item.slug %}?case=detail">Lanjut baca</a>
-                            <div class="info-view">
-                                <i class="far fa-grin-hearts"></i> {{item.hit_count.hits}} view
-                            </div>
-                        </div>
-                    </div>
-                {% endfor %}
-            </div>
-        </div>
+<section class="col-lg-9">
+    <div class="info-section-heading">
+        <div><span class="info-eyebrow">Informasi SDM</span><h2>{% if query %}Hasil pencarian “{{ query }}”{% elif slug %}Informasi sesuai kategori{% else %}Informasi terbaru{% endif %}</h2></div>
+        <span class="info-result-count">{{ page_obj.paginator.count }} informasi</span>
     </div>
-</div>
+    {% if page_obj %}
+    <div class="row info-card-grid">
+        {% for item in page_obj %}
+        <div class="col-md-6 col-xl-4 mb-4"><article class="info-card">
+            <a class="info-card__image" href="{% url 'informasi_urls:informasi_view' slug=item.slug %}?case=detail">
+                {% if item.gambar %}<img src="{{ item.gambar.url }}" alt="Ilustrasi {{ item.judul }}">{% else %}<img src="{% static 'img/picture_logo.png' %}" alt="Logo rumah sakit">{% endif %}<span>{{ item.kategori }}</span>
+            </a>
+            <div class="info-card__body">
+                <div class="info-card__meta"><span><i class="far fa-calendar-alt"></i>{{ item.created_at|date:"d M Y" }}</span><span><i class="far fa-eye"></i>{{ item.hit_count.hits }}</span></div>
+                <h3><a href="{% url 'informasi_urls:informasi_view' slug=item.slug %}?case=detail">{{ item.judul }}</a></h3>
+                <div class="info-card__excerpt">{{ item.isi|striptags|truncatewords:18 }}</div>
+                <a class="info-card__read" href="{% url 'informasi_urls:informasi_view' slug=item.slug %}?case=detail">Baca selengkapnya <i class="fas fa-arrow-right"></i></a>
+            </div>
+        </article></div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="info-empty-state"><i class="far fa-folder-open"></i><h3>Informasi belum ditemukan</h3><p>Coba gunakan kata kunci lain atau tampilkan semua kategori.</p><a href="{% url 'informasi_urls:informasi_view' %}" class="btn btn-primary">Tampilkan semua informasi</a></div>
+    {% endif %}
+</section>

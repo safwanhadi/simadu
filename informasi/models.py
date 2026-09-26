@@ -7,6 +7,7 @@ from django.contrib.contenttypes.fields import GenericRelation
 from datetime import datetime
 from pytz import timezone as tz
 from tinymce.models import HTMLField
+from urllib.parse import parse_qs, urlparse
 # Create your models here.
 
 
@@ -75,6 +76,25 @@ class VideoYoutube(models.Model):
 
     def __str__(self):
         return self.judul_video
+
+    @property
+    def youtube_id(self):
+        """Return a usable YouTube ID for both legacy URLs and plain IDs."""
+        value = (self.id_video or '').strip()
+        if not value:
+            return ''
+
+        parsed = urlparse(value if '://' in value else f'https://{value}')
+        hostname = (parsed.hostname or '').lower()
+        if hostname in {'youtu.be', 'www.youtu.be'}:
+            return parsed.path.strip('/').split('/')[0]
+        if hostname.endswith('youtube.com'):
+            if parsed.path == '/watch':
+                return parse_qs(parsed.query).get('v', [value])[0]
+            for prefix in ('/embed/', '/shorts/', '/live/'):
+                if parsed.path.startswith(prefix):
+                    return parsed.path[len(prefix):].split('/')[0]
+        return value
 
     
 @receiver(pre_save, sender=VideoYoutube)

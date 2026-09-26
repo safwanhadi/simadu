@@ -102,6 +102,11 @@
             {% else %}
                 <span class="badge badge-warning"> Belum ada</span>
             {% endif %}
+            {% if is_sip_scope_admin %}
+                <br/>(<span class="help-block text-muted text-sm">Akan diupload oleh pegawai -- tombol upload hanya bisa diakses pegawai</span>)
+            {% else %}
+                <a href="{% url 'layanan_urls:layanan_sip_upload_rekomendasi' pk=layanan_sip.pk %}" class="btn btn-sm btn-warning ml-2"><i class="fas fa-upload"></i> Upload/Ganti</a>
+            {% endif %}
         </td>
     </tr>
     <tr>

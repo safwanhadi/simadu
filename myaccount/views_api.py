@@ -5,9 +5,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView, get_object_or_404
 from oauth2_provider.contrib.rest_framework import OAuth2Authentication
+from oauth2_provider.contrib.rest_framework.permissions import IsAuthenticatedOrTokenHasScope
 from rest_framework.authentication import SessionAuthentication
 from datetime import date
-from django.db.models import F, OuterRef, Subquery, Prefetch, Value, Case, When, BooleanField
+from django.db.models import F, OuterRef, Subquery, Prefetch, Value, Case, When, BooleanField, Q
 from django.db.models.functions import Coalesce
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.permissions import IsAuthenticated
@@ -19,7 +20,10 @@ from oauth2_provider.contrib.rest_framework import OAuth2Authentication
 from .models import Users, ProfilSDM
 from strukturorg.models import PejabatStruktur, UnitOrganisasi, Bidang, SubBidang
 from disiplinsdm.models import JenisSDMPerinstalasi
-from .serializers import DataMinimalPegawaiSerializer, PegawaiSerializer, DokterSpesialisSerializer
+from .serializers import (
+    DataMinimalPegawaiSerializer, DokterSpesialisSerializer, PegawaiSerializer,
+    TenagaPerawatAktifSerializer,
+)
 from dokumen.models import RiwayatPanggol, RiwayatPendidikan, RiwayatPenempatan, RiwayatJabatan
 
 
@@ -282,3 +286,30 @@ class DokterSpesialisAPIView(ListAPIView):
         qs = Users.objects.select_related('profil_user').filter(
             profil_user__is_dokter_spesialis=True)
         return qs
+
+
+class TenagaPerawatAktifAPIView(ListAPIView):
+    """Daftar tenaga perawat dengan akun aktif untuk integrasi layanan."""
+
+    authentication_classes = [OAuth2Authentication, SessionAuthentication]
+    permission_classes = [IsAuthenticatedOrTokenHasScope]
+    required_scopes = ['read:listpegawai']
+    serializer_class = TenagaPerawatAktifSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        queryset = (
+            Users.objects
+            .filter(is_active=True)
+            .filter(
+                Q(jenissdmperinstalasi__jenis_sdm__jenis_sdm__icontains='perawat')
+                | Q(jenissdmperinstalasi__jenis_sdm__profesi__profesi__icontains='perawat')
+            )
+            .select_related('profil_user')
+            .order_by('first_name', 'last_name', 'pk')
+            .distinct()
+        )
+        nip = self.request.query_params.get('nip')
+        if nip:
+            queryset = queryset.filter(profil_user__nip=nip)
+        return queryset

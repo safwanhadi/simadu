@@ -599,6 +599,19 @@ class SimaduLoginPKCETests(SimpleTestCase):
             'https://akreditasi.rsmandalika.com/sso/simadu/callback/',
         )
 
+    def test_portal_memakai_icon_lokal_untuk_admin_web_dan_akreditasi(self):
+        self.assertEqual(
+            settings.APP_VISUAL['admin_epasien']['icon_image'],
+            'images/sso/admin-web.svg',
+        )
+        self.assertEqual(
+            settings.APP_VISUAL['akreditasi']['icon_image'],
+            'images/sso/akreditasi.svg',
+        )
+
+        content = get_template('sso/portal.html').template.source
+        self.assertIn('{% static app.icon_image %}', content)
+
 
 class PrivacyPolicyTests(TestCase):
     @classmethod

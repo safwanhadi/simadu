@@ -1,16 +1,24 @@
 import os
-from django.db.models.query import QuerySet
+from urllib.parse import urlencode
+from django.db.models import Count, Prefetch, Q
 from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse, reverse_lazy
 from django.views import View
 from django.views.generic import ListView, DetailView, DeleteView
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from hitcount.views import HitCountDetailView
 
-from .models import InformasiSDM, VideoYoutube, KategoriVideo, KategoriInformasi
-from .forms import VideoCommentForm, ReVideoCommentForm, VideoYoutubeForm, InformasiSDMForm
+from .models import (
+    InformasiSDM, KategoriInformasi, KategoriVideo, ReVideoComment,
+    VideoComment, VideoYoutube,
+)
+from .forms import (
+    InformasiSDMForm, KategoriVideoForm, ReVideoCommentForm,
+    VideoCommentForm, VideoYoutubeForm,
+)
 
 # Create your views here.
 
@@ -81,21 +89,36 @@ class InformasiListView(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         get_kategori = self.request.GET.get('kat')
+        search_query = self.request.GET.get('q', '').strip()
+        queryset = self.model.objects.filter(active=True, status='publish').select_related('kategori', 'author')
         if get_kategori:
-            queryset = self.model.objects.filter(kategori__slug=get_kategori, active=True, status='publish').order_by('-id')
-        else:
-            queryset = self.model.objects.filter(active=True, status='publish').order_by('-id')
-        return queryset
+            queryset = queryset.filter(kategori__slug=get_kategori)
+        if search_query:
+            queryset = queryset.filter(
+                Q(judul__icontains=search_query)
+                | Q(isi__icontains=search_query)
+                | Q(kategori__kategori__icontains=search_query)
+            )
+        return queryset.order_by('-created_at')
 
     def get_context_data(self, **kwargs):
         context = super(InformasiListView, self).get_context_data(**kwargs)
         get_kategori = self.request.GET.get('kat')
-        info_populer = self.model.objects.filter(active=True, status='publish').order_by('-hit_count_generic__hits')[:2]
+        search_query = self.request.GET.get('q', '').strip()
+        published_information = self.model.objects.filter(active=True, status='publish')
+        info_populer = published_information.order_by('-hit_count_generic__hits')[:2]
         context.update({
-            'headline': self.model.objects.filter(headline=True).first(),
+            'headline': published_information.filter(headline=True).order_by('-updated_at').first(),
             'info_populer': info_populer,
-            'kategori':KategoriInformasi.objects.all(),
+            'kategori': KategoriInformasi.objects.annotate(
+                jumlah_informasi=Count(
+                    'informasisdm',
+                    filter=Q(informasisdm__active=True, informasisdm__status='publish'),
+                )
+            ).order_by('kategori'),
             'slug':get_kategori,
+            'query': search_query,
+            'jumlah_informasi': published_information.count(),
             'informasi':'active',
             'infotutorial':'active'
         })
@@ -108,11 +131,22 @@ class InformasiDetailView(LoginRequiredMixin, HitCountDetailView):
     context_object_name = 'detail'
     count_hit = True
 
+    def get_queryset(self):
+        return self.model.objects.filter(active=True, status='publish').select_related('kategori', 'author')
+
     def get_context_data(self, **kwargs):
         context = super(InformasiDetailView, self).get_context_data(**kwargs)
         get_case = self.request.GET.get('case')
+        published_information = self.model.objects.filter(active=True, status='publish')
         context.update({
-            'kategori':KategoriInformasi.objects.all(),
+            'kategori': KategoriInformasi.objects.annotate(
+                jumlah_informasi=Count(
+                    'informasisdm',
+                    filter=Q(informasisdm__active=True, informasisdm__status='publish'),
+                )
+            ).order_by('kategori'),
+            'slug': self.object.kategori.slug,
+            'jumlah_informasi': published_information.count(),
             'case': get_case,
             'informasi':'active',
             'infotutorial':'active'
@@ -197,6 +231,10 @@ class DeleteInformasiView(DeleteView):
 
 
 class VideoTutorialView(LoginRequiredMixin, View):
+    @staticmethod
+    def can_manage_tutorial(user):
+        return user.is_informasi_admin
+
     def get_object(self, id):
         try:
             data = VideoYoutube.objects.get(id=id)
@@ -212,41 +250,65 @@ class VideoTutorialView(LoginRequiredMixin, View):
             return None
         
     def get(self, request, **kwargs):
-        print('get video tutorial')
         get_kategori = request.GET.get('kategori')
         get_video_id = request.GET.get('vid')
-        video = self.get_video(get_video_id)
-        kategori = KategoriVideo.objects.all()
-        data = VideoYoutube.objects.all()
-        if get_kategori is not None:
-            data = VideoYoutube.objects.filter(kategori__slug=get_kategori)
-        headline = data.filter(headline=True).order_by('updated_at').last()
-        id_video = headline
-        print('id_video', id_video)
+        search_query = request.GET.get('q', '').strip()
+        published_videos = VideoYoutube.objects.filter(status='publish').select_related(
+            'kategori', 'author'
+        ).prefetch_related(
+            Prefetch(
+                'videocomment_set',
+                queryset=VideoComment.objects.select_related('author').prefetch_related(
+                    Prefetch(
+                        'revideocomment_set',
+                        queryset=ReVideoComment.objects.select_related('author').order_by('created_at'),
+                    )
+                ).order_by('-created_at'),
+            )
+        )
+        data = published_videos
+        if get_kategori:
+            data = data.filter(kategori__slug=get_kategori)
+        if search_query:
+            data = data.filter(
+                Q(judul_video__icontains=search_query)
+                | Q(kategori__kategori__icontains=search_query)
+            )
+        data = data.order_by('-headline', '-updated_at')
+
+        video = published_videos.filter(id_video=get_video_id).first() if get_video_id else None
+        if video and get_kategori and video.kategori.slug != get_kategori:
+            video = None
+        id_video = data.filter(headline=True).first() or data.first()
         if video:
             id_video = video
             
-        initial_comment = {
-            'video':id_video,
-            'author':request.user
-        }
         form = None
-        print('get id video', get_video_id)
         get_id = kwargs.get("id")
         instance = self.get_object(get_id)
-        if request.user.is_superuser:
-            form = VideoYoutubeForm(initial={'author':request.user}, instance=instance)
-        commentform = VideoCommentForm(initial=initial_comment)
+        if self.can_manage_tutorial(request.user):
+            kategori_awal = KategoriVideo.objects.filter(slug=get_kategori).first()
+            form = VideoYoutubeForm(
+                initial={'author': request.user, 'kategori': kategori_awal},
+                instance=instance,
+            )
+        commentform = VideoCommentForm()
         recommentform = ReVideoCommentForm()
         context={
             'form':form,
+            'kategori_form': KategoriVideoForm(),
             'commentform':commentform,
             'recommentform': recommentform,
             'get_id': get_id,
             'vid':get_video_id,
             'video':id_video,
-            'kategori':kategori,
+            'kategori': KategoriVideo.objects.annotate(
+                jumlah_video=Count('videoyoutube', filter=Q(videoyoutube__status='publish'))
+            ).order_by('kategori'),
             'data':data,
+            'kategori_aktif': get_kategori,
+            'query': search_query,
+            'jumlah_video': published_videos.count(),
             'tutorial':'active',
             'infotutorial':'active'
         }
@@ -257,9 +319,71 @@ class VideoTutorialView(LoginRequiredMixin, View):
         get_kategori = request.GET.get('kategori')
         get_id_video = request.GET.get('vid')
         instance = self.get_object(get_id)
-        commentform = VideoCommentForm(data=request.POST)
-        form = VideoYoutubeForm(data=request.POST, instance=instance)
         url_redirect = reverse('informasi_urls:tutorial_view')
+        redirect_params = {}
+        if get_kategori:
+            redirect_params['kategori'] = get_kategori
+        if get_id_video:
+            redirect_params['vid'] = get_id_video
+        redirect_url = url_redirect
+        if redirect_params:
+            redirect_url = f'{url_redirect}?{urlencode(redirect_params)}'
+
+        action = request.POST.get('action')
+        if action == 'comment':
+            video = get_object_or_404(
+                VideoYoutube,
+                pk=request.POST.get('video_id'),
+                status='publish',
+            )
+            redirect_params['vid'] = video.id_video
+            redirect_url = f'{url_redirect}?{urlencode(redirect_params)}'
+            commentform = VideoCommentForm(data=request.POST)
+            if commentform.is_valid():
+                comment = commentform.save(commit=False)
+                comment.video = video
+                comment.author = request.user
+                comment.save()
+                messages.success(request, 'Komentar berhasil dikirim.')
+                return redirect(f'{redirect_url}#discussion')
+            messages.error(request, 'Komentar belum dapat dikirim. Pastikan komentar tidak kosong.')
+            return redirect(f'{redirect_url}#discussion')
+
+        if action == 'reply':
+            parent_comment = get_object_or_404(
+                VideoComment.objects.select_related('video'),
+                pk=request.POST.get('comment_id'),
+                video__pk=request.POST.get('video_id'),
+                video__status='publish',
+            )
+            redirect_params['vid'] = parent_comment.video.id_video
+            redirect_url = f'{url_redirect}?{urlencode(redirect_params)}'
+            recommentform = ReVideoCommentForm(data=request.POST)
+            if recommentform.is_valid():
+                reply = recommentform.save(commit=False)
+                reply.comment = parent_comment
+                reply.author = request.user
+                reply.save()
+                messages.success(request, 'Balasan berhasil dikirim.')
+                return redirect(f'{redirect_url}#comment-{parent_comment.pk}')
+            messages.error(request, 'Balasan belum dapat dikirim. Pastikan balasan tidak kosong.')
+            return redirect(f'{redirect_url}#comment-{parent_comment.pk}')
+
+        if action == 'add_category':
+            if not self.can_manage_tutorial(request.user):
+                raise PermissionDenied
+            kategori_form = KategoriVideoForm(data=request.POST)
+            if kategori_form.is_valid():
+                kategori = kategori_form.save()
+                messages.success(request, 'Kategori tutorial berhasil ditambahkan.')
+                return redirect(f'{url_redirect}?kategori={kategori.slug}#openModal')
+            messages.error(request, kategori_form.errors['kategori'][0])
+            return redirect(f'{url_redirect}#openCategoryModal')
+
+        if not self.can_manage_tutorial(request.user):
+            raise PermissionDenied
+
+        form = VideoYoutubeForm(data=request.POST, instance=instance)
         if form.is_valid():
             dataform = form.save(commit=False)
             dataform.headline = form.cleaned_data.get('headline')
@@ -273,12 +397,5 @@ class VideoTutorialView(LoginRequiredMixin, View):
                 return redirect(f'{url_redirect}?kategori={get_kategori}&vid={dataform.id_video}#close')
             else:
                 return redirect(f'{url_redirect}?vid={dataform.id_video}#close')
-        if commentform.is_valid():
-            commentform.save()
-            messages.success(request, 'Data berhasil diinput!')
-            if get_kategori:
-                return redirect(f'{url_redirect}?kategori={get_kategori}&vid={get_id_video}')
-            else:
-                return redirect(f'{url_redirect}?vid={get_id_video}')
         messages.error(request, 'Mohon maaf data gagal disimpan!')
-        return redirect(f'{url_redirect}?vid={get_id_video}')
+        return redirect(redirect_url)

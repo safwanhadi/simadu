@@ -1,0 +1,12 @@
+<aside class="col-lg-3">
+    <div class="info-sidebar">
+        <div class="info-sidebar__heading"><i class="fas fa-filter"></i><div><strong>Kategori Informasi</strong><small>Pilih topik yang dibutuhkan</small></div></div>
+        <nav class="info-category-list" aria-label="Kategori informasi">
+            <a class="{% if not slug %}active{% endif %}" href="{% url 'informasi_urls:informasi_view' %}{% if query %}?q={{ query|urlencode }}{% endif %}#informasi"><span><i class="fas fa-th-large"></i>Semua informasi</span><b>{{ jumlah_informasi }}</b></a>
+            {% for item in kategori %}
+            <a class="{% if slug == item.slug %}active{% endif %}" href="{% url 'informasi_urls:informasi_view' %}?kat={{ item.slug }}{% if query %}&q={{ query|urlencode }}{% endif %}#informasi"><span><i class="far fa-folder"></i>{{ item.kategori }}</span><b>{{ item.jumlah_informasi }}</b></a>
+            {% empty %}<p class="info-sidebar__empty">Kategori belum tersedia.</p>{% endfor %}
+        </nav>
+        <a class="info-tutorial-link" href="{% url 'informasi_urls:tutorial_view' %}"><i class="fas fa-play-circle"></i><span><strong>Butuh panduan?</strong><small>Buka video tutorial pegawai</small></span><i class="fas fa-arrow-right"></i></a>
+    </div>
+</aside>

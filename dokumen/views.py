@@ -1,4 +1,6 @@
-from django.db.models import Q, Count, F, Case, When, Sum, Prefetch, IntegerField
+from django.db.models import (
+    Q, Count, F, Case, When, Sum, Prefetch, IntegerField, OuterRef, Subquery,
+)
 from django.shortcuts import render, redirect
 from django.urls import reverse, reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
@@ -10,7 +12,7 @@ from django.contrib.messages.views import SuccessMessageMixin
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.http import Http404
+from django.http import Http404, HttpResponse
 # from django.utils.text import slugify
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
@@ -19,6 +21,8 @@ from functools import lru_cache
 import os
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
 
 from layanan.services import CheckCuti
 from layanan.models import (
@@ -499,6 +503,7 @@ class DocumentAdminDashboardView(DocumentAdminRequiredMixin, ListView):
                 | Q(last_name__icontains=query)
                 | Q(email__icontains=query)
                 | Q(profil_user__nip__icontains=query)
+                | Q(profil_user__no_ktp__icontains=query)
             )
         return queryset
 
@@ -1832,6 +1837,175 @@ class RiwayatCutiUpdateView(LoginRequiredMixin, View):
         else:
             messages.error(request, form_not_valid_message)
             return redirect(reverse('riwayat_urls:riwayat_cuti'))
+
+
+class DataCutiFilterMixin:
+    """Query bersama untuk daftar dan ekspor data cuti pegawai."""
+
+    def dapat_melihat_data_cuti(self):
+        return bool(
+            self.request.user.is_superuser
+            or is_leave_admin(self.request.user)
+            or is_leave_structural_officer(self.request.user)
+        )
+
+    def get_filtered_queryset(self):
+        latest_pengangkatan = RiwayatPengangkatan.objects.filter(
+            pegawai=OuterRef('pegawai_id')
+        ).order_by('-tmt_pegawai', '-id')
+        queryset = (
+            RiwayatCuti.objects.select_related('pegawai', 'pegawai__profil_user')
+            .prefetch_related(
+                Prefetch(
+                    'pegawai__riwayat_penempatan',
+                    queryset=RiwayatPenempatan.objects.filter(status=True)
+                    .select_related(
+                        'penempatan_level1',
+                        'penempatan_level2',
+                        'penempatan_level3',
+                        'penempatan_level4',
+                    )
+                    .order_by('-updated_at', '-id'),
+                    to_attr='penempatan_aktif',
+                )
+            )
+            .annotate(
+                status_pegawai=Subquery(
+                    latest_pengangkatan.values('status_pegawai')[:1]
+                )
+            )
+        )
+
+        if not self.request.user.is_superuser:
+            pegawai_ids = filter_users_for_leave_role(
+                Users.objects.filter(is_active=True),
+                self.request.user,
+                include_self=False,
+            ).values('pk')
+            queryset = queryset.filter(pegawai_id__in=pegawai_ids)
+
+        jenis_cuti = self.request.GET.get('jenis_cuti', '').strip()
+        tahun = self.request.GET.get('tahun', '').strip()
+        keyword = self.request.GET.get('q', '').strip()
+        if jenis_cuti:
+            queryset = queryset.filter(jenis_cuti=jenis_cuti)
+        if tahun.isdigit():
+            queryset = queryset.filter(tahun_cuti=int(tahun))
+        if keyword:
+            for term in keyword.split():
+                queryset = queryset.filter(
+                    Q(pegawai__first_name__icontains=term)
+                    | Q(pegawai__last_name__icontains=term)
+                    | Q(pegawai__email__icontains=term)
+                    | Q(pegawai__profil_user__nip__icontains=term)
+                )
+        return queryset.order_by('-tahun_cuti', '-tgl_mulai_cuti', '-created_at')
+
+    @staticmethod
+    def get_penempatan(cuti):
+        penempatan = getattr(cuti.pegawai, 'penempatan_aktif', [])
+        return penempatan[0].penempatan if penempatan else '-'
+
+
+class DataCUtiMelahirkanView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    DataCutiFilterMixin,
+    ListView,
+):
+    template_name = '10_riwayat_cuti/data_cuti_melahirkan.html'
+    context_object_name = 'cuti_list'
+    paginate_by = 20
+
+    def test_func(self):
+        return self.dapat_melihat_data_cuti()
+
+    def get_queryset(self):
+        return self.get_filtered_queryset()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        for cuti in context['cuti_list']:
+            cuti.penempatan = self.get_penempatan(cuti)
+        context.update({
+            'page': 'Home',
+            'sub_page': 'Riwayat',
+            'title_page': 'Data Cuti Pegawai',
+            'riwayat': 'active',
+            'selected': 'cuti',
+            'q': self.request.GET.get('q', '').strip(),
+            'jenis_cuti_terpilih': self.request.GET.get('jenis_cuti', '').strip(),
+            'tahun_terpilih': self.request.GET.get('tahun', '').strip(),
+            'jenis_cuti_options': RiwayatCuti._meta.get_field('jenis_cuti').choices,
+            'tahun_options': (
+                RiwayatCuti.objects.exclude(tahun_cuti__isnull=True)
+                .order_by('-tahun_cuti')
+                .values_list('tahun_cuti', flat=True)
+                .distinct()
+            ),
+            'filter_query': self.request.GET.urlencode(),
+        })
+        return context
+
+
+class DataCutiExcelView(
+    LoginRequiredMixin,
+    UserPassesTestMixin,
+    DataCutiFilterMixin,
+    View,
+):
+    def test_func(self):
+        return self.dapat_melihat_data_cuti()
+
+    def get(self, request, *args, **kwargs):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = 'Data Cuti Pegawai'
+        headers = (
+            'No', 'Nama Pegawai', 'NIP', 'Status Pegawai', 'Penempatan',
+            'Jenis Cuti', 'Tanggal Mulai', 'Tanggal Selesai', 'Lama Cuti',
+            'Tahun Cuti', 'Status Pelaksanaan',
+        )
+        worksheet.append(headers)
+        header_fill = PatternFill('solid', fgColor='1F4E78')
+        for cell in worksheet[1]:
+            cell.font = Font(color='FFFFFF', bold=True)
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center')
+
+        for number, cuti in enumerate(self.get_filtered_queryset(), start=1):
+            profil = getattr(cuti.pegawai, 'profil_user', None)
+            worksheet.append((
+                number,
+                cuti.pegawai.full_name,
+                getattr(profil, 'nip', '') or '',
+                cuti.status_pegawai or '-',
+                self.get_penempatan(cuti),
+                cuti.jenis_cuti,
+                cuti.tgl_mulai_cuti,
+                cuti.tgl_akhir_cuti,
+                cuti.lama_cuti or 0,
+                cuti.tahun_cuti,
+                cuti.status_pelaksanaan_display,
+            ))
+
+        widths = (6, 30, 22, 18, 35, 25, 15, 15, 12, 12, 20)
+        for column, width in enumerate(widths, start=1):
+            worksheet.column_dimensions[chr(64 + column)].width = width
+        worksheet.freeze_panes = 'A2'
+        worksheet.auto_filter.ref = worksheet.dimensions
+
+        response = HttpResponse(
+            content_type=(
+                'application/vnd.openxmlformats-officedocument.'
+                'spreadsheetml.sheet'
+            )
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="data_cuti_pegawai_{date.today():%Y%m%d}.xlsx"'
+        )
+        workbook.save(response)
+        return response
 
 
 class RiwayatPenggunaanCutiView(LoginRequiredMixin, CheckCuti, TemplateView):

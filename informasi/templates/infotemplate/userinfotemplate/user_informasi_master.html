@@ -1,123 +1,51 @@
 {% extends 'base.html' %}
 {% load static %}
-{% load crispy_forms_tags %}
 {% load humanize %}
 
-{% block title_page %}
-
-{% endblock title_page %}
-
-{% block styles %}
-<link rel="stylesheet" href="{% static 'dist/css/informasi.css' %}">
-{% endblock styles %}
+{% block title_page %}Pusat Informasi SDM{% endblock title_page %}
+{% block styles %}<link rel="stylesheet" href="{% static 'src/informasi.css' %}">{% endblock styles %}
 
 {% block content %}
-
-<div class="container p-3 rounded" style="background-color: white;">
-    {% if request.user.is_superuser %}
-        <div class="row">
-            <div class="col-md-9">
-                <a href="{% url 'informasi_urls:add_informasi_view' %}" class="btn btn-dark">Tambah Informasi SDM</a>
-            </div>
-        </div>
-    {% endif %}
-    {% if page_obj %}
-    <div class="row">
-        <div class="col-md-12">
-            <!-- headline container here -->
-            {% if not case == 'detail' and headline %}
-                {% include 'infotemplate/userinfotemplate/headline.html' %}
-            {% endif %}
-            <!-- end of headline -->
-            <div class="row" id="informasi">
-                <!-- list or detail informasi -->
-                {% include 'infotemplate/userinfotemplate/list_card_informasi.html' %}
-                <!-- end list or detail informasi -->
-                <div class="col-md-3">
-                    <div class="col-md-12">
-                        <h6 class="art-text">Kategori Info</h6>
-                        <hr style="width:100%; height: 5px; border:0; background: linear-gradient(to right, #02b9fc, #c4e9ff);">
-                        <ul style="display: flex; flex-direction:column; gap:10px;">
-                            {% for item in kategori %}
-                            <a href="?kat={{item.slug}}#informasi" ><li class="kategori-informasi">{{item.kategori}}</li></a>    
-                            {% endfor %}
-                        </ul>
-                    </div>
-                </div>
-            </div>
+<main class="info-page container-fluid px-0">
+    <section class="info-hero">
+        <div class="info-hero__content">
+            <span class="info-eyebrow"><i class="fas fa-bullhorn mr-2"></i>Pusat Informasi Pegawai</span>
+            <h1>Informasi penting, lebih mudah ditemukan</h1>
+            <p>Ikuti pengumuman, panduan, dan pembaruan layanan SDM rumah sakit dalam satu tempat.</p>
             {% if not case == 'detail' %}
-            <div class="row mt-5">
-                <div class="col-md-12">
-                    <div class="pagination">
-                        {% if page_obj.has_previous %}
-                        <li><a href="?page={{ page_obj.previous_page_number }}"><< Prev</a></li>
-
-                        {% if page_obj.number > 3 %}
-                            <li><a href="?page=1">1</a></li>
-                            {% if page_obj.number > 4 %}
-                            <li><a >...</a></li>
-                            {% endif %}
-                        {% endif %}
-                        {% endif %}
-
-                        {% for num in page_obj.paginator.page_range %}
-                        {% if page_obj.number == num %}
-                            <li><a href="?page={{ num }}">({{ num }})</a></li>
-                        {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
-                            <li><a href="?page={{ num }}">({{ num }})</a></li>
-                        {% endif %}
-                        {% endfor %}
-
-                        {% if page_obj.has_next %}
-                        {% if page_obj.number < page_obj.paginator.num_pages|add:'-3' %}
-                            <li><a >...</a></li>
-                            <li><a href="?page={{ page_obj.paginator.num_pages }}">
-                            ({{ page_obj.paginator.num_pages }})
-                            </a></li>
-                        {% elif page_obj.number < page_obj.paginator.num_pages|add:'-2' %}
-                            <li><a href="?page={{ page_obj.paginator.num_pages }}">
-                            ({{ page_obj.paginator.num_pages }})
-                            </a></li>
-                        {% endif %}
-
-                        <li><a href="?page={{ page_obj.next_page_number }}">Next >></a></li>
-                        {% endif %}
-
-                    </div>
-                </div>
-            </div>
+            <form method="get" action="{% url 'informasi_urls:informasi_view' %}" class="info-search" role="search">
+                {% if slug %}<input type="hidden" name="kat" value="{{ slug }}">{% endif %}
+                <label class="sr-only" for="information-search">Cari informasi</label><i class="fas fa-search"></i>
+                <input id="information-search" name="q" value="{{ query }}" placeholder="Cari judul, isi, atau kategori informasi...">
+                <button type="submit">Cari</button>
+            </form>
             {% endif %}
         </div>
-    </div>
-    {% elif case == 'detail' %}
-    <div class="row" id="informasi">
-        <!-- list or detail informasi -->
+        <div class="info-hero__icon" aria-hidden="true"><i class="far fa-newspaper"></i></div>
+    </section>
+
+    {% if request.user.is_superuser %}
+    <div class="info-admin-action"><a href="{% url 'informasi_urls:add_informasi_view' %}" class="btn btn-primary"><i class="fas fa-plus mr-2"></i>Tambah Informasi SDM</a></div>
+    {% endif %}
+
+    {% if case == 'detail' %}
+    <div class="row info-layout" id="informasi">
         {% include 'infotemplate/userinfotemplate/singleinformasi.html' %}
-        <!-- end list or detail informasi -->
-        <div class="col-md-3">
-            <div class="col-md-12">
-                <h6 class="art-text">Kategori Info</h6>
-                <hr style="width:100%; height: 5px; border:0; background: linear-gradient(to right, #02b9fc, #c4e9ff);">
-                <ul style="display: flex; flex-direction:column; gap:10px;">
-                    {% for item in kategori %}
-                    <a href="?kat={{item.slug}}#informasi" ><li class="kategori-informasi">{{item.kategori}}</li></a>    
-                    {% endfor %}
-                </ul>
-            </div>
-        </div>
+        {% include 'infotemplate/userinfotemplate/information_categories.html' %}
     </div>
     {% else %}
-    <div class="row">
-        <div class="col-md-12 d-flex justify-content-center">
-            <h3>Belum ada informasi yang dapat ditampilkan</h3>
+        {% if headline and not query and not slug %}{% include 'infotemplate/userinfotemplate/headline.html' %}{% endif %}
+        <div class="row info-layout" id="informasi">
+            {% include 'infotemplate/userinfotemplate/list_card_informasi.html' %}
+            {% include 'infotemplate/userinfotemplate/information_categories.html' %}
         </div>
-    </div>
+        {% if page_obj.paginator.num_pages > 1 %}
+        <nav aria-label="Navigasi halaman informasi" class="info-pagination">
+            {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}{% if slug %}&kat={{ slug }}{% endif %}{% if query %}&q={{ query|urlencode }}{% endif %}"><i class="fas fa-chevron-left"></i><span>Sebelumnya</span></a>{% endif %}
+            <span class="info-pagination__current">Halaman {{ page_obj.number }} dari {{ page_obj.paginator.num_pages }}</span>
+            {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}{% if slug %}&kat={{ slug }}{% endif %}{% if query %}&q={{ query|urlencode }}{% endif %}"><span>Berikutnya</span><i class="fas fa-chevron-right"></i></a>{% endif %}
+        </nav>
+        {% endif %}
     {% endif %}
-</div>
-{% endblock %}
-
-
-
-{% block script %}
-
-{% endblock script %}
+</main>
+{% endblock content %}

@@ -21,7 +21,7 @@
         </div>
         <form method="get" class="mb-3">
             <div class="input-group">
-                <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Cari nama, email, atau NIP">
+                <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Cari nama, email, NIP, atau NIK">
                 <div class="input-group-append">
                     <button class="btn btn-primary"><i class="fas fa-search"></i> Cari</button>
                     {% if q %}<a href="{% url 'riwayat_urls:document_admin_dashboard' %}" class="btn btn-secondary">Reset</a>{% endif %}
@@ -30,13 +30,14 @@
         </form>
         <div class="table-responsive">
             <table class="table table-bordered table-hover">
-                <thead><tr><th>Nama</th><th>Email</th><th>NIP/NIK</th><th>Nomor HP</th><th>Aksi</th></tr></thead>
+                <thead><tr><th>Nama</th><th>Email</th><th>NIP</th><th>NIK</th><th>Nomor HP</th><th>Aksi</th></tr></thead>
                 <tbody>
                     {% for employee in employee_list %}
                     <tr>
                         <td>{{ employee.full_name|default:'-' }}</td>
                         <td>{{ employee.email }}</td>
                         <td>{{ employee.profil_user.nip|default:'-' }}</td>
+                        <td>{{ employee.profil_user.no_ktp|default:'-' }}</td>
                         <td>{{ employee.profil_user.no_hp|default:'-' }}</td>
                         <td>
                             {% if employee.profil_user.nip %}
@@ -44,7 +45,7 @@
                             {% else %}<span class="text-muted">Profil belum lengkap</span>{% endif %}
                         </td>
                     </tr>
-                    {% empty %}<tr><td colspan="5" class="text-center text-muted">Pegawai tidak ditemukan.</td></tr>{% endfor %}
+                    {% empty %}<tr><td colspan="6" class="text-center text-muted">Pegawai tidak ditemukan.</td></tr>{% endfor %}
                 </tbody>
             </table>
         </div>

@@ -45,8 +45,13 @@
                 Daftar pengajuan cuti pegawai di bawah kewenangan Anda.
             </p>
         </div>
-        {% if is_cuti_scope_admin %}
+        {% if can_view_subordinates %}
         <div class="d-flex flex-wrap gap-2">
+            <a href="{% url 'riwayat_urls:riwayat_cuti_melahirkan' %}"
+               class="btn btn-outline-primary">
+                <i class="fas fa-list-alt mr-1"></i>Data Cuti Pegawai
+            </a>
+            {% if is_cuti_scope_admin %}
             <a href="{% url 'riwayat_urls:riwayat_cuti_monitoring' %}"
                class="btn btn-outline-success">
                 <i class="fas fa-calendar-check mr-1"></i>Monitoring Sisa Cuti
@@ -55,6 +60,7 @@
                class="btn btn-outline-warning">
                 <i class="fas fa-broom mr-1"></i>Pemutihan Status
             </a>
+            {% endif %}
         </div>
         {% endif %}
     </div>

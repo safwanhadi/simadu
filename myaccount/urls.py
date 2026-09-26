@@ -42,7 +42,10 @@ from .views import (
     SSOApplicationRotateSecretView,
     SSOApplicationUpdateView,
 )
-from .views_api import api_me, PegawaiAPIView, DokterSpesialisAPIView, DetailMeAPIView
+from .views_api import (
+    api_me, DetailMeAPIView, DokterSpesialisAPIView, PegawaiAPIView,
+    TenagaPerawatAktifAPIView,
+)
 from .telegram_views import (
     TelegramPasswordResetCompleteView,
     TelegramPasswordResetConfirmView,
@@ -103,6 +106,7 @@ urlpatterns=[
     path('api/me/', DetailMeAPIView.as_view(), name='api_me'),
     path('api/pegawai/', PegawaiAPIView.as_view(), name='pegawai_api_view'),
     path('api/dokter-spesialis/', DokterSpesialisAPIView.as_view(), name='dokter_spesialis_api_view'),
+    path('api/pegawai-perawat-aktif/', TenagaPerawatAktifAPIView.as_view(), name='pegawai_perawat_aktif_api_view'),
     path('api/pegawai/me/', DetailMeAPIView.as_view(), name='detail_me_api_view'),
     path('sso/', sso_portal, name='sso_portal'),
     path('sso/<str:client_key>/', sso_go, name='sso_go'),

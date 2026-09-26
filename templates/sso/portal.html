@@ -118,7 +118,7 @@
                                             </span>
 
                                             <div class="{{ app.bg_class }} w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform duration-300 group-hover:scale-110 shadow-lg">
-                                                <i class="{{ app.icon }} text-white text-xl"></i>
+                                                {% if app.icon_image %}<img src="{% static app.icon_image %}" alt="" class="w-9 h-9" aria-hidden="true">{% else %}<i class="{{ app.icon }} text-white text-xl"></i>{% endif %}
                                             </div>
                                             <h3 class="font-bold text-gray-800 text-sm md:text-base">{{ app.name }}</h3>
                                             <span class="text-xs text-gray-400 mt-1 uppercase tracking-wider">{{ app.category }}</span>
@@ -133,7 +133,7 @@
                                             </span>
 
                                             <div class="{{ app.bg_class }} w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform duration-300 group-hover:scale-110 shadow-lg">
-                                                <i class="{{ app.icon }} text-white text-xl"></i>
+                                                {% if app.icon_image %}<img src="{% static app.icon_image %}" alt="" class="w-9 h-9" aria-hidden="true">{% else %}<i class="{{ app.icon }} text-white text-xl"></i>{% endif %}
                                             </div>
                                             <h3 class="font-bold text-gray-800 text-sm md:text-base">{{ app.name }}</h3>
                                             <span class="text-xs text-gray-400 mt-1 uppercase tracking-wider">{{ app.category }}</span>
@@ -147,7 +147,7 @@
                                         class="app-item app-card bg-white p-6 rounded-2xl border border-gray-100 flex flex-col items-center text-center shadow-sm hover:shadow-xl transition-all duration-300 group">
                                         
                                         <div class="{{ app.bg_class }} w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform duration-300 group-hover:scale-110 shadow-lg">
-                                            <i class="{{ app.icon }} text-white text-xl"></i>
+                                            {% if app.icon_image %}<img src="{% static app.icon_image %}" alt="" class="w-9 h-9" aria-hidden="true">{% else %}<i class="{{ app.icon }} text-white text-xl"></i>{% endif %}
                                         </div>
                                         <h3 class="font-bold text-gray-800 text-sm md:text-base">{{ app.name }}</h3>
                                         <span class="text-xs text-gray-400 mt-1 uppercase tracking-wider">{{ app.category }}</span>
@@ -158,7 +158,7 @@
                                         class="app-item app-card bg-white p-6 rounded-2xl border border-gray-100 flex flex-col items-center text-center shadow-sm hover:shadow-xl transition-all duration-300 group">
                                         
                                         <div class="{{ app.bg_class }} w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform duration-300 group-hover:scale-110 shadow-lg">
-                                            <i class="{{ app.icon }} text-white text-xl"></i>
+                                            {% if app.icon_image %}<img src="{% static app.icon_image %}" alt="" class="w-9 h-9" aria-hidden="true">{% else %}<i class="{{ app.icon }} text-white text-xl"></i>{% endif %}
                                         </div>
                                         <h3 class="font-bold text-gray-800 text-sm md:text-base">{{ app.name }}</h3>
                                         <span class="text-xs text-gray-400 mt-1 uppercase tracking-wider">{{ app.category }}</span>
@@ -183,7 +183,7 @@
                             <div class="app-item opacity-75 grayscale bg-white p-6 rounded-2xl border border-dashed border-gray-300 flex flex-col items-center text-center relative overflow-hidden group">
                                 <div class="absolute top-0 right-0 bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-bl-lg">ON DEV</div>
                                 <div class="bg-gray-200 w-14 h-14 rounded-2xl flex items-center justify-center mb-3">
-                                    <i class="{{ app.icon }} text-gray-500 text-xl"></i>
+                                    {% if app.icon_image %}<img src="{% static app.icon_image %}" alt="" class="w-9 h-9 grayscale" aria-hidden="true">{% else %}<i class="{{ app.icon }} text-gray-500 text-xl"></i>{% endif %}
                                 </div>
                                 <h3 class="font-bold text-gray-600 text-sm md:text-base">{{ app.name }}</h3>
                                 <p class="text-[10px] text-amber-600 mt-1 font-medium italic">Sedang disiapkan</p>
@@ -194,7 +194,7 @@
                                 <div class="app-item opacity-75 grayscale bg-white p-6 rounded-2xl border border-dashed border-gray-300 flex flex-col items-center text-center relative overflow-hidden group">
                                     <div class="absolute top-0 right-0 bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-bl-lg">ON DEV</div>
                                     <div class="bg-gray-200 w-14 h-14 rounded-2xl flex items-center justify-center mb-3">
-                                        <i class="{{ app.icon }} text-gray-500 text-xl"></i>
+                                        {% if app.icon_image %}<img src="{% static app.icon_image %}" alt="" class="w-9 h-9 grayscale" aria-hidden="true">{% else %}<i class="{{ app.icon }} text-gray-500 text-xl"></i>{% endif %}
                                     </div>
                                     <h3 class="font-bold text-gray-600 text-sm md:text-base">{{ app.name }}</h3>
                                     <p class="text-[10px] text-amber-600 mt-1 font-medium italic">Sedang disiapkan</p>

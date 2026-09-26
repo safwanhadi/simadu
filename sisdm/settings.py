@@ -349,6 +349,7 @@ APP_VISUAL = {
     },
     "admin_epasien": {
         "icon": "fas fa-user-injured", 
+        "icon_image": "images/sso/admin-web.svg",
         "bg_class": "bg-gradient-to-br from-cyan-500 to-blue-600",
         "category": "Admin MandaCare",
     },
@@ -394,6 +395,7 @@ APP_VISUAL = {
     },
     "akreditasi": {
         "icon": "fas fa-clipboard-check",
+        "icon_image": "images/sso/akreditasi.svg",
         "bg_class": "bg-gradient-to-br from-teal-500 to-cyan-600",
         "category": "Mutu & Akreditasi",
     },

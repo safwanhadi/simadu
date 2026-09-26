@@ -141,6 +141,7 @@ class DocumentAccessSecurityTests(TestCase):
         ProfilSDM.objects.create(
             user=cls.other_employee,
             nip='19870002',
+            no_ktp='5201000000000002',
             no_hp='081200000002',
             email_pribadi=cls.other_employee.email,
         )
@@ -1141,6 +1142,20 @@ class DocumentAccessSecurityTests(TestCase):
         )
         self.assertEqual(allowed.status_code, 200)
         self.assertContains(allowed, self.other_employee.email)
+
+    def test_dashboard_admin_dokumen_menampilkan_dan_mencari_nik(self):
+        self.client.force_login(self.document_admin)
+
+        response = self.client.get(
+            reverse('riwayat_urls:document_admin_dashboard'),
+            {'q': self.other_employee.profil_user.no_ktp},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<th>NIK</th>', html=True)
+        self.assertContains(response, self.other_employee.profil_user.no_ktp)
+        self.assertContains(response, self.other_employee.email)
+        self.assertNotContains(response, self.employee.email)
 
     def test_pengurutan_dokumen_hanya_untuk_admin_dokumen(self):
         url = reverse(

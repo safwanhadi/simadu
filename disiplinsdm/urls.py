@@ -1,5 +1,6 @@
 from django.urls import path
 from .pdf_views import DownloadPresensiBulananPDFView
+from .api_views import JadwalDokterAPIView
 from .views import (    
     JadwalListView,
     DeleteJadwalView,
@@ -51,6 +52,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path('api/jadwal-dokter/', JadwalDokterAPIView.as_view(), name='api_jadwal_dokter'),
     path('', JadwalListView.as_view(), name='jadwal_list'),
     path('updatejadwal/<int:pk>/', JadwalUpdateView.as_view(), name='jadwal_update_view'),
     path('deletejadwal/<int:id>/', DeleteJadwalView.as_view(), name='jadwal_delete_view'),
