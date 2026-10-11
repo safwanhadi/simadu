@@ -2065,7 +2065,7 @@ class JadwalListView(LoginRequiredMixin, generic.ListView):
         tahun = form.data.get('tahun')
 
         if pegawai and bulan and tahun:
-            existing = JenisSDMPerinstalasi.objects.filter(pegawai__id=pegawai, bulan=bulan, tahun=tahun).first()
+            existing = JenisSDMPerinstalasi.objects.filter(pegawai__id=pegawai, bulan=bulan, tahun=tahun).order_by('-id').first()
             if existing:
                 messages.info(request, 'Jadwal sudah ada untuk pegawai ini pada bulan dan tahun tersebut.')
                 return redirect(reverse('disiplinsdm_urls:jadwal_auto_create', kwargs={'pk': existing.pk}))

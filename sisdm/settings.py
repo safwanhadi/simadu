@@ -15,6 +15,7 @@ from django.contrib import messages
 from decouple import config
 
 from sisdm.scopes import Scopes
+from sisdm.portal_defaults import APP_VISUAL, SSO_CLIENTS
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -336,176 +337,6 @@ LOGGING = {
 }
 """
 
-APP_VISUAL = {
-    "simadu": {
-        "icon": "fas fa-users-cog",
-        "bg_class": "bg-gradient-to-br from-indigo-500 to-indigo-600",
-        "category": "Kepegawaian",
-    },
-    "simrs": {
-        "icon": "fas fa-hospital-user",
-        "bg_class": "bg-gradient-to-br from-blue-500 to-teal-600",
-        "category": "Rekam Medis",
-    },
-    "admin_epasien": {
-        "icon": "fas fa-user-injured", 
-        "icon_image": "images/sso/admin-web.svg",
-        "bg_class": "bg-gradient-to-br from-cyan-500 to-blue-600",
-        "category": "Admin MandaCare",
-    },
-    "remun": {
-        "icon": "fas fa-coins",
-        "bg_class": "bg-gradient-to-br from-emerald-500 to-teal-600",
-        "category": "Keuangan",
-    },
-    "dashboard": {
-        "icon": "fas fa-chart-line",
-        "bg_class": "bg-gradient-to-br from-green-500 to-teal-600",
-        "category": "Dashboard",
-    },
-    "anggaran": {
-        "icon": "fas fa-balance-scale",
-        "bg_class": "bg-gradient-to-br from-amber-500 to-teal-600",
-        "category": "Keuangan",
-    },
-    "perencanaan": {
-        "icon": "fas fa-clipboard-list",
-        "bg_class": "bg-gradient-to-br from-yellow-500 to-teal-600",
-        "category": "Perencanaan",
-    },
-    "aset": {
-        "icon": "fas fa-boxes",
-        "bg_class": "bg-gradient-to-br from-amber-500 to-teal-600",
-        "category": "Aset",
-    },
-    "pemeliharaan": {
-        "icon": "fas fa-wrench",
-        "bg_class": "bg-gradient-to-br from-red-500 to-teal-600",
-        "category": "Pemeliharaan",
-    },
-    "koperasi": {
-        "icon": "fas fa-balance-scale",
-        "bg_class": "bg-gradient-to-br from-blue-500 to-teal-600",
-        "category": "Koperasi & Syariah",
-    },
-    "datahub": {
-        "icon": "fas fa-chart-bar",
-        "bg_class": "bg-gradient-to-br from-purple-500 to-indigo-600",
-        "category": "Data & Analitik",
-    },
-    "akreditasi": {
-        "icon": "fas fa-clipboard-check",
-        "icon_image": "images/sso/akreditasi.svg",
-        "bg_class": "bg-gradient-to-br from-teal-500 to-cyan-600",
-        "category": "Mutu & Akreditasi",
-    },
-    # tambahkan aplikasi lain di sini
-}
-
-SSO_CLIENTS = {
-    "simadu": {
-        "label": "SIMADU",
-        "type": "local",  # login internal SIMADU
-        "dashboard": "/",
-        "dashboard_absensi": "/dashboard-absensi/",
-        "login_url": None,
-    },"simrs": {
-        "label": "SIMRS",
-        "type": "oauth_client",
-        # ini DIDAPAT dari DOT Application untuk SIMRS (client_id + redirect_uri)
-        "client_id": config("SIMRS_CLIENT_ID"),
-        "redirect_uri": "http://simrs.rsmandalika.com/callback/",
-        "login_url": None,
-        "scopes": "read:rm_read write:rm_write",
-    },
-    "admin_epasien": {
-        "label": "MANDACARE",
-        "type": "oauth_client",
-        "client_id": config("EPASIEN_CLIENT_ID"),
-        "redirect_uri": "http://mandacare.rsmandalika.com/admin-web/sso/callback/",
-        "login_url": "https://mandacare.rsmandalika.com/admin-web/sso/login/",
-        "scopes": "read:pasien",
-    },
-    "remun": {
-        "label": "REMUNERASI",
-        "type": "oauth_client",
-        # ini DIDAPAT dari DOT Application untuk REMUN (client_id + redirect_uri)
-        "client_id": config("REMUN_CLIENT_ID"),
-        "redirect_uri": "http://simrs.rsmandalika.com/callback/",
-        "login_url": None,
-        "scopes": "read:pegawai",
-    },
-    "anggaran": {
-        "label": "ANGGARAN",
-        "type": "oauth_client",
-        # ini DIDAPAT dari DOT Application untuk ANGGARAN (client_id + redirect_uri)
-        "client_id": config("ANGGARAN_CLIENT_ID"),
-        "redirect_uri": "http://simrs.rsmandalika.com/callback/",
-        "login_url": None,
-        "scopes": "read:anggaran",
-    },
-    "perencanaan": {
-        "label": "PERENCANAAN",
-        "type": "oauth_client",
-        # ini DIDAPAT dari DOT Application untuk PERENCANAAN (client_id + redirect_uri)
-        "client_id": config("PERENCANAAN_CLIENT_ID"),
-        "redirect_uri": "http://simrs.rsmandalika.com/callback/",
-        "login_url": None,
-        "scopes": "read:perencanaan",
-    },
-    "aset": {
-        "label": "ASET",
-        "type": "oauth_client",
-        # ini DIDAPAT dari DOT Application untuk aset (client_id + redirect_uri)
-        "client_id": config("ASET_CLIENT_ID"),
-        "redirect_uri": "http://simrs.rsmandalika.com/callback/",
-        "login_url": None,
-        "scopes": "read:aset",
-    },
-    "dashboard": {
-        "label": "DASHBOARD",
-        "type": "oauth_client",
-        # ini DIDAPAT dari DOT Application untuk DASHBOARD (client_id + redirect_uri)
-        "client_id": config("DASHBOARD_CLIENT_ID"),
-        "redirect_uri": "https://dash.rsmandalika.com/callback/",
-        "login_url": None,
-        "scopes": "read:dash",
-    },
-    "pemeliharaan": {
-        "label": "PEMELIHARAAN",
-        "type": "oauth_client",
-        # ini DIDAPAT dari DOT Application untuk pemeliharaan (client_id + redirect_uri)
-        "client_id": config("PEMELIHARAAN_CLIENT_ID"),
-        "redirect_uri": "http://simrs.rsmandalika.com/callback/",
-        "login_url": None,
-        "scopes": "read:pemeliharaan",
-    },
-    "koperasi": {
-        "label": "KOPERASI",
-        "type": "oauth_client",
-        "client_id": config("KOPERASI_CLIENT_ID"),
-        "redirect_uri": "http://127.0.0.1:3000/api/auth/callback/django-oauth2",
-        "login_url": None,
-        "scopes": "read:koperasi",
-    },
-    "datahub": {
-        "label": "DATAHUB",
-        "type": "oauth_client",
-        "client_id": config("DASHBOARD_CLIENT_ID"),
-        "redirect_uri": "https://datahub.rsmandalika.com/accounts/callback/",
-        "login_url": "https://datahub.rsmandalika.com/accounts/simadu/launch/",
-        "scopes": "read:pegawai",
-    },
-    "akreditasi": {
-        "label": "SELF ASSESSMENT AKREDITASI",
-        "type": "oauth_client",
-        "client_id": config("AKREDITASI_CLIENT_ID"),
-        "redirect_uri": "https://akreditasi.rsmandalika.com/sso/simadu/callback/",
-        "login_url": "https://akreditasi.rsmandalika.com/sso/simadu/",
-        "scopes": "read:pegawai",
-    },
-    # tambah aplikasi lain tinggal copy ini
-}
 SSO_AUTH_BASE = "https://simadu.rsmandalika.com"  # base SIMADU sendiri
 PRESENSI_BASE_URL = "http://172.16.16.19"  # base Flask Bridge untuk presensi
 
@@ -521,6 +352,8 @@ OAUTH2_PROVIDER = {
     "ACCESS_TOKEN_EXPIRE_SECONDS": 3600,
     "REFRESH_TOKEN_EXPIRE_SECONDS": 7 * 24 * 3600,
     "SCOPES": Scopes.as_choices(),
+    # Permintaan tanpa scope hanya memperoleh izin membaca profil pegawai.
+    "DEFAULT_SCOPES": [Scopes.READ_PEGAWAI],
 }
 
 

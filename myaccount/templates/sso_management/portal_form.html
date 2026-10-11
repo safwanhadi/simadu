@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-9">
+    <div class="card card-primary card-outline">
+      <div class="card-header"><h3 class="card-title">{{ card_title }}</h3></div>
+      <form method="post" novalidate>
+        {% csrf_token %}
+        <div class="card-body">
+          {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+          {% for field in form %}
+            {% if field.name == 'enabled' %}
+            <div class="custom-control custom-switch mb-3">
+              {{ field }}<label class="custom-control-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            </div>
+            {% else %}
+            <div class="form-group" data-field="{{ field.name }}">
+              <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% if field.help_text %}<small class="form-text text-muted">{{ field.help_text }}</small>{% endif %}
+              {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            {% endif %}
+          {% endfor %}
+        </div>
+        <div class="card-footer d-flex justify-content-between">
+          <a href="{% url 'myaccount_urls:sso_portal_application_list' %}" class="btn btn-secondary">Kembali</a>
+          <button class="btn btn-primary" type="submit"><i class="fas fa-save mr-1"></i>Simpan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+  (function () {
+    var type = document.getElementById('id_type');
+    if (!type) return;
+    function updateFields() {
+      var local = type.value === 'local';
+      ['client_id', 'redirect_uri', 'scopes'].forEach(function (name) {
+        var field = document.querySelector('[data-field="' + name + '"]');
+        if (field) field.hidden = local;
+      });
+      ['dashboard', 'dashboard_absensi'].forEach(function (name) {
+        var field = document.querySelector('[data-field="' + name + '"]');
+        if (field) field.hidden = !local;
+      });
+    }
+    type.addEventListener('change', updateFields);
+    updateFields();
+  }());
+</script>
+{% endblock %}

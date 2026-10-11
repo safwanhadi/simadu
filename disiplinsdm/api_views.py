@@ -5,9 +5,9 @@ from django.utils.dateparse import parse_date
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.exceptions import ValidationError
 from rest_framework.generics import ListAPIView
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.serializers import ModelSerializer, SerializerMethodField
 from oauth2_provider.contrib.rest_framework import OAuth2Authentication
+from oauth2_provider.contrib.rest_framework.permissions import IsAuthenticatedOrTokenHasScope
 
 from .models import ApprovedJadwalDinasSDM
 
@@ -17,6 +17,7 @@ class JadwalDokterSerializer(ModelSerializer):
 
     dokter_id = SerializerMethodField()
     nama_dokter = SerializerMethodField()
+    nama_lengkap_dokter = SerializerMethodField()
     nik = SerializerMethodField()
     nip = SerializerMethodField()
     identitas_valid = SerializerMethodField()
@@ -28,9 +29,10 @@ class JadwalDokterSerializer(ModelSerializer):
     class Meta:
         model = ApprovedJadwalDinasSDM
         fields = (
-            'id', 'tanggal', 'dokter_id', 'nama_dokter', 'nik', 'nip',
-            'identitas_valid', 'instalasi', 'kategori_jadwal',
-            'waktu_mulai', 'waktu_selesai', 'catatan',
+            'id', 'tanggal', 'dokter_id', 'nama_dokter',
+            'nama_lengkap_dokter', 'nik', 'nip', 'identitas_valid',
+            'instalasi', 'kategori_jadwal', 'waktu_mulai',
+            'waktu_selesai', 'catatan',
         )
 
     @staticmethod
@@ -43,11 +45,16 @@ class JadwalDokterSerializer(ModelSerializer):
     def get_nama_dokter(self, obj):
         return self._dokter(obj).full_name_2
 
+    def get_nama_lengkap_dokter(self, obj):
+        return self._dokter(obj).full_name_2
+
     def get_nik(self, obj):
-        return self._dokter(obj).profil_user.no_ktp or None
+        profil = getattr(self._dokter(obj), 'profil_user', None)
+        return profil.no_ktp or None if profil else None
 
     def get_nip(self, obj):
-        return self._dokter(obj).profil_user.nip or None
+        profil = getattr(self._dokter(obj), 'profil_user', None)
+        return profil.nip or None if profil else None
 
     def get_identitas_valid(self, obj):
         """True hanya bila NIK dan NIP tersedia untuk pencocokan sistem tujuan."""
@@ -72,11 +79,13 @@ class JadwalDokterAPIView(ListAPIView):
 
     Tanpa parameter, endpoint mengembalikan jadwal hari ini. Gunakan ``tanggal``
     atau pasangan ``mulai`` dan ``sampai`` (format YYYY-MM-DD) untuk jadwal pada
-    tanggal atau rentang tertentu.
+    tanggal atau rentang tertentu. Hasil dapat disaring lagi menggunakan
+    ``dokter_id``, ``nik``, ``nip``, dan ``instalasi``.
     """
 
     authentication_classes = [OAuth2Authentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrTokenHasScope]
+    required_scopes = ['read:listpegawai']
     serializer_class = JadwalDokterSerializer
     pagination_class = None
 
@@ -88,6 +97,12 @@ class JadwalDokterAPIView(ListAPIView):
         if not tanggal:
             raise ValidationError({nama: 'Gunakan format tanggal YYYY-MM-DD.'})
         return tanggal
+
+    def _filter_teks(self, queryset, parameter, lookup):
+        nilai = self.request.query_params.get(parameter)
+        if nilai and nilai.strip():
+            return queryset.filter(**{lookup: nilai.strip()})
+        return queryset
 
     def get_queryset(self):
         tanggal = self._tanggal_parameter('tanggal')
@@ -120,11 +135,27 @@ class JadwalDokterAPIView(ListAPIView):
         )
 
         if tanggal:
-            return queryset.filter(tanggal=tanggal)
-        if mulai:
+            queryset = queryset.filter(tanggal=tanggal)
+        elif mulai:
             queryset = queryset.filter(tanggal__gte=mulai)
         if sampai:
             queryset = queryset.filter(tanggal__lte=sampai)
-        if not mulai and not sampai:
+        if not tanggal and not mulai and not sampai:
             queryset = queryset.filter(tanggal=date.today())
+
+        dokter_id = self.request.query_params.get('dokter_id')
+        if dokter_id:
+            if not dokter_id.isdigit():
+                raise ValidationError({'dokter_id': 'Gunakan ID dokter berupa angka.'})
+            queryset = queryset.filter(pegawai__pegawai_id=dokter_id)
+
+        queryset = self._filter_teks(
+            queryset, 'nik', 'pegawai__pegawai__profil_user__no_ktp'
+        )
+        queryset = self._filter_teks(
+            queryset, 'nip', 'pegawai__pegawai__profil_user__nip'
+        )
+        queryset = self._filter_teks(
+            queryset, 'instalasi', 'pegawai__instalasi__instalasi__iexact'
+        )
         return queryset

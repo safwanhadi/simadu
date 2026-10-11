@@ -1,13 +1,57 @@
-{% extends "oauth2_provider/base.html" %}
-
-{% load i18n %}
-{% block content %}
-    <div class="block-center">
+﻿{% load static %}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Persetujuan akses | SIMADU</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 32px 20px; font-family: system-ui, sans-serif; color: #183247; background: radial-gradient(ellipse at top, #dceef4, #f4f7fa 65%); }
+        .card { width: 100%; max-width: 510px; background: #fff; border: 1px solid #e2e9ef; border-radius: 24px; box-shadow: 0 20px 70px #18324712; overflow: hidden; }
+        .brand { display: flex; align-items: center; gap: 14px; padding: 24px 32px; border-bottom: 1px solid #edf1f5; }
+        .brand img { width: 44px; height: 44px; object-fit: contain; }
+        .brand strong { display: block; letter-spacing: .08em; }
+        .brand span, .footer { font-size: 12px; color: #617589; }
+        .content { padding: 32px; }
+        .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .1em; color: #087b86; text-transform: uppercase; }
+        h1 { font-size: 26px; line-height: 1.3; margin: 12px 0 16px; overflow-wrap: anywhere; }
+        p { font-size: 14px; line-height: 1.7; color: #526779; }
+        .access { margin: 24px 0; padding: 18px 20px; background: #f1f8fa; border: 1px solid #dbecef; border-radius: 14px; }
+        .access p { margin: 8px 0 0; }
+        .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+        button { padding: 13px 18px; border-radius: 10px; border: 1px solid #d7e1e8; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+        .primary { flex: 1; color: #fff; background: #087b86; border-color: #087b86; overflow-wrap: anywhere; }
+        .primary:hover { background: #066873; }
+        .secondary { color: #526779; background: #fff; }
+        button:focus-visible { outline: 3px solid #70c8dc; outline-offset: 3px; }
+        .error { background: #fff3f3; border-radius: 12px; padding: 16px; color: #983d3d; overflow-wrap: anywhere; }
+        .errorlist { color: #983d3d; font-size: 14px; }
+        .footer { margin: 0; padding: 18px 32px; border-top: 1px solid #edf1f5; text-align: center; }
+        @media (max-width: 420px) { .brand, .content { padding: 24px; } h1 { font-size: 23px; } .actions { flex-direction: column; } }
+    </style>
+</head>
+<body>
+<main class="card">
+    <header class="brand">
+        <img src="{% static 'dist/img/logo_rsmandalika.png' %}" alt="Logo RS Mandalika">
+        <div><strong>SIMADU</strong><span>Layanan akun terintegrasi RS Mandalika</span></div>
+    </header>
+    <section class="content">
         {% if not error %}
+            <div class="eyebrow">Persetujuan akses</div>
+            <h1>Masuk ke {{ application.name }} menggunakan akun SIMADU</h1>
+            <p>Tinjau akses yang diminta sebelum melanjutkan ke aplikasi.</p>
+            <div class="access">
+                <strong>Akses yang Anda setujui</strong>
+                {% if form.scope.value == 'read:pegawai' %}
+                    <p>{{ application.name }} meminta izin untuk membaca informasi dasar pegawai guna mengenali akun Anda.</p>
+                {% else %}
+                    <p>{{ application.name }} meminta akses berikut: {{ scopes_descriptions|join:"; " }}.</p>
+                {% endif %}
+            </div>
             <form id="authorizationForm" method="post">
-                <h3 class="block-center-heading">{% trans "Authorize" %} {{ application.name }}?</h3>
                 {% csrf_token %}
-
                 {{ form.redirect_uri }}
                 {{ form.scope }}
                 {{ form.nonce }}
@@ -17,27 +61,20 @@
                 {{ form.code_challenge }}
                 {{ form.code_challenge_method }}
                 {{ form.claims }}
-
-                <p>{% trans "Application requires the following permissions" %}</p>
-                <ul>
-                    {% for scope in scopes_descriptions %}
-                        <li>{{ scope }}</li>
-                    {% endfor %}
-                </ul>
-
                 {{ form.errors }}
-                {{ form.non_field_errors }}
-
-                <div class="control-group">
-                    <div class="controls">
-                        <input type="submit" class="btn btn-large" value="{% trans 'Cancel' %}">
-                        <input type="submit" class="btn btn-large btn-primary" name="allow" value="{% trans 'Authorize' %}">
-                    </div>
+                <div class="actions">
+                    <button class="secondary" type="submit">Batalkan</button>
+                    <button class="primary" type="submit" name="allow" value="true">Lanjutkan ke {{ application.name }}</button>
                 </div>
             </form>
         {% else %}
-            <h2>Error: {{ error.error }}</h2>
-            <p>{{ error.description }}</p>
+            <div class="eyebrow">Persetujuan akses</div>
+            <h1>Permintaan akses tidak dapat diproses</h1>
+            <div class="error" role="alert">{{ error.description|default:error.error }}</div>
+            <p>Silakan kembali ke aplikasi asal dan mulai proses masuk kembali.</p>
         {% endif %}
-    </div>
-{% endblock %}
+    </section>
+    <p class="footer">SIMADU &middot; RS Mandalika</p>
+</main>
+</body>
+</html>

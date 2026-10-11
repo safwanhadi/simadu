@@ -12,13 +12,15 @@ from allauth.socialaccount.models import SocialApp
 from oauth2_provider.forms import AllowForm
 
 from .adapters import RestrictToExistingUserAdapter
-from .models import AccountRegistration, ProfilSDM, Users
+from .models import AccountRegistration, PortalApplication, ProfilSDM, Users
+from .portal_services import PORTAL_MODEL_FIELDS, get_portal_application
 from .roles import (
     ADMIN_AKUN,
     ADMIN_DASHBOARD,
     ADMIN_DOKUMEN,
     ADMIN_GROUPS,
     ADMIN_INFORMASI,
+    ADMIN_SSO,
 )
 from .views import SimaduLoginView
 from strukturorg.models import (
@@ -611,6 +613,148 @@ class SimaduLoginPKCETests(SimpleTestCase):
 
         content = get_template('sso/portal.html').template.source
         self.assertIn('{% static app.icon_image %}', content)
+
+
+class PortalApplicationManagementTests(TestCase):
+    password = 'Password-Awal-123!'
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = Users.objects.create_user(
+            email='admin-sso@example.com',
+            first_name='Admin',
+            last_name='SSO',
+            password=cls.password,
+        )
+        cls.admin.groups.add(Group.objects.get_or_create(name=ADMIN_SSO)[0])
+        cls.regular_user = Users.objects.create_user(
+            email='pengguna@example.com',
+            first_name='Pengguna',
+            last_name='Biasa',
+            password=cls.password,
+        )
+
+    def setUp(self):
+        self.client.force_login(self.admin)
+
+    def portal_application_data(self, **overrides):
+        data = {
+            'key': 'portal-uji',
+            'label': 'Portal Uji',
+            'type': PortalApplication.OAUTH_CLIENT,
+            'client_id': 'portal-uji-client',
+            'redirect_uri': 'https://portal.example.org/callback/',
+            'login_url': 'https://portal.example.org/login/',
+            'scopes': 'read:pegawai',
+            'dashboard': '',
+            'dashboard_absensi': '',
+            'category': 'Pengujian',
+            'icon': 'fas fa-flask',
+            'icon_image': '',
+            'bg_class': 'bg-gradient-to-br from-blue-500 to-teal-600',
+            'enabled': 'on',
+        }
+        data.update(overrides)
+        return data
+
+    def test_admin_sso_dapat_menambah_aplikasi_yang_langsung_muncul_di_portal(self):
+        response = self.client.post(
+            reverse('myaccount_urls:sso_portal_application_create'),
+            self.portal_application_data(),
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('myaccount_urls:sso_portal_application_list'),
+        )
+        self.assertTrue(PortalApplication.objects.filter(key='portal-uji').exists())
+        response = self.client.get(reverse('myaccount_urls:sso_portal'))
+        self.assertContains(response, 'Portal Uji')
+        self.assertContains(response, 'fas fa-flask')
+        self.assertContains(response, 'Pengujian')
+        launch_response = self.client.get(
+            reverse('myaccount_urls:sso_go', args=['portal-uji'])
+        )
+        self.assertIn('client_id=portal-uji-client', launch_response['Location'])
+
+    def test_admin_sso_dapat_mengubah_visual_konfigurasi_awal(self):
+        current = get_portal_application('akreditasi')
+        data = {
+            field: current[field]
+            for field in PORTAL_MODEL_FIELDS
+        }
+        data.update({
+            'enabled': 'on',
+            'category': 'Mutu Rumah Sakit',
+            'icon': 'fas fa-award',
+        })
+
+        response = self.client.post(
+            reverse(
+                'myaccount_urls:sso_portal_application_edit',
+                args=['akreditasi'],
+            ),
+            data,
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('myaccount_urls:sso_portal_application_list'),
+        )
+        stored = PortalApplication.objects.get(key='akreditasi')
+        self.assertEqual(stored.category, 'Mutu Rumah Sakit')
+        self.assertEqual(stored.icon, 'fas fa-award')
+
+    def test_aplikasi_lokal_tidak_mewajibkan_client_oauth(self):
+        response = self.client.post(
+            reverse('myaccount_urls:sso_portal_application_create'),
+            self.portal_application_data(
+                key='aplikasi-lokal-uji',
+                label='Aplikasi Lokal Uji',
+                type=PortalApplication.LOCAL,
+                client_id='',
+                redirect_uri='',
+                login_url='',
+                scopes='',
+                dashboard='/dashboard-uji/',
+            ),
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('myaccount_urls:sso_portal_application_list'),
+        )
+        self.assertEqual(
+            PortalApplication.objects.get(key='aplikasi-lokal-uji').dashboard,
+            '/dashboard-uji/',
+        )
+
+    def test_admin_sso_dapat_menonaktifkan_konfigurasi_awal(self):
+        response = self.client.post(
+            reverse(
+                'myaccount_urls:sso_portal_application_toggle',
+                args=['akreditasi'],
+            ),
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('myaccount_urls:sso_portal_application_list'),
+        )
+        self.assertFalse(
+            PortalApplication.objects.get(key='akreditasi').enabled,
+        )
+        portal_response = self.client.get(reverse('myaccount_urls:sso_portal'))
+        self.assertNotContains(portal_response, 'SELF ASSESSMENT AKREDITASI')
+
+    def test_pengguna_tanpa_peran_admin_sso_ditolak(self):
+        self.client.force_login(self.regular_user)
+
+        response = self.client.get(
+            reverse('myaccount_urls:sso_portal_application_list')
+        )
+
+        self.assertEqual(response.status_code, 403)
 
 
 class PrivacyPolicyTests(TestCase):

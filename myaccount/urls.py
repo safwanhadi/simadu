@@ -41,6 +41,10 @@ from .views import (
     SSOApplicationListView,
     SSOApplicationRotateSecretView,
     SSOApplicationUpdateView,
+    PortalApplicationCreateView,
+    PortalApplicationEditView,
+    PortalApplicationListView,
+    PortalApplicationToggleView,
 )
 from .views_api import (
     api_me, DetailMeAPIView, DokterSpesialisAPIView, PegawaiAPIView,
@@ -96,6 +100,10 @@ urlpatterns=[
     path('integrasi-sso/<int:pk>/ubah/', SSOApplicationUpdateView.as_view(), name='sso_application_update'),
     path('integrasi-sso/<int:pk>/rotasi-secret/', SSOApplicationRotateSecretView.as_view(), name='sso_application_rotate_secret'),
     path('integrasi-sso/<int:pk>/hapus/', SSOApplicationDeleteView.as_view(), name='sso_application_delete'),
+    path('portal-sso/', PortalApplicationListView.as_view(), name='sso_portal_application_list'),
+    path('portal-sso/tambah/', PortalApplicationCreateView.as_view(), name='sso_portal_application_create'),
+    path('portal-sso/<slug:key>/ubah/', PortalApplicationEditView.as_view(), name='sso_portal_application_edit'),
+    path('portal-sso/<slug:key>/toggle/', PortalApplicationToggleView.as_view(), name='sso_portal_application_toggle'),
     path('profil/', ProfilListView.as_view(), name='profil_view'),
     path('profil/add/', ProfilCreateView.as_view(), name='profil_create_view'),
     path('profil/detail/<int:pk>/', ProfilDetailView.as_view(), name='profil_detail_view'),

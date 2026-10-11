@@ -2,6 +2,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.response import Response
+from rest_framework.filters import SearchFilter
 from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView, get_object_or_404
 from oauth2_provider.contrib.rest_framework import OAuth2Authentication
@@ -168,9 +169,14 @@ class DetailMeAPIView(APIView):
     
 
 class PegawaiAPIView(ListAPIView):
+    """Daftar pegawai dengan pencarian nama, NIP, atau email melalui search."""
+
     authentication_classes = [OAuth2Authentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrTokenHasScope]
+    required_scopes = ['read:listpegawai']
     serializer_class = PegawaiSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ['first_name', 'last_name', 'profil_user__nip', 'email']
 
     def get_queryset(self):
         nip = self.request.GET.get("nip")
@@ -265,8 +271,9 @@ class PegawaiAPIView(ListAPIView):
         page_size = request.GET.get("page_size") or ""
         bulan = request.GET.get("bulan") or ""
         tahun = request.GET.get("tahun") or ""
+        search = request.GET.get("search") or ""
 
-        cache_key = f"pegawai_api:{nip}:bulan={bulan}:tahun={tahun}:page={page}:ps={page_size}"
+        cache_key = f"pegawai_api:{nip}:bulan={bulan}:tahun={tahun}:page={page}:ps={page_size}:search={search}"
 
         # cached = cache.get(cache_key)
         # if cached is not None:

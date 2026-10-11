@@ -9,7 +9,7 @@ from django.forms import inlineformset_factory
 from django.db import transaction
 from .models import (
     AccountRegistration, AdminScopeAssignment, CoordinationAssignment,
-    ProfilSDM, Users,
+    PortalApplication, ProfilSDM, Users,
 )
 from .roles import ADMIN_GROUPS
 from strukturorg.models import (
@@ -105,6 +105,71 @@ class SSOApplicationForm(forms.ModelForm):
             and not cleaned.get('redirect_uris', '').strip()
         ):
             self.add_error('redirect_uris', 'Redirect URI wajib untuk jenis grant ini.')
+        return cleaned
+
+
+class PortalApplicationForm(forms.ModelForm):
+    class Meta:
+        model = PortalApplication
+        fields = (
+            'key', 'label', 'type', 'client_id', 'redirect_uri', 'login_url',
+            'scopes', 'dashboard', 'dashboard_absensi', 'category', 'icon',
+            'icon_image', 'bg_class', 'enabled',
+        )
+        widgets = {
+            'key': forms.TextInput(attrs={'class': 'form-control'}),
+            'label': forms.TextInput(attrs={'class': 'form-control'}),
+            'type': forms.Select(attrs={'class': 'form-control'}),
+            'client_id': forms.TextInput(attrs={'class': 'form-control'}),
+            'redirect_uri': forms.URLInput(attrs={'class': 'form-control'}),
+            'login_url': forms.URLInput(attrs={'class': 'form-control'}),
+            'scopes': forms.TextInput(attrs={'class': 'form-control'}),
+            'dashboard': forms.TextInput(attrs={'class': 'form-control'}),
+            'dashboard_absensi': forms.TextInput(attrs={'class': 'form-control'}),
+            'category': forms.TextInput(attrs={'class': 'form-control'}),
+            'icon': forms.TextInput(attrs={'class': 'form-control'}),
+            'icon_image': forms.TextInput(attrs={'class': 'form-control'}),
+            'bg_class': forms.TextInput(attrs={'class': 'form-control'}),
+            'enabled': forms.CheckboxInput(attrs={'class': 'custom-control-input'}),
+        }
+        labels = {
+            'key': 'Kode unik aplikasi',
+            'label': 'Nama aplikasi',
+            'type': 'Jenis integrasi',
+            'client_id': 'Client ID',
+            'redirect_uri': 'Redirect URI',
+            'login_url': 'URL login eksternal',
+            'scopes': 'Scopes',
+            'dashboard': 'URL dashboard lokal',
+            'dashboard_absensi': 'URL dashboard absensi',
+            'category': 'Kategori portal',
+            'icon': 'Class icon Font Awesome',
+            'icon_image': 'Path icon gambar (opsional)',
+            'bg_class': 'Class latar kartu',
+            'enabled': 'Tampilkan di portal SSO',
+        }
+        help_texts = {
+            'key': 'Gunakan huruf kecil, angka, dan tanda hubung; harus sama dengan kode aplikasi pada portal.',
+            'client_id': 'Tidak perlu diisi untuk aplikasi lokal.',
+            'redirect_uri': 'Callback aplikasi OAuth; wajib untuk tipe OAuth client.',
+            'login_url': 'Opsional. Jika diisi, kartu portal membuka URL ini langsung; jika kosong, portal memakai endpoint SSO SIMADU.',
+            'scopes': 'Pisahkan scope dengan spasi, misalnya read:pegawai profile.',
+            'dashboard': 'Wajib untuk aplikasi lokal.',
+            'icon': 'Contoh: fas fa-hospital-user.',
+            'icon_image': 'Path relatif terhadap static files, contoh images/sso/app.svg.',
+            'bg_class': 'Contoh: bg-gradient-to-br from-blue-500 to-teal-600.',
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        app_type = cleaned.get('type')
+        if app_type == PortalApplication.OAUTH_CLIENT:
+            for field in ('client_id', 'redirect_uri'):
+                if not cleaned.get(field, '').strip():
+                    self.add_error(field, 'Wajib diisi untuk aplikasi OAuth client.')
+        elif app_type == PortalApplication.LOCAL:
+            if not cleaned.get('dashboard', '').strip():
+                self.add_error('dashboard', 'URL dashboard wajib untuk aplikasi lokal.')
         return cleaned
 
 

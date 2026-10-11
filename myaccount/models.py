@@ -642,3 +642,61 @@ class AccountRegistration(models.Model):
 
     def __str__(self):
         return f'{self.user.email} - {self.get_status_display()}'
+
+
+class PortalApplication(models.Model):
+    LOCAL = 'local'
+    OAUTH_CLIENT = 'oauth_client'
+    APPLICATION_TYPES = (
+        (LOCAL, 'Aplikasi lokal SIMADU'),
+        (OAUTH_CLIENT, 'OAuth client'),
+    )
+
+    key = models.SlugField(max_length=64, unique=True, verbose_name='Kode aplikasi')
+    label = models.CharField(max_length=120, verbose_name='Nama aplikasi')
+    type = models.CharField(
+        max_length=16,
+        choices=APPLICATION_TYPES,
+        default=OAUTH_CLIENT,
+        verbose_name='Jenis integrasi',
+    )
+    client_id = models.CharField(max_length=255, blank=True, verbose_name='Client ID')
+    redirect_uri = models.CharField(max_length=500, blank=True, verbose_name='Redirect URI')
+    login_url = models.CharField(max_length=500, blank=True, verbose_name='URL login')
+    scopes = models.CharField(max_length=500, blank=True, verbose_name='Scopes')
+    dashboard = models.CharField(max_length=255, blank=True, verbose_name='URL dashboard')
+    dashboard_absensi = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name='URL dashboard absensi',
+    )
+    icon = models.CharField(max_length=100, default='fas fa-th-large', verbose_name='Icon')
+    icon_image = models.CharField(max_length=255, blank=True, verbose_name='Path gambar icon')
+    bg_class = models.CharField(
+        max_length=255,
+        default='bg-gradient-to-br from-blue-500 to-blue-600',
+        verbose_name='Kelas warna latar',
+    )
+    category = models.CharField(max_length=100, default='Umum', verbose_name='Kategori')
+    enabled = models.BooleanField(default=True, db_index=True, verbose_name='Aktif di portal')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('label', 'key')
+        verbose_name = 'Aplikasi portal SSO'
+        verbose_name_plural = 'Aplikasi portal SSO'
+
+    def clean(self):
+        super().clean()
+        if self.type == self.OAUTH_CLIENT and (
+            not self.client_id.strip() or not self.redirect_uri.strip()
+        ):
+            raise ValidationError(
+                'Client ID dan Redirect URI wajib untuk aplikasi OAuth client.'
+            )
+        if self.type == self.LOCAL and not self.dashboard.strip():
+            raise ValidationError('URL dashboard wajib untuk aplikasi lokal.')
+
+    def __str__(self):
+        return self.label

@@ -34,7 +34,7 @@ from .models import ProfilSDM
 
 from .models import (
     AccountRegistration, AdminScopeAssignment, CoordinationAssignment,
-    ProfilSDM, Users,
+    PortalApplication, ProfilSDM, Users,
 )
 from .forms import (
     AccountAdminRolesForm,
@@ -44,6 +44,7 @@ from .forms import (
     CoordinationAssignmentForm,
     ProfilForm,
     StructuralOfficerForm,
+    PortalApplicationForm,
     UserAdminChangeForm,
 )
 import logging
@@ -52,6 +53,12 @@ from strukturorg.models import PejabatStruktur
 from oauth2_provider.generators import generate_client_secret
 from oauth2_provider.models import Application
 from .forms import SSOApplicationForm
+from .portal_services import (
+    PORTAL_MODEL_FIELDS,
+    get_portal_application,
+    get_portal_applications,
+    portal_application_model_defaults,
+)
 
 
 class AccountAdminRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
@@ -165,6 +172,109 @@ class SSOApplicationDeleteView(SSOAdminRequiredMixin, View):
         application.delete()
         messages.success(request, f'Integrasi {name} berhasil dihapus.')
         return redirect('myaccount_urls:sso_application_list')
+
+
+class PortalApplicationListView(SSOAdminRequiredMixin, TemplateView):
+    template_name = 'sso_management/portal_list.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'portal_applications': sorted(
+                get_portal_applications(include_disabled=True).values(),
+                key=lambda app: (app['label'].lower(), app['key']),
+            ),
+            'sso_portal_management': 'active',
+            'card_title': 'Aplikasi Portal SSO',
+            'title_page': 'Pengelolaan Aplikasi Portal SSO',
+        })
+        return context
+
+
+class PortalApplicationCreateView(SSOAdminRequiredMixin, FormView):
+    form_class = PortalApplicationForm
+    template_name = 'sso_management/portal_form.html'
+    success_url = reverse_lazy('myaccount_urls:sso_portal_application_list')
+
+    def form_valid(self, form):
+        form.save()
+        messages.success(self.request, 'Aplikasi portal SSO berhasil ditambahkan.')
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'sso_portal_management': 'active',
+            'card_title': 'Tambah Aplikasi Portal SSO',
+            'title_page': 'Tambah Aplikasi Portal SSO',
+            'is_create': True,
+        })
+        return context
+
+
+class PortalApplicationEditView(SSOAdminRequiredMixin, View):
+    template_name = 'sso_management/portal_form.html'
+
+    def get_application(self):
+        application = get_portal_application(self.kwargs['key'])
+        if application is None:
+            raise Http404('Aplikasi portal tidak ditemukan.')
+        return application
+
+    def get_form(self, data=None):
+        application = self.get_application()
+        stored = PortalApplication.objects.filter(key=application['key']).first()
+        form = PortalApplicationForm(
+            data=data,
+            instance=stored,
+            initial=application,
+        )
+        form.fields['key'].disabled = True
+        return form
+
+    def get(self, request, *args, **kwargs):
+        return self.render_form(request, self.get_form())
+
+    def post(self, request, *args, **kwargs):
+        form = self.get_form(request.POST)
+        if form.is_valid():
+            application = form.save(commit=False)
+            application.key = self.kwargs['key']
+            PortalApplication.objects.update_or_create(
+                key=application.key,
+                defaults=portal_application_model_defaults({
+                    field: getattr(application, field)
+                    for field in PORTAL_MODEL_FIELDS
+                }),
+            )
+            messages.success(request, 'Konfigurasi aplikasi portal berhasil diperbarui.')
+            return redirect('myaccount_urls:sso_portal_application_list')
+        return self.render_form(request, form)
+
+    def render_form(self, request, form):
+        return render(request, self.template_name, {
+            'form': form,
+            'sso_portal_management': 'active',
+            'card_title': 'Ubah Aplikasi Portal SSO',
+            'title_page': 'Ubah Aplikasi Portal SSO',
+            'is_create': False,
+        })
+
+
+class PortalApplicationToggleView(SSOAdminRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        key = kwargs['key']
+        application = get_portal_application(key)
+        if application is None:
+            raise Http404('Aplikasi portal tidak ditemukan.')
+        application['enabled'] = not application['enabled']
+        PortalApplication.objects.update_or_create(
+            key=key,
+            defaults=portal_application_model_defaults(application),
+        )
+        status = 'diaktifkan' if application['enabled'] else 'dinonaktifkan'
+        messages.success(request, f'Aplikasi {application["label"]} berhasil {status}.')
+        return redirect('myaccount_urls:sso_portal_application_list')
 
 
 class AccountManagementListView(AccountAdminRequiredMixin, ListView):
@@ -1012,8 +1122,7 @@ def sso_portal(request):
     # opsional: kalau ingin portal bisa diakses tanpa login, biarkan saja.
     # kalau ingin wajib login SIMADU dulu, tinggal cek request.user.is_authenticated.
     if request.user.is_authenticated:
-        clients = settings.SSO_CLIENTS
-        Visuals = settings.APP_VISUAL
+        clients = get_portal_applications()
         # identifikasi IP user untuk development: kalau IP localhost sembunyikan icon aplikasi kecuali untuk Tim IT
         # atau ambil di setting client SSO yang sudah ditentukan
         user_ip = get_client_ip(request)
@@ -1035,7 +1144,7 @@ def sso_portal(request):
         
         apps = []
         for key, client in clients.items():
-            visual = Visuals.get(key, {})
+            visual = client
             # untuk filter url apakah local url atau tidak
             actual_url = client.get("redirect_uri", "")
             is_dev = True if (actual_url.startswith("http://localhost") or actual_url.startswith("http://127.0.0.1")) and user_jabatan == "it" else False
@@ -1060,7 +1169,7 @@ def sso_portal(request):
     
 
 def sso_go(request, client_key):
-    clients = settings.SSO_CLIENTS
+    clients = get_portal_applications()
     if client_key not in clients:
         raise Http404("Client tidak ditemukan")
 

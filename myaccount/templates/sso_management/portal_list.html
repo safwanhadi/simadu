@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card card-primary card-outline">
+  <div class="card-header d-flex align-items-center">
+    <h3 class="card-title">Aplikasi pada Portal SSO</h3>
+    <a href="{% url 'myaccount_urls:sso_portal_application_create' %}" class="btn btn-primary btn-sm ml-auto">
+      <i class="fas fa-plus mr-1"></i>Tambah aplikasi
+    </a>
+  </div>
+  <div class="card-body">
+    <p class="text-muted">Atur informasi integrasi dan tampilan kartu aplikasi. Perubahan langsung digunakan portal SSO.</p>
+    <div class="table-responsive">
+      <table class="table table-hover">
+        <thead>
+          <tr><th>Aplikasi</th><th>Kode</th><th>Integrasi</th><th>Kategori</th><th>Status</th><th>Aksi</th></tr>
+        </thead>
+        <tbody>
+          {% for app in portal_applications %}
+          <tr>
+            <td><strong>{{ app.label }}</strong></td>
+            <td><code>{{ app.key }}</code></td>
+            <td>{% if app.type == 'local' %}Lokal SIMADU{% else %}OAuth client{% endif %}</td>
+            <td>{{ app.category }}</td>
+            <td>
+              {% if app.enabled %}<span class="badge badge-success">Aktif</span>
+              {% else %}<span class="badge badge-secondary">Nonaktif</span>{% endif %}
+              {% if app.is_default %}<span class="badge badge-info">Konfigurasi awal</span>{% endif %}
+            </td>
+            <td class="text-nowrap">
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'myaccount_urls:sso_portal_application_edit' app.key %}">Ubah</a>
+              <form method="post" class="d-inline" action="{% url 'myaccount_urls:sso_portal_application_toggle' app.key %}">
+                {% csrf_token %}
+                <button class="btn btn-sm {% if app.enabled %}btn-outline-danger{% else %}btn-outline-success{% endif %}" type="submit">
+                  {% if app.enabled %}Nonaktifkan{% else %}Aktifkan{% endif %}
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="text-center text-muted">Belum ada aplikasi portal.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
