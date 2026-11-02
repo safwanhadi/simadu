@@ -1,11 +1,13 @@
 from django.test import TestCase
 from django.urls import reverse
+from django.contrib.auth.models import Group
 from oauth2_provider.models import Application
 
 from disiplinsdm.models import JenisSDMPerinstalasi
 from jenissdm.models import JenisSDM, ProfesiSDM
 
 from .models import ProfilSDM, Users
+from .roles import ADMIN_DOKUMEN
 
 
 class TenagaPerawatAktifAPITests(TestCase):
@@ -14,6 +16,8 @@ class TenagaPerawatAktifAPITests(TestCase):
         cls.pengguna_integrasi = Users.objects.create_user(
             email='integrasi@example.test', first_name='Petugas', last_name='Integrasi',
         )
+        admin_group, _ = Group.objects.get_or_create(name=ADMIN_DOKUMEN)
+        cls.pengguna_integrasi.groups.add(admin_group)
         profesi = ProfesiSDM.objects.create(profesi='Perawat')
         jenis_perawat = JenisSDM.objects.create(profesi=profesi, jenis_sdm='Perawat Klinis')
         jenis_dokter = JenisSDM.objects.create(jenis_sdm='Dokter Umum')
@@ -69,7 +73,7 @@ class TenagaPerawatAktifAPITests(TestCase):
             reverse('oauth2_provider:token'),
             {
                 'grant_type': 'client_credentials',
-                'scope': 'read:pegawai',
+                'scope': 'read:listpegawai',
             },
             HTTP_AUTHORIZATION=self._basic_auth(application.client_id, client_secret),
         )

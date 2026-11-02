@@ -6,7 +6,6 @@ from rest_framework.filters import SearchFilter
 from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView, get_object_or_404
 from oauth2_provider.contrib.rest_framework import OAuth2Authentication
-from oauth2_provider.contrib.rest_framework.permissions import IsAuthenticatedOrTokenHasScope
 from rest_framework.authentication import SessionAuthentication
 from datetime import date
 from django.db.models import F, OuterRef, Subquery, Prefetch, Value, Case, When, BooleanField, Q
@@ -25,6 +24,7 @@ from .serializers import (
     DataMinimalPegawaiSerializer, DokterSpesialisSerializer, PegawaiSerializer,
     TenagaPerawatAktifSerializer,
 )
+from .permissions import IsAppAdminOrTokenHasScope
 from dokumen.models import RiwayatPanggol, RiwayatPendidikan, RiwayatPenempatan, RiwayatJabatan
 
 
@@ -172,7 +172,7 @@ class PegawaiAPIView(ListAPIView):
     """Daftar pegawai dengan pencarian nama, NIP, atau email melalui search."""
 
     authentication_classes = [OAuth2Authentication, SessionAuthentication]
-    permission_classes = [IsAuthenticatedOrTokenHasScope]
+    permission_classes = [IsAppAdminOrTokenHasScope]
     required_scopes = ['read:listpegawai']
     serializer_class = PegawaiSerializer
     filter_backends = [SearchFilter]
@@ -286,7 +286,8 @@ class PegawaiAPIView(ListAPIView):
 
 class DokterSpesialisAPIView(ListAPIView):
     authentication_classes = [OAuth2Authentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAppAdminOrTokenHasScope]
+    required_scopes = ['read:listpegawai']
     serializer_class = DokterSpesialisSerializer
 
     def get_queryset(self):
@@ -299,7 +300,7 @@ class TenagaPerawatAktifAPIView(ListAPIView):
     """Daftar tenaga perawat dengan akun aktif untuk integrasi layanan."""
 
     authentication_classes = [OAuth2Authentication, SessionAuthentication]
-    permission_classes = [IsAuthenticatedOrTokenHasScope]
+    permission_classes = [IsAppAdminOrTokenHasScope]
     required_scopes = ['read:listpegawai']
     serializer_class = TenagaPerawatAktifSerializer
     pagination_class = None

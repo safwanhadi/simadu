@@ -10,7 +10,7 @@ Dokumen ini menjelaskan cara aplikasi server mengakses daftar pegawai perawat ak
 | Mengambil semua perawat aktif | `GET` | `https://simadu.rsmandalika.com/accounts/api/pegawai-perawat-aktif/` |
 | Mencari perawat aktif berdasarkan NIP | `GET` | `https://simadu.rsmandalika.com/accounts/api/pegawai-perawat-aktif/?nip={NIP}` |
 
-Endpoint data memerlukan scope `read:pegawai`. Respons tidak dipaginasi dan hanya berisi identitas minimum pegawai.
+Endpoint data memerlukan scope `read:listpegawai`. Respons tidak dipaginasi dan hanya berisi identitas minimum pegawai.
 
 ## 1. Pembuatan credential oleh admin SIMADU
 
@@ -33,7 +33,7 @@ curl --request POST \
   --user "${SIMADU_CLIENT_ID}:${SIMADU_CLIENT_SECRET}" \
   --header "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "grant_type=client_credentials" \
-  --data-urlencode "scope=read:pegawai"
+  --data-urlencode "scope=read:listpegawai"
 ```
 
 Contoh respons berhasil:
@@ -43,7 +43,7 @@ Contoh respons berhasil:
   "access_token": "ACCESS_TOKEN",
   "expires_in": 3600,
   "token_type": "Bearer",
-  "scope": "read:pegawai"
+  "scope": "read:listpegawai"
 }
 ```
 
@@ -92,7 +92,7 @@ Jika NIP tidak ditemukan atau pegawai tidak lagi aktif/terklasifikasi sebagai pe
 | --- | --- | --- |
 | `client_id` atau `client_secret` salah | `401` dari token endpoint, `invalid_client` | Verifikasi credential; minta admin merotasi secret bila perlu. |
 | Grant aplikasi bukan `client_credentials` | `400`, `unauthorized_client` | Minta admin memperbaiki jenis grant aplikasi. |
-| Scope tidak menyertakan `read:pegawai` | `403 Forbidden` pada endpoint data | Minta token ulang dengan `scope=read:pegawai`. |
+| Scope tidak menyertakan `read:listpegawai` | `403 Forbidden` pada endpoint data | Minta token ulang dengan `scope=read:listpegawai`. |
 | Token tidak ada, salah, atau kedaluwarsa | `401 Unauthorized` | Minta access token baru dan ulangi request satu kali. |
 | Gangguan sementara server | `5xx` | Terapkan retry terbatas dengan exponential backoff; jangan mencatat token pada log. |
 
